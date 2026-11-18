@@ -47,6 +47,9 @@ Detalles que ya costaron una iteración:
 - **El binario usa el catálogo del entorno**, no `KruneApp::with_mock`. `snapshots.sh` fija
   `KRUNE_PROVIDER=mock`; si lanzas `--snap` a mano, exporta lo mismo o la captura dependerá
   de las claves de tu máquina.
+- **Krune abierto bloquea `target/debug/krune.exe`** en Windows («Acceso denegado» al compilar).
+  No lo cierres sin preguntar: `CARGO_TARGET_DIR=target/snapshots bash scripts/snapshots.sh`
+  compila y captura en otra carpeta.
 - **Desplegables abiertos**: revisa que el listbox no corte etiquetas (mide 160 pt como
   mínimo) y que el trigger no se salga del panel (en `narrow` sobre todo).
 

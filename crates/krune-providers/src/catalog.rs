@@ -4,6 +4,7 @@
 //! | --- | --- | --- |
 //! | OpenAI | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 //! | OpenAI-compatible | `OPENAI_BASE_URL` (only listed when set) | `OPENAI_API_KEY`, if any |
+//! | llama.cpp | `http://127.0.0.1:9931/v1` (`LLAMA_CPP_URL`) | none |
 //! | Ollama | `http://localhost:11434/v1` | none |
 //! | LM Studio | `http://localhost:1234/v1` | none |
 //! | Simulated | the `MockAgent` | none |
@@ -24,14 +25,30 @@ pub const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
 pub const OLLAMA_URL: &str = "http://localhost:11434/v1";
 pub const LM_STUDIO_URL: &str = "http://localhost:1234/v1";
 
+/// llama-server's address as `llama-menu.bat` starts it (`--port 9931`); `LLAMA_CPP_URL`
+/// overrides it (llama-server's own default is port 8080).
+pub const LLAMA_CPP_URL: &str = "http://127.0.0.1:9931/v1";
+
+/// How a server's model list is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Listing {
+    /// As the server names them.
+    All,
+    /// Without models that can't chat (OpenAI lists embeddings, speech… with the rest).
+    ChatOnly,
+    /// By file name: llama-server names a model by the path it was loaded from
+    /// (`C:\…\Models\Qwen3.8-27B-UD-IQ3_XXS.gguf` shows as `Qwen3.8-27B-UD-IQ3_XXS`). It serves
+    /// the one model it loaded whatever name a request carries, so the short name works.
+    FileNames,
+}
+
 /// One OpenAI-protocol server.
 #[derive(Clone)]
 struct Server {
     provider: Provider,
     base_url: String,
     api_key: Option<String>,
-    /// Hide non-chat models from the list (OpenAI lists embeddings, speech… with the rest).
-    chat_only: bool,
+    listing: Listing,
 }
 
 pub struct Catalog {
@@ -59,7 +76,7 @@ impl Catalog {
             },
             base_url: DEFAULT_BASE_URL.into(),
             api_key: key.clone(),
-            chat_only: true,
+            listing: Listing::ChatOnly,
         }];
         if let Some(url) = var("OPENAI_BASE_URL") {
             servers.push(Server {
@@ -71,15 +88,21 @@ impl Catalog {
                 },
                 base_url: url,
                 api_key: key,
-                chat_only: false,
+                listing: Listing::All,
             });
         }
-        for (id, label, url) in [("ollama", "Ollama", OLLAMA_URL), ("lmstudio", "LM Studio", LM_STUDIO_URL)] {
+        let llama_cpp = var("LLAMA_CPP_URL").unwrap_or_else(|| LLAMA_CPP_URL.to_owned());
+        let local = [
+            ("llamacpp", "llama.cpp", llama_cpp, Listing::FileNames),
+            ("ollama", "Ollama", OLLAMA_URL.to_owned(), Listing::All),
+            ("lmstudio", "LM Studio", LM_STUDIO_URL.to_owned(), Listing::All),
+        ];
+        for (id, label, base_url, listing) in local {
             servers.push(Server {
                 provider: Provider { id: id.into(), label: label.into(), default_model: None, missing: None },
-                base_url: url.into(),
+                base_url,
                 api_key: None,
-                chat_only: false,
+                listing,
             });
         }
 
@@ -150,8 +173,26 @@ impl EngineCatalog for Catalog {
         let client = self.client.clone();
         Box::pin(async move {
             let config = Self::config(&server, "");
-            Ok(openai::list_models(&client, &config, server.chat_only).await?)
+            let models = openai::list_models(&client, &config, server.listing == Listing::ChatOnly).await?;
+            Ok(match server.listing {
+                Listing::FileNames => {
+                    let mut names: Vec<String> = models.iter().map(|id| file_name(id).to_owned()).collect();
+                    names.sort();
+                    names.dedup();
+                    names
+                }
+                Listing::All | Listing::ChatOnly => models,
+            })
         })
+    }
+}
+
+/// A model file's name without folders or `.gguf`; other ids come back unchanged.
+fn file_name(id: &str) -> &str {
+    let name = id.rsplit(['/', '\\']).next().unwrap_or(id);
+    match name.len().checked_sub(5) {
+        Some(cut) if name.is_char_boundary(cut) && name[cut..].eq_ignore_ascii_case(".gguf") => &name[..cut],
+        _ => name,
     }
 }
 
@@ -177,7 +218,7 @@ mod tests {
     #[test]
     fn with_nothing_configured_the_simulated_agent_is_selected() {
         let c = catalog(&[]).unwrap();
-        assert_eq!(ids(&c), ["openai", "ollama", "lmstudio", "mock"]);
+        assert_eq!(ids(&c), ["openai", "llamacpp", "ollama", "lmstudio", "mock"]);
         assert_eq!(c.initial(), MockCatalog::default().initial());
         assert_eq!(c.providers()[0].missing.as_deref(), Some("needs OPENAI_API_KEY"));
         let err = c.engine("openai", "gpt-4o-mini").err().unwrap();
@@ -191,7 +232,7 @@ mod tests {
         assert_eq!(c.engine("openai", "gpt-4o").unwrap().name(), "OpenAI · gpt-4o");
 
         let c = catalog(&[("OPENAI_BASE_URL", "http://gpu-box:8000/v1"), ("KRUNE_MODEL", "qwen3")]).unwrap();
-        assert_eq!(ids(&c), ["openai", "custom", "ollama", "lmstudio", "mock"]);
+        assert_eq!(ids(&c), ["openai", "custom", "llamacpp", "ollama", "lmstudio", "mock"]);
         assert_eq!(c.initial(), Selection { provider: "custom".into(), model: Some("qwen3".into()) });
         assert_eq!(c.providers()[1].label, "OpenAI-compatible (gpu-box:8000)");
     }
@@ -204,5 +245,44 @@ mod tests {
         let c = catalog(&[("KRUNE_PROVIDER", "lmstudio")]).unwrap();
         assert_eq!(c.initial().model, None, "local servers have no default model until listed");
         assert!(matches!(catalog(&[("KRUNE_PROVIDER", "nope")]), Err(ProviderError::Unknown(p)) if p == "nope"));
+    }
+
+    #[test]
+    fn model_files_show_by_name() {
+        assert_eq!(file_name(r"C:\Users\me\Desktop\Models\Qwen3.8-27B-UD-IQ3_XXS.gguf"), "Qwen3.8-27B-UD-IQ3_XXS");
+        assert_eq!(file_name("/models/llama-3.2-3b.Q4_K_M.GGUF"), "llama-3.2-3b.Q4_K_M");
+        assert_eq!(file_name("qwen3:4b"), "qwen3:4b");
+        assert_eq!(file_name("gguf"), "gguf");
+    }
+
+    #[test]
+    fn llama_cpp_defaults_to_the_llama_menu_port_and_can_be_moved() {
+        let c = catalog(&[]).unwrap();
+        assert_eq!(c.server("llamacpp").unwrap().base_url, LLAMA_CPP_URL);
+        assert_eq!(c.engine("llamacpp", "Qwen3.8-27B").unwrap().name(), "llama.cpp · Qwen3.8-27B");
+        let c = catalog(&[("LLAMA_CPP_URL", "http://127.0.0.1:8080/v1")]).unwrap();
+        assert_eq!(c.server("llamacpp").unwrap().base_url, "http://127.0.0.1:8080/v1");
+    }
+
+    #[test]
+    fn llama_server_models_are_listed_by_file_name() {
+        use std::io::{Read, Write};
+        // What llama-server answers when started with `-m <full path>` (as llama-menu.bat does).
+        let body = r#"{"object":"list","data":[{"id":"C:\\Users\\me\\Desktop\\Models\\Qwen3.8-27B-UD-IQ3_XXS.gguf","object":"model","owned_by":"llamacpp"}]}"#;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0; 4096];
+            let _ = stream.read(&mut buf);
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(reply.as_bytes()).unwrap();
+        });
+        let c = catalog(&[("LLAMA_CPP_URL", url.as_str())]).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        assert_eq!(rt.block_on(c.models("llamacpp")).unwrap(), ["Qwen3.8-27B-UD-IQ3_XXS"]);
     }
 }

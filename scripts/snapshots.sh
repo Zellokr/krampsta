@@ -4,7 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo build -p krune-app
-BIN=target/debug/krune
+# Honour CARGO_TARGET_DIR, so stills can be rendered while target/debug/krune.exe is running
+# (Windows locks a running executable).
+BIN="${CARGO_TARGET_DIR:-target}/debug/krune"
 [ -x "$BIN.exe" ] && BIN="$BIN.exe"
 OUT=assets/screenshots
 # The simulated agent, whatever keys this machine has: stills must not depend on the environment

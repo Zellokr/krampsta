@@ -112,12 +112,14 @@ modelos se leen del propio servidor (`GET /v1/models`). Los proveedores disponib
 | --- | --- | --- |
 | OpenAI | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
 | OpenAI-compatible | `OPENAI_BASE_URL` (sólo aparece si está definida) | `OPENAI_API_KEY`, si el servidor la pide |
+| llama.cpp | `http://127.0.0.1:9931/v1` (el puerto de `llama-menu.bat`; otro con `LLAMA_CPP_URL`) | `llama-server` en marcha |
 | Ollama | `http://localhost:11434/v1` | Ollama en marcha |
 | LM Studio | `http://localhost:1234/v1` | el servidor de LM Studio en marcha |
 | Simulated | el `MockAgent` | nada |
 
 Las claves se leen del entorno, nunca del repositorio. Para elegir lo que sale seleccionado al
-abrir: `KRUNE_PROVIDER` (`openai`, `custom`, `ollama`, `lmstudio` o `mock`) y `KRUNE_MODEL`.
+abrir: `KRUNE_PROVIDER` (`openai`, `custom`, `llamacpp`, `ollama`, `lmstudio` o `mock`) y
+`KRUNE_MODEL`. Con llama.cpp el desplegable muestra el nombre del `.gguf` cargado.
 Sin nada definido, arranca con el simulado. Con Ollama, por ejemplo:
 
 ```bash

@@ -238,6 +238,7 @@ fn stage_providers(s: &mut KruneApp) {
     };
     s.engine.providers = vec![
         provider("openai", "OpenAI", Some("needs OPENAI_API_KEY")),
+        provider("llamacpp", "llama.cpp", None),
         provider("ollama", "Ollama", None),
         provider("lmstudio", "LM Studio", None),
         MockCatalog::provider(),
