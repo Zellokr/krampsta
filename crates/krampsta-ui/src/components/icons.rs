@@ -2,7 +2,9 @@
 
 use rune::Icon;
 
-pub use rune_theme_opencode::icons::{ARROW_UP, GITHUB, PLUS, SETTINGS_GEAR as GEAR, STOP, TERMINAL as TOOL};
+pub use rune_theme_opencode::icons::{
+    ARROW_UP, CHECK, GITHUB, PLUS, SETTINGS_GEAR as GEAR, STOP, TERMINAL as TOOL, WARNING,
+};
 
 /// OpenAI's mark, for the ChatGPT account (24-point SVG, current colour).
 pub static OPENAI: Icon = Icon {

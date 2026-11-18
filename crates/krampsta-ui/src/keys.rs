@@ -31,6 +31,11 @@ pub fn message(id: krampsta_core::MessageId) -> String {
     format!("krampsta-message-{id}")
 }
 
+/// A tool card's header (the button that opens and closes it).
+pub fn tool(id: &krampsta_core::ToolCallId) -> String {
+    format!("krampsta-tool-{id}")
+}
+
 /// Provider and model pickers. rune-kit keys a select's trigger `<key>-trigger` and its
 /// options `option<i>` inside `<key>-content`.
 pub const COMPOSER_PROVIDER: &str = "krampsta-composer-provider";

@@ -149,6 +149,7 @@ const SCENES: &[Scene] = &[
         s.draft.focused = true;
     }),
     ("running", scene_running),
+    ("tools", scene_tools),
     ("completed", scene_completed),
     ("failed", scene_failed),
     ("cancelled", |s| {
@@ -229,6 +230,39 @@ fn scene_running(s: &mut KrampstaApp) {
     let run = staged(s, "Find where the configuration is loaded");
     let (started, _) = tool(run);
     apply(s, &[started, AgentEvent::TextDelta { run, text: "Looking through the workspace for".into() }]);
+}
+
+/// One tool card of each kind while the run goes on: done and opened, failed, still running.
+fn scene_tools(s: &mut KrampstaApp) {
+    let run = staged(s, "Fix the failing checkout test");
+    let call = |id: &str, name: &str, arguments: &str| ToolCall {
+        id: ToolCallId(id.into()),
+        name: name.into(),
+        arguments: arguments.into(),
+    };
+    let result = |id: &str, output: &str, is_error: bool| ToolResult {
+        call_id: ToolCallId(id.into()),
+        output: output.into(),
+        is_error,
+    };
+    let read = call("scene-read", "read_file", r#"{"path": "src/checkout.rs"}"#);
+    let bash = call("scene-bash", "bash", r#"{"command": "cargo test checkout"}"#);
+    let search = call("scene-search", "search", r#"{"pattern": "fn total", "path": "src"}"#);
+    let source = "pub fn total(items: &[Item]) -> u32 {\n    items.iter().map(|i| i.price).sum()\n}";
+    apply(
+        s,
+        &[
+            AgentEvent::ToolCallStarted { run, call: read.clone() },
+            AgentEvent::ToolCallFinished { run, result: result("scene-read", source, false) },
+            AgentEvent::ToolCallStarted { run, call: bash },
+            AgentEvent::ToolCallFinished {
+                run,
+                result: result("scene-bash", "error: no `cargo` found in PATH\nexit status 127", true),
+            },
+            AgentEvent::ToolCallStarted { run, call: search },
+        ],
+    );
+    s.open_tools.insert(read.id);
 }
 
 fn scene_completed(s: &mut KrampstaApp) {

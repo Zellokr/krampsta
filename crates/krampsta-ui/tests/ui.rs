@@ -155,6 +155,28 @@ fn typing_and_pressing_enter_runs_the_agent_and_shows_the_reply() {
 }
 
 #[test]
+fn a_tool_card_opens_and_closes_on_click() {
+    let mut rt = runtime();
+    click(&mut rt, keys::COMPOSER);
+    type_text(&mut rt, "List the files");
+    press(&mut rt, Key::Enter, Mods::default());
+    pump_until_finished(&mut rt);
+    let session = rt.state.current().cloned().expect("a session");
+    let call = session.messages.iter().flat_map(|m| &m.tool_calls).next().expect("the mock calls a tool").clone();
+    let header = keys::tool(&call.id);
+    let shows_output = |rt: &Runtime<KrampstaApp>| rt.elements().iter().any(|e| e.text.as_deref() == Some("Output"));
+    assert!(has(&rt, &header));
+    assert!(!shows_output(&rt), "cards start closed");
+
+    click(&mut rt, &header);
+    assert!(rt.state.open_tools.contains(&call.id));
+    assert!(shows_output(&rt), "an open card shows the tool's output");
+    click(&mut rt, &header);
+    assert!(!rt.state.open_tools.contains(&call.id));
+    assert!(!shows_output(&rt));
+}
+
+#[test]
 fn the_send_button_sends_too() {
     let mut rt = runtime();
     click(&mut rt, keys::COMPOSER);

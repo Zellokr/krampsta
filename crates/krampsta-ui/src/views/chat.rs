@@ -1,6 +1,8 @@
 //! The main pane: the transcript of the selected session and the composer under it.
 
-use krampsta_core::{AgentStatus, MessageRole, Session};
+use std::collections::HashSet;
+
+use krampsta_core::{AgentStatus, MessageRole, Session, ToolCallId};
 use rune::{El, ScrollSpec, col, icon, row, text};
 use rune_kit::Kit;
 
@@ -13,7 +15,9 @@ const COLUMN: f32 = 820.0;
 
 pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
     let (content, running) = match s.current() {
-        Some(session) if !session.messages.is_empty() => (transcript(session, k), session.status.is_running()),
+        Some(session) if !session.messages.is_empty() => {
+            (transcript(session, &s.open_tools, k), session.status.is_running())
+        }
         Some(session) => (empty_state(k), session.status.is_running()),
         None => (empty_state(k), false),
     };
@@ -29,7 +33,7 @@ pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
     col().w_full().h_full().min_h(0.0).child(scroll).child(composer)
 }
 
-fn transcript(session: &Session, k: &Kit) -> El {
+fn transcript(session: &Session, open_tools: &HashSet<ToolCallId>, k: &Kit) -> El {
     let running = session.status.is_running();
     let streaming_id = session
         .messages
@@ -43,7 +47,7 @@ fn transcript(session: &Session, k: &Kit) -> El {
         .w_full()
         .max_w(COLUMN)
         .gap(24.0)
-        .children(session.messages.iter().map(|m| message::view(m, Some(m.id) == streaming_id, k)));
+        .children(session.messages.iter().map(|m| message::view(m, Some(m.id) == streaming_id, open_tools, k)));
     // Running, but the assistant hasn't started its message yet: show that it's working.
     if running && streaming_id.is_none() {
         list = list.child(waiting(k));

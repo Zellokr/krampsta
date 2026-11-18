@@ -1,19 +1,21 @@
 //! A message in the transcript: the user's on the right in a bubble, the agent's on the left
 //! as Markdown with its tool calls above.
 
-use krampsta_core::{Message, MessageRole, ToolCall};
+use std::collections::HashSet;
+
+use krampsta_core::{Message, MessageRole, ToolCallId};
 use rune::{El, col, icon, row, text};
 use rune_kit::{Kit, Markdown, Spinner};
 
-use crate::components::icons;
+use crate::components::{icons, tool_card};
 use crate::keys;
 use crate::theme;
 
-/// `streaming`: the message's run is still writing it.
-pub fn view(m: &Message, streaming: bool, k: &Kit) -> El {
+/// `streaming`: the message's run is still writing it. `open_tools`: the tool cards shown open.
+pub fn view(m: &Message, streaming: bool, open_tools: &HashSet<ToolCallId>, k: &Kit) -> El {
     let body = match m.role {
         MessageRole::User => user(m, k),
-        MessageRole::Assistant => assistant(m, streaming, k),
+        MessageRole::Assistant => assistant(m, streaming, open_tools, k),
         MessageRole::System | MessageRole::Tool => {
             text(m.content.clone()).font(k.ty.small).color(k.c.text_faint).wrap().selectable(true)
         }
@@ -34,7 +36,7 @@ fn user(m: &Message, k: &Kit) -> El {
     row().role("group").label("You").w_full().justify_end().child(bubble)
 }
 
-fn assistant(m: &Message, streaming: bool, k: &Kit) -> El {
+fn assistant(m: &Message, streaming: bool, open_tools: &HashSet<ToolCallId>, k: &Kit) -> El {
     let header = row()
         .gap(8.0)
         .items_center()
@@ -42,7 +44,8 @@ fn assistant(m: &Message, streaming: bool, k: &Kit) -> El {
         .child(text(MessageRole::Assistant.label()).font(k.ty.ui_medium).color(k.c.text_base));
     let mut out = col().role("group").label("Krampsta").w_full().gap(10.0).child(header);
     if !m.tool_calls.is_empty() {
-        out = out.child(row().gap(6.0).flex_wrap().children(m.tool_calls.iter().map(|c| tool_chip(m, c, k))));
+        let cards = m.tool_calls.iter().map(|c| tool_card::view(c, m.result_for(c), open_tools.contains(&c.id), k));
+        out = out.child(col().w_full().gap(8.0).children(cards));
     }
     if m.content.is_empty() {
         if streaming {
@@ -60,25 +63,4 @@ fn thinking(k: &Kit) -> El {
         .items_center()
         .child(Spinner::new().size(12.0).color(theme::accent(k.dark)).build(k))
         .child(text("Thinking…").font(k.ty.ui).color(k.c.text_muted))
-}
-
-fn tool_chip(m: &Message, call: &ToolCall, k: &Kit) -> El {
-    let (state, ink) = match m.result_for(call) {
-        None => ("running", k.c.text_faint),
-        Some(r) if r.is_error => ("failed", k.c.danger.icon),
-        Some(_) => ("done", k.c.success.icon),
-    };
-    row()
-        .role("note")
-        .label(format!("Tool {} {state}", call.name))
-        .h(24.0)
-        .px(8.0)
-        .gap(6.0)
-        .items_center()
-        .radius(k.radius.sm)
-        .fill(k.c.layer_01)
-        .border(1.0, k.c.border_weak)
-        .child(icon(&icons::TOOL, 12.0).color(k.c.icon_muted))
-        .child(text(call.name.clone()).font(k.ty.mono).color(k.c.text_base))
-        .child(text(state).font(k.ty.small).color(ink))
 }

@@ -3,10 +3,11 @@
 //! Everything a view reads lives in [`KrampstaApp`]. Handlers call its methods; agent events
 //! reach it through [`KrampstaApp::pump`], which `poll` runs when the agent host wakes the window.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use krampsta_agent::{AgentError, AgentHost, EngineCatalog, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest};
-use krampsta_core::{AgentEvent, IdGen, RunId, Session, SessionError, SessionId};
+use krampsta_core::{AgentEvent, IdGen, RunId, Session, SessionError, SessionId, ToolCallId};
 use rune::TextEdit;
 use rune_kit::PaneState;
 use rune_kit::diff::DiffState;
@@ -53,6 +54,8 @@ pub struct KrampstaApp {
     pub engine: EngineChoice,
     /// The account sign-in dialog.
     pub sign_in: SignIn,
+    /// Tool cards the user opened in the transcript.
+    pub open_tools: HashSet<ToolCallId>,
     pub(crate) catalog: Arc<dyn EngineCatalog>,
     pub(crate) agent: AgentHost,
     ids: IdGen,
@@ -86,6 +89,7 @@ impl KrampstaApp {
             diff: sample::diff(),
             engine,
             sign_in: SignIn::Closed,
+            open_tools: HashSet::new(),
             catalog,
             agent,
             ids,
@@ -126,6 +130,13 @@ impl KrampstaApp {
     }
 
     /// Adds an empty session at the top and selects it.
+    /// Opens a closed tool card, closes an open one.
+    pub fn toggle_tool(&mut self, id: &ToolCallId) {
+        if !self.open_tools.remove(id) {
+            self.open_tools.insert(id.clone());
+        }
+    }
+
     pub fn new_session(&mut self) -> SessionId {
         let id = SessionId(self.ids.next());
         self.sessions.insert(0, Session::new(id));
