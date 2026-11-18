@@ -11,7 +11,7 @@ use crate::theme;
 
 const COLUMN: f32 = 820.0;
 
-pub fn view(s: &KruneApp, k: &Kit) -> El {
+pub fn view(s: &KruneApp, k: &Kit, layer: &mut Vec<El>) -> El {
     let (content, running) = match s.current() {
         Some(session) if !session.messages.is_empty() => (transcript(session, k), session.status.is_running()),
         Some(session) => (empty_state(k), session.status.is_running()),
@@ -25,7 +25,7 @@ pub fn view(s: &KruneApp, k: &Kit) -> El {
         .scroll(ScrollSpec { stick_bottom: true })
         .scroll_edge_fade(12.0)
         .child(col().w_full().items_center().px(28.0).pt(24.0).pb(16.0).child(content));
-    let composer = col().w_full().items_center().px(28.0).pt(8.0).pb(18.0).child(composer::view(s, running, k));
+    let composer = col().w_full().items_center().px(28.0).pt(8.0).pb(18.0).child(composer::view(s, running, k, layer));
     col().w_full().h_full().min_h(0.0).child(scroll).child(composer)
 }
 

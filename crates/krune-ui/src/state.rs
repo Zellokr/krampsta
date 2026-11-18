@@ -5,12 +5,13 @@
 
 use std::sync::Arc;
 
-use krune_agent::{AgentEngine, AgentError, AgentHost, MockAgent, MockConfig, Notifier, RunRequest};
+use krune_agent::{AgentError, AgentHost, EngineCatalog, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest};
 use krune_core::{AgentEvent, IdGen, RunId, Session, SessionError, SessionId};
 use rune::TextEdit;
 use rune_kit::PaneState;
 use rune_kit::diff::DiffState;
 
+use crate::picker::EngineChoice;
 use crate::sample;
 use crate::theme::ThemeChoice;
 
@@ -28,6 +29,9 @@ pub enum SendError {
     Session(#[from] SessionError),
     #[error("could not start the agent: {0}")]
     Agent(#[from] AgentError),
+    /// The chosen provider and model can't run (no model yet, missing key…).
+    #[error("{0}")]
+    Engine(String),
 }
 
 pub struct KruneApp {
@@ -44,7 +48,10 @@ pub struct KruneApp {
     /// The right-hand changes panel.
     pub changes: PaneState,
     pub diff: DiffState,
-    agent: AgentHost,
+    /// The provider and model pickers.
+    pub engine: EngineChoice,
+    pub(crate) catalog: Arc<dyn EngineCatalog>,
+    pub(crate) agent: AgentHost,
     ids: IdGen,
     window_width: Option<f32>,
     auto_hidden: AutoHidden,
@@ -52,14 +59,19 @@ pub struct KruneApp {
 }
 
 impl KruneApp {
-    /// A fresh app driving `engine`, with the sample sessions.
-    pub fn new(engine: Arc<dyn AgentEngine>) -> Self {
+    /// A fresh app running what `catalog` offers, starting from its initial selection, with
+    /// the sample sessions.
+    pub fn new(catalog: Arc<dyn EngineCatalog>) -> Self {
         let ids = IdGen::new();
         let sessions = sample::sessions(&ids);
         let selected = sessions.first().map_or(SessionId(0), |s| s.id);
         let mut draft = TextEdit::new("");
         draft.focused = true;
-        KruneApp {
+        let engine = EngineChoice::new(catalog.providers(), catalog.initial());
+        // A stand-in until `rebuild_engine` below. With no usable selection sends are refused,
+        // so it never runs.
+        let agent = AgentHost::new(Arc::new(MockAgent::new(MockConfig::default())));
+        let mut app = KruneApp {
             sessions,
             selected,
             draft,
@@ -69,17 +81,21 @@ impl KruneApp {
             sidebar: PaneState::new(264.0).range(200.0, 420.0),
             changes: PaneState::new(440.0).range(320.0, 760.0),
             diff: sample::diff(),
-            agent: AgentHost::new(engine),
+            engine,
+            catalog,
+            agent,
             ids,
             window_width: None,
             auto_hidden: AutoHidden::default(),
             keep: Pane::Sidebar,
-        }
+        };
+        app.rebuild_engine();
+        app
     }
 
     /// The default app: the mock agent at its normal pace. `AppSpec::init` needs a plain `fn`.
     pub fn with_mock() -> Self {
-        Self::new(Arc::new(MockAgent::new(MockConfig::default())))
+        Self::new(Arc::new(MockCatalog::new(MockConfig::default())))
     }
 
     /// Wakes the window when agent events arrive.
@@ -123,6 +139,9 @@ impl KruneApp {
 
     /// Sends the composer's text to the agent in the selected session.
     pub fn send(&mut self) -> Result<RunId, SendError> {
+        if let Some(problem) = &self.engine.problem {
+            return Err(SendError::Engine(problem.clone()));
+        }
         let run = self.agent.next_run_id();
         let text = self.draft.text.clone();
         let id = self.current().map(|s| s.id).ok_or(SessionError::EmptyMessage)?;
@@ -159,7 +178,8 @@ impl KruneApp {
 
     /// Applies every agent event that has arrived. True when anything visible changed.
     pub fn pump(&mut self) -> bool {
-        let mut changed = false;
+        let lists = self.agent.drain_models();
+        let mut changed = self.land_models(lists);
         for e in self.agent.drain() {
             if let Some(s) = self.session_mut(e.session) {
                 changed |= s.apply(&e.event);
@@ -248,7 +268,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn app() -> KruneApp {
-        KruneApp::new(Arc::new(MockAgent::new(MockConfig::instant())))
+        KruneApp::new(Arc::new(MockCatalog::new(MockConfig::instant())))
     }
 
     fn pump_until_idle(app: &mut KruneApp) {
@@ -347,7 +367,7 @@ mod tests {
     #[test]
     fn cancel_stops_a_slow_run() {
         let slow = MockConfig { think: Duration::from_secs(30), ..MockConfig::default() };
-        let mut app = KruneApp::new(Arc::new(MockAgent::new(slow)));
+        let mut app = KruneApp::new(Arc::new(MockCatalog::new(slow)));
         app.draft = TextEdit::new("take your time");
         app.send().unwrap();
         assert!(app.cancel());

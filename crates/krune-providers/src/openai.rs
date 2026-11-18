@@ -11,7 +11,6 @@ use crate::http::{self, Flow, HttpError};
 use crate::sse::SseEvent;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
-pub const DEFAULT_MODEL: &str = "gpt-4o-mini";
 
 /// Where and how to reach the server.
 #[derive(Clone, PartialEq, Eq)]
@@ -24,28 +23,12 @@ pub struct OpenAiConfig {
 }
 
 impl OpenAiConfig {
-    /// `OPENAI_API_KEY`, `OPENAI_BASE_URL` and `KRUNE_MODEL`. `None` when neither a key nor a
-    /// base URL is set: there is nothing to talk to.
-    pub fn from_env() -> Option<Self> {
-        Self::from_vars(|name| std::env::var(name).ok())
-    }
-
-    fn from_vars(var: impl Fn(&str) -> Option<String>) -> Option<Self> {
-        let var = |name: &str| var(name).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
-        let api_key = var("OPENAI_API_KEY");
-        let base_url = var("OPENAI_BASE_URL");
-        if api_key.is_none() && base_url.is_none() {
-            return None;
-        }
-        Some(OpenAiConfig {
-            base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_owned()),
-            api_key,
-            model: var("KRUNE_MODEL").unwrap_or_else(|| DEFAULT_MODEL.to_owned()),
-        })
+    fn url(&self, path: &str) -> String {
+        format!("{}/{path}", self.base_url.trim_end_matches('/'))
     }
 
     fn endpoint(&self) -> String {
-        format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
+        self.url("chat/completions")
     }
 }
 
@@ -67,12 +50,52 @@ pub struct OpenAiEngine {
 }
 
 impl OpenAiEngine {
+    /// An engine with its own HTTP client, named after the server it talks to.
     pub fn new(config: OpenAiConfig) -> Result<Self, HttpError> {
-        let provider =
-            if config.base_url.trim_end_matches('/') == DEFAULT_BASE_URL { "openai" } else { "openai-compatible" };
-        let name = format!("{provider} · {}", config.model);
-        Ok(OpenAiEngine { client: http::client()?, config, name })
+        let label =
+            if config.base_url.trim_end_matches('/') == DEFAULT_BASE_URL { "OpenAI" } else { "OpenAI-compatible" };
+        Ok(Self::with_client(config, http::client()?, label))
     }
+
+    /// An engine sharing `client` (and its connection pool), shown as "<label> · <model>".
+    pub fn with_client(config: OpenAiConfig, client: reqwest::Client, label: &str) -> Self {
+        let name = format!("{label} · {}", config.model);
+        OpenAiEngine { client, config, name }
+    }
+}
+
+/// The models the server lists (`GET /models`), sorted. With `chat_only`, drops the ones that
+/// can't chat (embeddings, speech, images…), which OpenAI lists alongside the rest.
+pub async fn list_models(
+    client: &reqwest::Client,
+    config: &OpenAiConfig,
+    chat_only: bool,
+) -> Result<Vec<String>, HttpError> {
+    let mut req = client.get(config.url("models"));
+    if let Some(key) = &config.api_key {
+        req = req.bearer_auth(key);
+    }
+    let json = http::get_json(req, MODELS_TIMEOUT).await?;
+    let mut ids: Vec<String> = json["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m["id"].as_str())
+        .filter(|id| !chat_only || is_chat_model(id))
+        .map(str::to_owned)
+        .collect();
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
+}
+
+/// How long a model list may take (a local server that isn't running fails at once anyway).
+const MODELS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn is_chat_model(id: &str) -> bool {
+    const NOT_CHAT: [&str; 10] =
+        ["embedding", "tts", "whisper", "dall-e", "moderation", "image", "audio", "realtime", "transcribe", "search"];
+    !NOT_CHAT.iter().any(|n| id.contains(n))
 }
 
 impl AgentEngine for OpenAiEngine {
@@ -173,37 +196,32 @@ mod tests {
     use super::*;
     use krune_core::{MessageId, RunId};
 
-    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let pairs: Vec<(String, String)> = pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
-        move |name| pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+    fn cfg(url: &str, key: Option<&str>) -> OpenAiConfig {
+        OpenAiConfig { base_url: url.into(), api_key: key.map(str::to_owned), model: "m".into() }
     }
 
     #[test]
-    fn config_needs_a_key_or_a_base_url() {
-        assert_eq!(OpenAiConfig::from_vars(vars(&[])), None);
-        assert_eq!(OpenAiConfig::from_vars(vars(&[("OPENAI_API_KEY", "  ")])), None);
-        let cloud = OpenAiConfig::from_vars(vars(&[("OPENAI_API_KEY", "sk-test")])).unwrap();
-        assert_eq!((cloud.base_url.as_str(), cloud.model.as_str()), (DEFAULT_BASE_URL, DEFAULT_MODEL));
-        let local = OpenAiConfig::from_vars(vars(&[
-            ("OPENAI_BASE_URL", "http://localhost:11434/v1/"),
-            ("KRUNE_MODEL", "qwen3"),
-        ]))
-        .unwrap();
-        assert_eq!(local.api_key, None);
+    fn endpoints_tolerate_a_trailing_slash() {
+        let local = cfg("http://localhost:11434/v1/", None);
         assert_eq!(local.endpoint(), "http://localhost:11434/v1/chat/completions");
+        assert_eq!(local.url("models"), "http://localhost:11434/v1/models");
     }
 
     #[test]
     fn debug_output_hides_the_key() {
-        let cfg = OpenAiConfig::from_vars(vars(&[("OPENAI_API_KEY", "sk-secret")])).unwrap();
-        assert!(!format!("{cfg:?}").contains("sk-secret"));
+        assert!(!format!("{:?}", cfg(DEFAULT_BASE_URL, Some("sk-secret"))).contains("sk-secret"));
     }
 
     #[test]
     fn engine_name_says_which_server_and_model() {
-        let cfg = |url: &str| OpenAiConfig { base_url: url.into(), api_key: None, model: "m".into() };
-        assert_eq!(OpenAiEngine::new(cfg(DEFAULT_BASE_URL)).unwrap().name(), "openai · m");
-        assert_eq!(OpenAiEngine::new(cfg("http://localhost:8080/v1")).unwrap().name(), "openai-compatible · m");
+        assert_eq!(OpenAiEngine::new(cfg(DEFAULT_BASE_URL, None)).unwrap().name(), "OpenAI · m");
+        assert_eq!(OpenAiEngine::new(cfg("http://localhost:8080/v1", None)).unwrap().name(), "OpenAI-compatible · m");
+    }
+
+    #[test]
+    fn only_chat_models_survive_the_filter() {
+        assert!(is_chat_model("gpt-4o-mini") && is_chat_model("o3") && is_chat_model("qwen3:4b"));
+        assert!(!is_chat_model("text-embedding-3-small") && !is_chat_model("gpt-4o-mini-tts"));
     }
 
     #[test]

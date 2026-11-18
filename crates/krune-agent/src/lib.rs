@@ -10,16 +10,19 @@
 //!
 //! This crate knows nothing about the UI framework.
 
+mod catalog;
 mod engine;
 mod host;
 mod mock;
 
+pub use catalog::{EngineCatalog, MOCK_MODEL, MOCK_PROVIDER, MockCatalog, Provider, Selection};
 pub use engine::AgentEngine;
 pub use engine::AgentError;
 pub use engine::BoxFuture;
 pub use engine::RunContext;
 pub use engine::RunRequest;
 pub use host::AgentHost;
+pub use host::ModelList;
 pub use host::Notifier;
 pub use mock::MockAgent;
 pub use mock::MockConfig;

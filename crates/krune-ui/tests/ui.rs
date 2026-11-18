@@ -4,8 +4,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use krune_agent::{MockAgent, MockConfig};
+use krune_agent::{MockCatalog, MockConfig};
 use krune_core::AgentStatus;
+use krune_ui::picker::Picker;
 use krune_ui::{KruneApp, Screen, app, keys};
 use rune::runtime::ElementInfo;
 use rune::{Env, Ime, Key, KeyEvent, Mods, Runtime};
@@ -13,7 +14,7 @@ use rune::{Env, Ime, Key, KeyEvent, Mods, Runtime};
 const SIZE: (f32, f32) = (1200.0, 800.0);
 
 fn runtime_with(config: MockConfig, size: (f32, f32)) -> Runtime<KruneApp> {
-    let state = KruneApp::new(Arc::new(MockAgent::new(config)));
+    let state = KruneApp::new(Arc::new(MockCatalog::new(config)));
     let mut rt = Runtime::new(state, app::view, size, Env::new(true, 1.0));
     settle(&mut rt);
     rt
@@ -255,4 +256,37 @@ fn the_layout_holds_at_different_sizes() {
             .unwrap_or_default();
         assert!(!overlaps(title, pill), "title {title:?} overlaps the pill {pill:?} at {size:?}");
     }
+}
+
+#[test]
+fn the_model_picker_opens_from_the_composer_and_choosing_closes_it() {
+    let mut rt = runtime();
+    let trigger = format!("{}-trigger", keys::COMPOSER_MODEL);
+    let listbox = format!("{}-content", keys::COMPOSER_MODEL);
+    assert!(has(&rt, &trigger), "the model picker sits under the composer");
+    assert!(!has(&rt, &listbox));
+
+    click(&mut rt, &trigger);
+    assert_eq!(rt.state.engine.open, Some(Picker::ComposerModel));
+    let list = element(&rt, &listbox).expect("the listbox opens");
+    assert!(inside(list.rect, [0.0, 0.0, SIZE.0, SIZE.1]), "the listbox stays in the window: {:?}", list.rect);
+    let option = element(&rt, "option0").expect("the model is listed");
+    assert!(option.visible[2] > 0.0 && option.visible[3] > 0.0, "the option is on screen");
+
+    click(&mut rt, "option0");
+    assert_eq!(rt.state.engine.open, None, "choosing closes the list");
+    assert_eq!(rt.state.engine.selection.model.as_deref(), Some("simulated"));
+}
+
+#[test]
+fn escape_closes_an_open_picker_before_leaving_settings() {
+    let mut rt = runtime();
+    rt.update(|s, _| s.screen = Screen::Settings);
+    settle(&mut rt);
+    click(&mut rt, &format!("{}-trigger", keys::SETTINGS_PROVIDER));
+    assert_eq!(rt.state.engine.open, Some(Picker::SettingsProvider));
+    rt.update_if(|s, tx| app::on_key(s, &KeyEvent { key: Key::Escape, mods: Mods::default() }, tx));
+    settle(&mut rt);
+    assert_eq!(rt.state.engine.open, None);
+    assert_eq!(rt.state.screen, Screen::Settings, "the first Escape only closes the list");
 }

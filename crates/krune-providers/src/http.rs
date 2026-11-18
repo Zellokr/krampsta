@@ -98,6 +98,18 @@ async fn cancellable<T>(ctx: &RunContext, fut: impl Future<Output = T>) -> Resul
     }
 }
 
+/// Sends `request` and parses the JSON reply, failing after `timeout` (lookups like a model
+/// list should not hang a picker when a local server isn't running).
+pub async fn get_json(request: reqwest::RequestBuilder, timeout: Duration) -> Result<serde_json::Value, HttpError> {
+    let response = request.timeout(timeout).send().await.map_err(|e| request_error(&e))?;
+    let status = response.status();
+    let body = response.text().await.map_err(|e| request_error(&e))?;
+    if !status.is_success() {
+        return Err(status_error(status, &body));
+    }
+    serde_json::from_str(&body).map_err(|e| HttpError::Stream(format!("the reply was not valid JSON ({e})")))
+}
+
 fn request_error(e: &reqwest::Error) -> HttpError {
     if e.is_timeout() {
         HttpError::Timeout

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use krune_agent::{AgentHost, RunRequest};
 use krune_core::{AgentEvent, Message, MessageId, SessionId};
-use krune_providers::{OpenAiConfig, OpenAiEngine};
+use krune_providers::{OpenAiConfig, OpenAiEngine, list_models};
 
 /// A real reply from the Chat Completions API (trimmed ids), as the wire carries it.
 const RECORDED: &str = concat!(
@@ -251,4 +251,41 @@ fn cancelling_mid_stream_closes_the_connection() {
 
     // The provider sees the request go away, so it stops generating (and billing).
     server.closed.recv_timeout(Duration::from_secs(5)).expect("the connection stayed open after cancelling");
+}
+
+fn block_on<T>(fut: impl std::future::Future<Output = T>) -> T {
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(fut)
+}
+
+#[test]
+fn model_lists_come_from_get_models_sorted_and_optionally_chat_only() {
+    let body = r#"{"object":"list","data":[
+        {"id":"gpt-4o-mini","object":"model"},{"id":"text-embedding-3-small","object":"model"},
+        {"id":"gpt-4o","object":"model"},{"id":"gpt-4o-mini-tts","object":"model"}]}"#;
+    let reply =
+        |b: &str| Reply { status: "200 OK", content_type: "application/json", pieces: vec![b.into()], hang: false };
+
+    let server = serve(reply(body));
+    let config = OpenAiConfig { base_url: server.url.clone(), api_key: Some("sk-test".into()), model: String::new() };
+    let client = krune_providers::http::client().unwrap();
+    let all = block_on(list_models(&client, &config, false)).unwrap();
+    assert_eq!(all, ["gpt-4o", "gpt-4o-mini", "gpt-4o-mini-tts", "text-embedding-3-small"]);
+    let request = server.request.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(request.starts_with("GET /v1/models HTTP/1.1"), "{request}");
+    assert!(request.to_ascii_lowercase().contains("authorization: bearer sk-test"));
+
+    let server = serve(reply(body));
+    let config = OpenAiConfig { base_url: server.url.clone(), ..config };
+    assert_eq!(block_on(list_models(&client, &config, true)).unwrap(), ["gpt-4o", "gpt-4o-mini"]);
+}
+
+#[test]
+fn a_model_list_from_a_stopped_server_fails_quickly_and_readably() {
+    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let config = OpenAiConfig { base_url: format!("http://127.0.0.1:{port}/v1"), api_key: None, model: String::new() };
+    let client = krune_providers::http::client().unwrap();
+    let started = Instant::now();
+    let error = block_on(list_models(&client, &config, false)).unwrap_err();
+    assert!(error.to_string().contains("could not reach"), "{error}");
+    assert!(started.elapsed() < Duration::from_secs(5));
 }

@@ -8,13 +8,16 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
 - `crates/krune-core` — dominio puro. **Nunca** depende de Rune, tokio ni proveedores.
   `Session::apply` es la única forma de cambiar una sesión a partir de eventos.
 - `crates/krune-agent` — `AgentEngine` (contrato), `RunContext`, `AgentHost` (tokio, canal +
-  notificador), `MockAgent`. No depende de Rune.
+  notificador, cambio de motor, listas de modelos en segundo plano), `EngineCatalog` (qué
+  proveedores y modelos hay, cómo construir un motor), `MockAgent`, `MockCatalog`. No depende de Rune.
 - `crates/krune-providers` — motores reales: `sse` (parser), `http` (cliente `reqwest`, petición
-  SSE cancelable, `HttpError`), `OpenAiEngine`; `engine_from_env()` elige el motor. No depende de Rune.
-- `crates/krune-ui` — `KruneApp` (estado), `app.rs` (spec, vista raíz, poll, teclas, escenas),
-  `views/` (pantallas y paneles), `components/` (piezas), `theme.rs` (único sitio de colores),
-  `keys.rs` (claves estables), `sample.rs` (datos de ejemplo).
-- `crates/krune-app` — binario `krune`; sólo elige el motor y arranca.
+  SSE cancelable, `HttpError`), `OpenAiEngine`, `list_models` y `Catalog` (proveedores leídos del
+  entorno). No depende de Rune.
+- `crates/krune-ui` — `KruneApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`
+  (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
+  (piezas), `theme.rs` (único sitio de colores), `keys.rs` (claves estables), `sample.rs` (datos
+  de ejemplo).
+- `crates/krune-app` — binario `krune`; sólo construye el catálogo y arranca.
 - Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
   `providers → core`. Sin ciclos; la UI nunca depende de `krune-providers`.
 
@@ -55,8 +58,13 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
 - **No** emitas `Started` ni eventos terminales: los pone el host. Devuelve `Ok(())`,
   `Err(AgentError::..)` o `Err(AgentError::Cancelled)`.
 - Nunca bloquees un hilo de tokio (nada de I/O síncrona en el motor).
-- Los motores de proveedor viven en `krune-providers` y se eligen en `engine_from_env()`
-  (llamado desde `engine()` en `crates/krune-app/src/main.rs`); la UI no cambia.
+- Los motores de proveedor viven en `krune-providers`. Un proveedor nuevo se añade a `Catalog`
+  (`catalog.rs`): sale solo en los selectores de la UI, que sólo conoce `EngineCatalog`.
+- El usuario elige proveedor y modelo en la app; cambiar de motor afecta a las ejecuciones
+  nuevas, no a la que está en marcha. Las listas de modelos se piden con `AgentHost::fetch_models`
+  y llegan por `poll`, nunca desde `view`.
+- Las capturas fijan `KRUNE_PROVIDER=mock` (`scripts/snapshots.sh`): no deben depender de las
+  claves de la máquina. Las escenas que muestran proveedores los preparan a mano.
 - Peticiones HTTP siempre con `http::client()` y `http::stream_sse` (cancelación y errores
   legibles ya resueltos). Cada motor se prueba contra el servidor falso de
   `crates/krune-providers/tests/` con un stream grabado real, no sólo con JSON inventado.

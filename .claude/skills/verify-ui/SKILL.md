@@ -30,7 +30,8 @@ bash scripts/snapshots.sh
 ```
 
 Escribe en `assets/screenshots/`: `krune` (estado inicial), `empty`, `running`, `completed`,
-`failed`, `cancelled`, `settings`, `light`, `narrow` (800×560) y `send-message` (script real:
+`failed`, `cancelled`, `settings`, `light`, `provider-picker`, `model-picker`, `model-error`
+(selectores abiertos y servidor local caído), `narrow` (800×560) y `send-message` (script real:
 escribe en el composer y pulsa Enter), más `krune-tree.json` (árbol de elementos, no versionado).
 
 Para una escena suelta:

@@ -73,11 +73,13 @@ krune-app ──▶ krune-providers ──▶ krune-agent
 - **krune-ui**: `KruneApp` es todo el estado. En `AppSpec::setup` el `Waker` de Rune se instala
   como notificador; cuando llega un evento, Rune ejecuta `poll`, que llama a `KruneApp::pump`.
   El hilo gráfico nunca bloquea y las vistas son funciones puras del estado (sin I/O).
-- **krune-app** sólo cablea: `rune::App::new(krune_ui::spec()).init(|| KruneApp::new(engine()))`.
-  `engine()` elige el proveedor con `krune_providers::engine_from_env()`; la interfaz no cambia.
+- **krune-app** sólo cablea: `rune::App::new(krune_ui::spec()).init(|| KruneApp::new(catalog()))`,
+  con el `Catalog` de `krune-providers`. La UI sólo conoce el contrato `EngineCatalog` de
+  `krune-agent`: lista los proveedores, pide sus modelos en segundo plano y cambia de motor.
 - **krune-providers**: `sse` (parser incremental de `text/event-stream`), `http` (petición
   cancelable: cancelar suelta la respuesta y cierra la conexión; errores legibles para 401/403,
-  429, red y *timeouts*) y `OpenAiEngine` (Chat Completions con streaming).
+  429, red y *timeouts*), `OpenAiEngine` (Chat Completions con streaming), `list_models`
+  (`GET /models`) y `Catalog`.
 
 ## Requisitos
 
@@ -103,22 +105,25 @@ La primera compilación descarga y compila Rune (varios minutos).
 
 ### Elegir el proveedor
 
-Krune lee la configuración del entorno (nunca del repositorio):
+El proveedor y el modelo se eligen dentro de la app, bajo el composer o en *Settings*. Los
+modelos se leen del propio servidor (`GET /v1/models`). Los proveedores disponibles son:
 
-| Variable | Para qué |
-| --- | --- |
-| `OPENAI_API_KEY` | Clave de OpenAI (u otro servicio compatible). Con ella se usa OpenAI. |
-| `OPENAI_BASE_URL` | Raíz de la API, hasta `/v1`. Por defecto `https://api.openai.com/v1`. |
-| `KRUNE_MODEL` | Modelo. Por defecto `gpt-4o-mini`. |
-| `KRUNE_PROVIDER` | `openai` o `mock` para forzar uno. |
+| Proveedor | Servidor | Necesita |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| OpenAI-compatible | `OPENAI_BASE_URL` (sólo aparece si está definida) | `OPENAI_API_KEY`, si el servidor la pide |
+| Ollama | `http://localhost:11434/v1` | Ollama en marcha |
+| LM Studio | `http://localhost:1234/v1` | el servidor de LM Studio en marcha |
+| Simulated | el `MockAgent` | nada |
 
-Con un servidor local no hace falta clave, por ejemplo con Ollama:
+Las claves se leen del entorno, nunca del repositorio. Para elegir lo que sale seleccionado al
+abrir: `KRUNE_PROVIDER` (`openai`, `custom`, `ollama`, `lmstudio` o `mock`) y `KRUNE_MODEL`.
+Sin nada definido, arranca con el simulado. Con Ollama, por ejemplo:
 
 ```bash
-OPENAI_BASE_URL=http://localhost:11434/v1 KRUNE_MODEL=qwen3 cargo run -p krune-app
+ollama pull qwen3:4b
+cargo run -p krune-app        # y elige Ollama › qwen3:4b bajo el composer
 ```
-
-El motor activo aparece bajo el composer y en *Settings*.
 
 ## Tests y comprobaciones
 
@@ -136,7 +141,8 @@ cargo test --workspace
 `), errores HTTP y, contra
   un servidor falso, streaming grabado, 401, 429, error dentro del stream, servidor caído y que
   cancelar cierra la conexión.
-- `krune-ui` (unitarias): enviar/recibir con el mock real, plegado responsive de paneles.
+- `krune-ui` (unitarias): enviar/recibir con el mock real, plegado responsive de paneles y el
+  selector (lista de modelos que llega, primer modelo, recordar el último, servidor caído, sin clave).
 - `krune-ui/tests/ui.rs`: la vista real en el `Runtime` headless de Rune, con clics y teclado:
   componentes presentes, crear/seleccionar sesiones, escribir en el composer, Enter y botón de
   enviar, estados running → completed/failed/cancelled, panel de cambios, ajustes y que el
@@ -158,7 +164,7 @@ bash scripts/snapshots.sh            # regenera assets/screenshots/
 ```
 
 Escenas: `light`, `empty`, `draft`, `running`, `completed`, `failed`, `cancelled`, `settings`,
-`changes-hidden`, `sidebar-hidden`. Para tamaños estrechos usa `--at 1.0`: los paneles se pliegan
+`changes-hidden`, `sidebar-hidden`, `provider-picker`, `model-picker`, `model-error`. Para tamaños estrechos usa `--at 1.0`: los paneles se pliegan
 tras el primer layout. Todos los elementos importantes tienen claves estables con el prefijo
 `krune-` (ver `crates/krune-ui/src/keys.rs`), útiles en scripts (`"key": "krune-composer"`) y
 en el árbol JSON.

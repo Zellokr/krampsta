@@ -10,6 +10,7 @@ pub const TRANSCRIPT: &str = "krune-transcript";
 pub const TRANSCRIPT_SCROLL: &str = "krune-transcript-scroll";
 pub const EMPTY_STATE: &str = "krune-empty-state";
 pub const COMPOSER: &str = "krune-composer";
+pub const COMPOSER_HINT: &str = "krune-composer-hint";
 pub const SEND: &str = "krune-send";
 pub const STOP: &str = "krune-stop";
 pub const STATUS: &str = "krune-agent-status";
@@ -28,3 +29,10 @@ pub fn session(id: krune_core::SessionId) -> String {
 pub fn message(id: krune_core::MessageId) -> String {
     format!("krune-message-{id}")
 }
+
+/// Provider and model pickers. rune-kit keys a select's trigger `<key>-trigger` and its
+/// options `option<i>` inside `<key>-content`.
+pub const COMPOSER_PROVIDER: &str = "krune-composer-provider";
+pub const COMPOSER_MODEL: &str = "krune-composer-model";
+pub const SETTINGS_PROVIDER: &str = "krune-settings-provider";
+pub const SETTINGS_MODEL: &str = "krune-settings-model";

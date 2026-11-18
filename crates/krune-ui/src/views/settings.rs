@@ -4,13 +4,14 @@ use rune::{Cx, El, Tx, col, row, text};
 use rune_kit::shell::Page;
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, SegmentedControl, Switch};
 
+use crate::components::engine_picker::{self, Place};
 use crate::keys;
 use crate::state::{KruneApp, Screen};
 use crate::theme::ThemeChoice;
 
 const THEMES: [ThemeChoice; 3] = [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::System];
 
-pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit) -> El {
+pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit, layer: &mut Vec<El>) -> El {
     let theme_index = THEMES.iter().position(|t| *t == s.theme);
     let appearance = SegmentedControl::new(&["Dark", "Light", "System"], theme_index)
         .width(Some(220.0))
@@ -25,16 +26,10 @@ pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit) -> El {
         .on_toggle(|s: &mut KruneApp| s.toggle_changes())
         .build(k)
         .key(keys::SETTING_CHANGES);
-    let simulated = s.engine_name() == "mock";
-    let (engine_label, engine_hint) = if simulated {
-        (
-            format!("{} (simulated, no network)", s.engine_name()),
-            "Set OPENAI_API_KEY, or OPENAI_BASE_URL for a local server.",
-        )
-    } else {
-        (s.engine_name().to_owned(), "Chosen from the environment (KRUNE_PROVIDER, OPENAI_*).")
-    };
-    let engine = text(engine_label).font(k.ty.ui).color(k.c.text_muted);
+    let provider = engine_picker::provider(s, k, layer, Place::Settings);
+    let model = engine_picker::model(s, k, layer, Place::Settings);
+    let warning = s.engine.warning();
+    let model_hint = warning.as_deref().unwrap_or("Used for new messages; a running reply keeps its model.");
     let version = text(concat!("Krune ", env!("CARGO_PKG_VERSION"))).font(k.ty.ui).color(k.c.text_muted);
 
     let body = col().w_full().h_full().padding(28.0).items_center().child(
@@ -45,7 +40,9 @@ pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit) -> El {
             .child(text("General").font(k.ty.small_medium).color(k.c.text_faint))
             .child(setting(k, "Appearance", "Krune uses the dark theme by default.", appearance))
             .child(setting(k, "Changes panel", "Show file changes beside the conversation.", changes))
-            .child(setting(k, "Agent engine", engine_hint, engine))
+            .child(text("Agent").font(k.ty.small_medium).color(k.c.text_faint).mt(12.0))
+            .child(setting(k, "Provider", "Ollama and LM Studio run on this computer.", provider))
+            .child(setting(k, "Model", model_hint, model))
             .child(setting(k, "About", "Native AI Coding Agent, built with Rust and Rune.", version)),
     );
     let back = Button::new("Back")

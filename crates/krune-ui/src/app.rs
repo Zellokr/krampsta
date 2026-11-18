@@ -1,5 +1,6 @@
 //! Rune wiring: the app spec, the root view, `poll`, keyboard shortcuts and headless scenes.
 
+use krune_agent::{MockCatalog, Provider, Selection};
 use krune_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult};
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, TextEdit, Tx, Waker, row, text};
 use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
@@ -7,6 +8,7 @@ use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit};
 
 use crate::components::status;
 use crate::keys;
+use crate::picker::{Models, Picker};
 use crate::state::{KruneApp, Screen};
 use crate::theme::{self, ThemeChoice};
 use crate::views::{changes, chat, settings, sidebar};
@@ -38,6 +40,8 @@ pub fn chrome() -> Chrome {
 
 fn setup(s: &mut KruneApp, waker: Waker) {
     s.set_notifier(waker);
+    // The selected provider's models load in the background while the window opens.
+    s.ensure_models();
 }
 
 /// Runs before every frame and whenever the agent host wakes the window.
@@ -46,6 +50,10 @@ pub fn poll(s: &mut KruneApp, _clock: f64, _tx: &mut Tx) -> bool {
 }
 
 pub fn on_key(s: &mut KruneApp, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+    if ev.key == Key::Escape && s.engine.open.is_some() {
+        s.close_picker();
+        return true;
+    }
     if shell::is_sidebar_toggle(ev) {
         s.sidebar.toggle();
         return true;
@@ -71,20 +79,23 @@ pub fn on_key(s: &mut KruneApp, ev: &KeyEvent, _tx: &mut Tx) -> bool {
 
 pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>) -> El {
     let k = theme::kit(s.theme.is_dark(cx.system_dark()));
+    // Open listboxes (the pickers) mount above everything else.
+    let mut layer = Vec::new();
     let screen = match s.screen {
-        Screen::Settings => settings::view(s, cx, k),
-        Screen::Chat => workspace(s, cx, k),
+        Screen::Settings => settings::view(s, cx, k, &mut layer),
+        Screen::Chat => workspace(s, cx, k, &mut layer),
     };
     // The root's rect is the window: refit the side panes whenever its width changes.
-    rune::el()
+    let base = rune::el()
         .key("krune-root")
         .w_full()
         .h_full()
         .on_layout(|s: &mut KruneApp, r: [f32; 4]| s.fit_width(r[2]))
-        .child(screen)
+        .child(screen);
+    rune_kit::root(base, layer)
 }
 
-fn workspace(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit) -> El {
+fn workspace(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit, layer: &mut Vec<El>) -> El {
     let session = s.current();
     let title = session.map_or(TITLE, |x| x.title.as_str());
     let status = session.map(|x| x.status.clone()).unwrap_or_default();
@@ -102,7 +113,7 @@ fn workspace(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit) -> El {
     let toolbar = Toolbar::new()
         .leading(row().grow(1.0).min_w(0.0).child(heading))
         .trailing(row().gap(8.0).items_center().child(status::pill(&status, k)).child(toggle));
-    SplitView::new(chat::view(s, k))
+    SplitView::new(chat::view(s, k, layer))
         .sidebar(&s.sidebar, |s: &mut KruneApp| &mut s.sidebar, sidebar::view(s, k))
         .inspector(&s.changes, |s: &mut KruneApp| &mut s.changes, changes::view(s, k))
         .toolbar(toolbar)
@@ -141,6 +152,25 @@ const SCENES: &[Scene] = &[
     ("settings", |s| s.screen = Screen::Settings),
     ("changes-hidden", |s| s.toggle_changes()),
     ("sidebar-hidden", |s| s.sidebar.toggle()),
+    ("provider-picker", |s| {
+        stage_providers(s);
+        s.engine.open = Some(Picker::ComposerProvider);
+    }),
+    ("model-picker", |s| {
+        stage_providers(s);
+        stage_local(s, Models::Ready(vec!["gemma3:12b".into(), "llama3.2:3b".into(), "qwen3:4b".into()]));
+        s.engine.selection.model = Some("qwen3:4b".into());
+        s.engine.open = Some(Picker::ComposerModel);
+    }),
+    ("model-error", |s| {
+        stage_providers(s);
+        stage_local(
+            s,
+            Models::Failed("could not reach http://localhost:11434/v1/models: error sending request".into()),
+        );
+        s.engine.problem = Some("Choose a model for Ollama.".into());
+        s.engine.open = Some(Picker::ComposerModel);
+    }),
 ];
 
 const SCENE_RUN: RunId = RunId(10_000);
@@ -194,4 +224,28 @@ fn scene_failed(s: &mut KruneApp) {
         s,
         &[AgentEvent::Failed { run, error: "provider error: simulated failure (you asked for it with /fail)".into() }],
     );
+}
+
+/// The providers of an environment without keys, whatever the real environment offers, so
+/// the snapshot is the same on every machine.
+fn stage_providers(s: &mut KruneApp) {
+    s.new_session();
+    let provider = |id: &str, label: &str, missing: Option<&str>| Provider {
+        id: id.into(),
+        label: label.into(),
+        default_model: None,
+        missing: missing.map(str::to_owned),
+    };
+    s.engine.providers = vec![
+        provider("openai", "OpenAI", Some("needs OPENAI_API_KEY")),
+        provider("ollama", "Ollama", None),
+        provider("lmstudio", "LM Studio", None),
+        MockCatalog::provider(),
+    ];
+}
+
+/// Ollama selected, its model list in `models`.
+fn stage_local(s: &mut KruneApp, models: Models) {
+    s.engine.selection = Selection { provider: "ollama".into(), model: None };
+    s.engine.models.insert("ollama".into(), models);
 }

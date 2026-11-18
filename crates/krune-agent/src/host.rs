@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use krune_core::{AgentEvent, IdGen, RunEvent, RunId};
 use tokio_util::sync::CancellationToken;
 
-use crate::engine::{AgentEngine, AgentError, RunContext, RunRequest};
+use crate::engine::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
 
 /// Called from a worker thread after each event is queued, to wake the UI so it drains them.
 /// Rune's `Waker` (`Arc<dyn Fn() + Send + Sync>`) is one.
@@ -26,11 +26,21 @@ pub struct AgentHost {
     notify: Notifier,
     runs: HashMap<RunId, CancellationToken>,
     ids: IdGen,
+    lookups_tx: Sender<ModelList>,
+    lookups_rx: Receiver<ModelList>,
+}
+
+/// The answer to [`AgentHost::fetch_models`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelList {
+    pub provider: String,
+    pub models: Result<Vec<String>, AgentError>,
 }
 
 impl AgentHost {
     pub fn new(engine: Arc<dyn AgentEngine>) -> Self {
         let (events_tx, events_rx) = channel();
+        let (lookups_tx, lookups_rx) = channel();
         AgentHost {
             engine,
             runtime: None,
@@ -39,6 +49,8 @@ impl AgentHost {
             notify: Arc::new(|| {}),
             runs: HashMap::new(),
             ids: IdGen::new(),
+            lookups_tx,
+            lookups_rx,
         }
     }
 
@@ -49,6 +61,33 @@ impl AgentHost {
 
     pub fn engine_name(&self) -> &str {
         self.engine.name()
+    }
+
+    /// Runs started from now on use `engine`; runs already going keep theirs.
+    pub fn set_engine(&mut self, engine: Arc<dyn AgentEngine>) {
+        self.engine = engine;
+    }
+
+    /// Resolves `lookup` (a catalog's model list) in the background; the answer arrives through
+    /// [`drain_models`](Self::drain_models) and wakes the UI like a run event.
+    pub fn fetch_models(
+        &mut self,
+        provider: &str,
+        lookup: BoxFuture<'static, Result<Vec<String>, AgentError>>,
+    ) -> Result<(), AgentError> {
+        let (tx, notify, provider) = (self.lookups_tx.clone(), self.notify.clone(), provider.to_owned());
+        self.runtime()?.spawn(async move {
+            let models = lookup.await;
+            if tx.send(ModelList { provider, models }).is_ok() {
+                notify();
+            }
+        });
+        Ok(())
+    }
+
+    /// Takes every model list that has arrived, without blocking.
+    pub fn drain_models(&mut self) -> Vec<ModelList> {
+        self.lookups_rx.try_iter().collect()
     }
 
     /// A fresh run id, to reserve a session before [`AgentHost::start`].
@@ -215,6 +254,29 @@ mod tests {
         let run = host.start(request(&host)).unwrap();
         let events = events_until_done(&mut host);
         assert!(matches!(events.last(), Some(AgentEvent::Failed { run: r, .. }) if *r == run));
+    }
+
+    #[test]
+    fn switching_engines_affects_only_new_runs() {
+        let mut host = AgentHost::new(Arc::new(Scripted(Ok(()))));
+        host.set_engine(Arc::new(Scripted(Err(AgentError::Provider("other".into())))));
+        assert_eq!(host.engine_name(), "scripted");
+        host.start(request(&host)).unwrap();
+        assert!(matches!(events_until_done(&mut host).last(), Some(AgentEvent::Failed { .. })));
+    }
+
+    #[test]
+    fn model_lookups_arrive_through_drain_models() {
+        let mut host = AgentHost::new(Arc::new(Scripted(Ok(()))));
+        host.fetch_models("p", Box::pin(async { Ok(vec!["m1".to_owned()]) })).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut lists = Vec::new();
+        while lists.is_empty() {
+            assert!(Instant::now() < deadline, "the lookup never arrived");
+            lists = host.drain_models();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(lists, [ModelList { provider: "p".into(), models: Ok(vec!["m1".into()]) }]);
     }
 
     #[test]
