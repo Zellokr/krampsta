@@ -177,6 +177,11 @@ const SCENES: &[Scene] = &[
         s.sign_in = SignIn::Failed { provider: "chatgpt".into(), error: error.into() };
     }),
     ("changes-hidden", |s| s.toggle_changes()),
+    // Nothing proposed yet: the changes panel's empty state beside a new session.
+    ("changes-empty", |s| {
+        s.new_session();
+        s.diff = rune_kit::diff::DiffState::new(Vec::new());
+    }),
     ("sidebar-hidden", |s| s.sidebar.toggle()),
     // Signed in and on a real provider: the list shows its groups, the simulated agent hidden.
     ("provider-picker", |s| {

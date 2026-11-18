@@ -20,6 +20,7 @@ pub const STARTING: &str = "krampsta-starting";
 pub const THINKING: &str = "krampsta-thinking";
 pub const CHANGES_TOGGLE: &str = "krampsta-changes-toggle";
 pub const CHANGES: &str = "krampsta-changes";
+pub const CHANGES_EMPTY: &str = "krampsta-changes-empty";
 pub const SETTINGS_PAGE: &str = "krampsta-settings-page";
 pub const SETTINGS_SCROLL: &str = "krampsta-settings-scroll";
 pub const SETTINGS_BACK: &str = "krampsta-settings-back";

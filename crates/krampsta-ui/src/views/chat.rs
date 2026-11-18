@@ -3,10 +3,11 @@
 use std::collections::HashSet;
 
 use krampsta_core::{AgentStatus, MessageRole, Session, ToolCallId};
-use rune::{El, ScrollSpec, col, icon, row, text};
+use rune::{El, ScrollSpec, col, row, text};
 use rune_kit::Kit;
 
 use crate::components::alert::{Alert, Tone};
+use crate::components::empty::Empty;
 use crate::components::{composer, icons, message, shimmer};
 use crate::keys;
 use crate::state::KrampstaApp;
@@ -76,19 +77,10 @@ fn run_error(error: &str, k: &Kit) -> El {
 }
 
 fn empty_state(k: &Kit) -> El {
-    col()
-        .key(keys::EMPTY_STATE)
-        .w_full()
-        .max_w(COLUMN)
-        .pt(120.0)
-        .gap(12.0)
-        .items_center()
-        .child(icon(&icons::KRAMPSTA, 36.0).color(theme::accent(k.dark)))
-        .child(text("What are we building today?").font(k.ty.body_medium).color(k.c.text_base))
-        .child(
-            text("Ask Krampsta to explore the repository, explain code or plan a change.")
-                .font(k.ty.ui)
-                .color(k.c.text_muted)
-                .wrap(),
-        )
+    let empty = Empty::new(&icons::KRAMPSTA, "What are we building today?")
+        .large()
+        .mark_color(theme::accent(k.dark))
+        .description("Ask Krampsta to explore the repository, explain code or plan a change.")
+        .build(k);
+    col().key(keys::EMPTY_STATE).w_full().max_w(COLUMN).pt(120.0).child(empty)
 }

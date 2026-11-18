@@ -29,7 +29,7 @@ Si `fmt --check` falla, ejecuta `cargo fmt --all` y repite.
 bash scripts/snapshots.sh
 ```
 
-Escribe en `assets/screenshots/`: `krampsta` (estado inicial), `empty`, `running`, `tools`
+Escribe en `assets/screenshots/`: `krampsta` (estado inicial), `empty`, `changes-empty` (panel de cambios vacío), `running`, `tools`
 (tarjetas de herramienta: abierta, fallida y en curso), `completed`,
 `failed`, `cancelled`, `settings`, `signed-in`, `sign-in` (diálogo con el código), `sign-in-failed` (el fallo, con «Try again»), `light`,
 `provider-picker`, `model-picker`, `model-error`
