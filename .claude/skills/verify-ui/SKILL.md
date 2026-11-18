@@ -31,7 +31,7 @@ bash scripts/snapshots.sh
 
 Escribe en `assets/screenshots/`: `krampsta` (estado inicial), `empty`, `running`, `tools`
 (tarjetas de herramienta: abierta, fallida y en curso), `completed`,
-`failed`, `cancelled`, `settings`, `signed-in`, `sign-in` (diálogo con el código), `light`,
+`failed`, `cancelled`, `settings`, `signed-in`, `sign-in` (diálogo con el código), `sign-in-failed` (el fallo, con «Try again»), `light`,
 `provider-picker`, `model-picker`, `model-error`
 (selectores abiertos y servidor local caído), `narrow` (800×560) y `send-message` (script real:
 escribe en el composer y pulsa Enter), más `krampsta-tree.json` (árbol de elementos, no versionado).

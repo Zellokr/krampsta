@@ -5,6 +5,7 @@ use rune::{El, TextStyle, Tx, col, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 
 use crate::accounts::SignIn;
+use crate::components::alert::{Alert, Tone};
 use crate::keys;
 use crate::state::KrampstaApp;
 
@@ -54,20 +55,18 @@ pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
         }
         SignIn::Failed { provider, error } => {
             let retry = provider.clone();
-            col()
-                .w_full()
-                .gap(14.0)
-                .child(text(error.clone()).font(k.ty.ui).color(k.c.danger.icon).wrap().selectable(true))
-                .child(
-                    row().child(
-                        Button::new("Try again")
-                            .variant(ButtonVariant::Neutral)
-                            .control_size(ControlSize::Regular)
-                            .on_press(move |s: &mut KrampstaApp| s.start_sign_in(&retry))
-                            .build(k)
-                            .key(keys::SIGN_IN_RETRY),
-                    ),
-                )
+            let again = Button::new("Try again")
+                .variant(ButtonVariant::Neutral)
+                .control_size(ControlSize::Regular)
+                .on_press(move |s: &mut KrampstaApp| s.start_sign_in(&retry))
+                .build(k)
+                .key(keys::SIGN_IN_RETRY);
+            col().w_full().child(
+                Alert::new(Tone::Danger, "The sign-in didn't go through")
+                    .description(error.clone())
+                    .action(again)
+                    .build(k),
+            )
         }
     };
     Dialog::new(keys::SIGN_IN, format!("Sign in to {label}"))

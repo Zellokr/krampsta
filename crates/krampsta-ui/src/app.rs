@@ -170,6 +170,12 @@ const SCENES: &[Scene] = &[
         let code = DeviceCode { url: "https://github.com/login/device".into(), code: "ABCD-1234".into() };
         s.sign_in = SignIn::Code { provider: "copilot".into(), code };
     }),
+    ("sign-in-failed", |s| {
+        stage_accounts(s, false);
+        s.screen = Screen::Settings;
+        let error = "The code expired before it was entered. Ask for a new one and enter it within 15 minutes.";
+        s.sign_in = SignIn::Failed { provider: "chatgpt".into(), error: error.into() };
+    }),
     ("changes-hidden", |s| s.toggle_changes()),
     ("sidebar-hidden", |s| s.sidebar.toggle()),
     // Signed in and on a real provider: the list shows its groups, the simulated agent hidden.

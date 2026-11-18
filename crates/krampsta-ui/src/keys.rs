@@ -15,6 +15,9 @@ pub const SEND: &str = "krampsta-send";
 pub const STOP: &str = "krampsta-stop";
 pub const STATUS: &str = "krampsta-agent-status";
 pub const RUN_ERROR: &str = "krampsta-run-error";
+/// The shimmering "working" lines: before the reply starts, and while it has no text yet.
+pub const STARTING: &str = "krampsta-starting";
+pub const THINKING: &str = "krampsta-thinking";
 pub const CHANGES_TOGGLE: &str = "krampsta-changes-toggle";
 pub const CHANGES: &str = "krampsta-changes";
 pub const SETTINGS_PAGE: &str = "krampsta-settings-page";

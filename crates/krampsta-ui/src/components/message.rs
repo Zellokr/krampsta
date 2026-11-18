@@ -7,7 +7,7 @@ use krampsta_core::{Message, MessageRole, ToolCallId};
 use rune::{El, col, icon, row, text};
 use rune_kit::{Kit, Markdown, Spinner};
 
-use crate::components::{icons, tool_card};
+use crate::components::{icons, shimmer, tool_card};
 use crate::keys;
 use crate::theme;
 
@@ -62,5 +62,5 @@ fn thinking(k: &Kit) -> El {
         .gap(8.0)
         .items_center()
         .child(Spinner::new().size(12.0).color(theme::accent(k.dark)).build(k))
-        .child(text("Thinking…").font(k.ty.ui).color(k.c.text_muted))
+        .child(shimmer::view(keys::THINKING, "Thinking…", k.ty.ui, k.c.text_faint, k.c.text_base))
 }

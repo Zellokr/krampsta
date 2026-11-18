@@ -6,7 +6,8 @@ use krampsta_core::{AgentStatus, MessageRole, Session, ToolCallId};
 use rune::{El, ScrollSpec, col, icon, row, text};
 use rune_kit::Kit;
 
-use crate::components::{composer, icons, message};
+use crate::components::alert::{Alert, Tone};
+use crate::components::{composer, icons, message, shimmer};
 use crate::keys;
 use crate::state::KrampstaApp;
 use crate::theme;
@@ -67,24 +68,11 @@ fn waiting(k: &Kit) -> El {
         .gap(8.0)
         .items_center()
         .child(rune_kit::Spinner::new().size(12.0).color(theme::accent(k.dark)).build(k))
-        .child(text("Starting…").font(k.ty.ui).color(k.c.text_muted))
+        .child(shimmer::view(keys::STARTING, "Starting…", k.ty.ui, k.c.text_faint, k.c.text_base))
 }
 
 fn run_error(error: &str, k: &Kit) -> El {
-    let c = &k.c.danger;
-    col()
-        .key(keys::RUN_ERROR)
-        .role("alert")
-        .label("Run failed")
-        .w_full()
-        .gap(4.0)
-        .px(14.0)
-        .py(10.0)
-        .radius(k.radius.md)
-        .fill(k.c.layer_01)
-        .border(1.0, c.icon)
-        .child(text("The run failed").font(k.ty.ui_medium).color(k.c.text_base))
-        .child(text(error.to_owned()).font(k.ty.small).color(c.icon).wrap().selectable(true))
+    Alert::new(Tone::Danger, "The run failed").description(error).build(k).key(keys::RUN_ERROR)
 }
 
 fn empty_state(k: &Kit) -> El {
