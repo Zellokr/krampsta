@@ -12,7 +12,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   proveedores y modelos hay, cómo construir un motor), `MockAgent`, `MockCatalog`. No depende de Rune.
 - `crates/krune-providers` — motores reales: `sse` (parser), `http` (cliente `reqwest`, petición
   SSE cancelable, `HttpError`), `access` (URL + cabeceras por petición: clave fija o token de
-  cuenta), `OpenAiEngine`, `list_models`, `copilot` (device flow, token de Copilot), `accounts`
+  cuenta), `OpenAiEngine`, `responses` (motor de la API Responses), `list_models`, `copilot`
+  (device flow, token de Copilot), `chatgpt` (código de dispositivo de OpenAI, refresh), `accounts`
   (iniciar/cerrar sesión), `secrets` (llavero del sistema) y `Catalog`. No depende de Rune.
 - `crates/krune-ui` — `KruneApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`
   (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
@@ -72,7 +73,8 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   `crates/krune-providers/tests/` con un stream grabado real, no sólo con JSON inventado.
 - Las claves nunca se imprimen: `Debug` a mano en las configs que las llevan; cabeceras con
   `access::bearer` (marcadas como sensibles).
-- Cuentas (Copilot…): lo que dependa de APIs no públicas va en su propio módulo (`copilot.rs`).
+- Cuentas (ChatGPT, Copilot): lo que dependa de APIs no públicas va en su propio módulo
+  (`chatgpt.rs`, `copilot.rs`). Un refresh token rotado se guarda en el llavero al momento.
   En el llavero sólo secretos pequeños y duraderos (Windows limita cada entrada a 2560 bytes);
   los tokens de corta duración se renuevan en memoria. Las llamadas al llavero desde async van
   por `spawn_blocking`. Los tests usan `MemoryStore` y un servidor falso, nunca el llavero real.

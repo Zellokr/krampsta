@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 
 use krune_agent::{Account, AgentHost, DeviceCode, EngineCatalog, RunRequest};
 use krune_core::{AgentEvent, Message, MessageId, SessionId};
-use krune_providers::Catalog;
 use krune_providers::copilot::GitHub;
 use krune_providers::secrets::{MemoryStore, SecretStore};
+use krune_providers::{Catalog, Hosts};
 
 /// Every request the fake server saw: "METHOD /path" and its lower-cased headers.
 type Seen = Arc<Mutex<Vec<(String, String)>>>;
@@ -94,8 +94,8 @@ fn route(line: &str, api: &str) -> (String, &'static str) {
 }
 
 fn catalog(base: &str, store: Arc<MemoryStore>) -> Catalog {
-    let github = GitHub { web: base.into(), api: base.into() };
-    Catalog::build(|_| None, store, github).unwrap()
+    let hosts = Hosts { github: GitHub { web: base.into(), api: base.into() }, ..Hosts::default() };
+    Catalog::build(|_| None, store, hosts).unwrap()
 }
 
 fn account(c: &Catalog) -> Option<Account> {

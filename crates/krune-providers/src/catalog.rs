@@ -19,8 +19,8 @@ use krune_agent::{
 };
 
 use crate::ProviderError;
-use crate::accounts::{Accounts, COPILOT};
-use crate::copilot::GitHub;
+use crate::accounts::{Accounts, CHATGPT, COPILOT, Hosts};
+
 use crate::http;
 use crate::openai::{self, DEFAULT_BASE_URL, OpenAiConfig, OpenAiEngine};
 use crate::secrets::{KeyringStore, SecretStore};
@@ -66,18 +66,18 @@ pub struct Catalog {
 impl Catalog {
     /// The catalog the environment describes, with the sessions saved in the system keychain.
     pub fn from_env() -> Result<Self, ProviderError> {
-        Self::build(|name| std::env::var(name).ok(), Arc::new(KeyringStore), GitHub::default())
+        Self::build(|name| std::env::var(name).ok(), Arc::new(KeyringStore), Hosts::default())
     }
 
-    /// A catalog over chosen variables, secret store and GitHub hosts (for tests).
+    /// A catalog over chosen variables, secret store and account hosts (for tests).
     pub fn build(
         var: impl Fn(&str) -> Option<String>,
         store: Arc<dyn SecretStore>,
-        github: GitHub,
+        hosts: Hosts,
     ) -> Result<Self, ProviderError> {
         let var = |name: &str| var(name).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
         let client = http::client()?;
-        let accounts = Accounts::load(client.clone(), store, github);
+        let accounts = Accounts::load(client.clone(), store, hosts);
         let key = var("OPENAI_API_KEY");
         let mut servers = vec![Server {
             provider: Provider {
@@ -133,6 +133,7 @@ impl Catalog {
             Some(p) => return Err(ProviderError::Unknown(p)),
             None if ready("custom") => "custom".into(),
             None if ready("openai") => "openai".into(),
+            None if accounts.signed_in(CHATGPT) => CHATGPT.into(),
             None if accounts.signed_in(COPILOT) => COPILOT.into(),
             None => MOCK_PROVIDER.into(),
         };
@@ -248,7 +249,7 @@ mod tests {
     fn catalog(pairs: &[(&str, &str)]) -> Result<Catalog, ProviderError> {
         let pairs: Vec<(String, String)> = pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
         let var = move |name: &str| pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
-        Catalog::build(var, Arc::new(crate::secrets::MemoryStore::default()), GitHub::default())
+        Catalog::build(var, Arc::new(crate::secrets::MemoryStore::default()), Hosts::default())
     }
 
     fn ids(c: &Catalog) -> Vec<String> {
@@ -258,7 +259,7 @@ mod tests {
     #[test]
     fn with_nothing_configured_the_simulated_agent_is_selected() {
         let c = catalog(&[]).unwrap();
-        assert_eq!(ids(&c), ["openai", "copilot", "llamacpp", "ollama", "lmstudio", "mock"]);
+        assert_eq!(ids(&c), ["openai", "chatgpt", "copilot", "llamacpp", "ollama", "lmstudio", "mock"]);
         assert_eq!(c.initial(), MockCatalog::default().initial());
         assert_eq!(c.providers()[0].missing.as_deref(), Some("needs OPENAI_API_KEY"));
         let err = c.engine("openai", "gpt-4o-mini").err().unwrap();
@@ -272,9 +273,9 @@ mod tests {
         assert_eq!(c.engine("openai", "gpt-4o").unwrap().name(), "OpenAI · gpt-4o");
 
         let c = catalog(&[("OPENAI_BASE_URL", "http://gpu-box:8000/v1"), ("KRUNE_MODEL", "qwen3")]).unwrap();
-        assert_eq!(ids(&c), ["openai", "copilot", "custom", "llamacpp", "ollama", "lmstudio", "mock"]);
+        assert_eq!(ids(&c), ["openai", "chatgpt", "copilot", "custom", "llamacpp", "ollama", "lmstudio", "mock"]);
         assert_eq!(c.initial(), Selection { provider: "custom".into(), model: Some("qwen3".into()) });
-        assert_eq!(c.providers()[2].label, "OpenAI-compatible (gpu-box:8000)");
+        assert_eq!(c.providers()[3].label, "OpenAI-compatible (gpu-box:8000)");
     }
 
     #[test]

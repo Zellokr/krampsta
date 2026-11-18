@@ -156,15 +156,15 @@ const SCENES: &[Scene] = &[
         apply(s, &[AgentEvent::Cancelled { run }]);
     }),
     ("settings", |s| {
-        stage_copilot(s, Account::SignedOut);
+        stage_accounts(s, false);
         s.screen = Screen::Settings;
     }),
     ("signed-in", |s| {
-        stage_copilot(s, Account::SignedIn { user: "octocat".into() });
+        stage_accounts(s, true);
         s.screen = Screen::Settings;
     }),
     ("sign-in", |s| {
-        stage_copilot(s, Account::SignedOut);
+        stage_accounts(s, false);
         s.screen = Screen::Settings;
         let code = DeviceCode { url: "https://github.com/login/device".into(), code: "ABCD-1234".into() };
         s.sign_in = SignIn::Code { provider: "copilot".into(), code };
@@ -245,15 +245,15 @@ fn scene_failed(s: &mut KruneApp) {
     );
 }
 
-/// The providers of an environment without keys and not signed in to Copilot, whatever the
+/// The providers of an environment without keys and signed in to no account, whatever the
 /// real environment and keychain hold, so the snapshot is the same on every machine.
 fn stage_providers(s: &mut KruneApp) {
     s.new_session();
-    stage_copilot(s, Account::SignedOut);
+    stage_accounts(s, false);
 }
 
-/// [`stage_providers`]'s list with Copilot in the given state.
-fn stage_copilot(s: &mut KruneApp, account: Account) {
+/// [`stage_providers`]'s list, with the ChatGPT and Copilot accounts signed in or not.
+fn stage_accounts(s: &mut KruneApp, signed_in: bool) {
     let provider = |id: &str, label: &str, missing: Option<&str>| Provider {
         id: id.into(),
         label: label.into(),
@@ -261,14 +261,15 @@ fn stage_copilot(s: &mut KruneApp, account: Account) {
         missing: missing.map(str::to_owned),
         account: None,
     };
-    let copilot = Provider {
-        missing: (account == Account::SignedOut).then(|| "needs signing in (Settings › Accounts)".into()),
-        account: Some(account),
-        ..provider("copilot", "GitHub Copilot", None)
+    let account = |id: &str, label: &str, user: &str| Provider {
+        missing: (!signed_in).then(|| "needs signing in (Settings › Accounts)".into()),
+        account: Some(if signed_in { Account::SignedIn { user: user.into() } } else { Account::SignedOut }),
+        ..provider(id, label, None)
     };
     s.engine.providers = vec![
         provider("openai", "OpenAI", Some("needs OPENAI_API_KEY")),
-        copilot,
+        account("chatgpt", "ChatGPT", "me@example.com"),
+        account("copilot", "GitHub Copilot", "octocat"),
         provider("llamacpp", "llama.cpp", None),
         provider("ollama", "Ollama", None),
         provider("lmstudio", "LM Studio", None),

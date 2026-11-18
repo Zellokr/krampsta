@@ -111,6 +111,7 @@ modelos se leen del propio servidor (`GET /v1/models`). Los proveedores disponib
 | Proveedor | Servidor | Necesita |
 | --- | --- | --- |
 | OpenAI | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| ChatGPT | el backend de Codex de tu cuenta (API Responses) | tu plan de ChatGPT: *Settings › Accounts › Sign in* |
 | GitHub Copilot | la API de Copilot de tu cuenta | tu suscripción: *Settings › Accounts › Sign in* |
 | OpenAI-compatible | `OPENAI_BASE_URL` (sólo aparece si está definida) | `OPENAI_API_KEY`, si el servidor la pide |
 | llama.cpp | `http://127.0.0.1:9931/v1` (el puerto de `llama-menu.bat`; otro con `LLAMA_CPP_URL`) | `llama-server` en marcha |
@@ -118,11 +119,11 @@ modelos se leen del propio servidor (`GET /v1/models`). Los proveedores disponib
 | LM Studio | `http://localhost:1234/v1` | el servidor de LM Studio en marcha |
 | Simulated | el `MockAgent` | nada |
 
-Las claves se leen del entorno, nunca del repositorio. Las cuentas (Copilot) se inician en la app
+Las claves se leen del entorno, nunca del repositorio. Las cuentas (ChatGPT, Copilot) se inician en la app
 con un código de dispositivo: Krune muestra el código, abre la página y guarda la sesión en el
 llavero del sistema (Administrador de credenciales en Windows). Elegir en el selector un proveedor
 de cuenta sin sesión abre el inicio de sesión. Para elegir lo que sale seleccionado al
-abrir: `KRUNE_PROVIDER` (`openai`, `copilot`, `custom`, `llamacpp`, `ollama`, `lmstudio` o `mock`) y
+abrir: `KRUNE_PROVIDER` (`openai`, `chatgpt`, `copilot`, `custom`, `llamacpp`, `ollama`, `lmstudio` o `mock`) y
 `KRUNE_MODEL`. Con llama.cpp el desplegable muestra el nombre del `.gguf` cargado.
 Sin nada definido, arranca con el simulado. Con Ollama, por ejemplo:
 
