@@ -16,3 +16,7 @@ thiserror.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Only for the fake catalogs in tests (a sign-in that takes a moment).
+tokio.workspace = true

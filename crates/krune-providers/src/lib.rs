@@ -9,9 +9,13 @@
 //!
 //! Credentials come from the environment, never from the repository.
 
+pub mod access;
+mod accounts;
 mod catalog;
+pub mod copilot;
 pub mod http;
 mod openai;
+pub mod secrets;
 pub mod sse;
 
 pub use catalog::{Catalog, DEFAULT_OPENAI_MODEL, LLAMA_CPP_URL, LM_STUDIO_URL, OLLAMA_URL};
@@ -21,7 +25,7 @@ pub use openai::{DEFAULT_BASE_URL, OpenAiConfig, OpenAiEngine, list_models};
 /// Why the configured provider could not be set up.
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
-    #[error("unknown KRUNE_PROVIDER `{0}` (expected openai, custom, llamacpp, ollama, lmstudio or mock)")]
+    #[error("unknown KRUNE_PROVIDER `{0}` (expected openai, copilot, custom, llamacpp, ollama, lmstudio or mock)")]
     Unknown(String),
     #[error(transparent)]
     Http(#[from] HttpError),

@@ -10,6 +10,7 @@
 //! Views are pure functions of [`KruneApp`]: no I/O, no blocking, no work beyond building
 //! elements. Agent events arrive in `poll` (woken by the agent host's notifier).
 
+pub mod accounts;
 pub mod app;
 pub mod components;
 pub mod keys;

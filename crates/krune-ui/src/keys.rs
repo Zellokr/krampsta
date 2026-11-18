@@ -18,6 +18,7 @@ pub const RUN_ERROR: &str = "krune-run-error";
 pub const CHANGES_TOGGLE: &str = "krune-changes-toggle";
 pub const CHANGES: &str = "krune-changes";
 pub const SETTINGS_PAGE: &str = "krune-settings-page";
+pub const SETTINGS_SCROLL: &str = "krune-settings-scroll";
 pub const SETTINGS_BACK: &str = "krune-settings-back";
 pub const SETTING_DARK: &str = "krune-setting-dark";
 pub const SETTING_CHANGES: &str = "krune-setting-changes";
@@ -36,3 +37,14 @@ pub const COMPOSER_PROVIDER: &str = "krune-composer-provider";
 pub const COMPOSER_MODEL: &str = "krune-composer-model";
 pub const SETTINGS_PROVIDER: &str = "krune-settings-provider";
 pub const SETTINGS_MODEL: &str = "krune-settings-model";
+
+/// The sign-in dialog and its parts.
+pub const SIGN_IN: &str = "krune-sign-in";
+pub const SIGN_IN_CODE: &str = "krune-sign-in-code";
+pub const SIGN_IN_OPEN: &str = "krune-sign-in-open";
+pub const SIGN_IN_RETRY: &str = "krune-sign-in-retry";
+
+/// The sign-in (or sign-out) button of an account provider in settings.
+pub fn account(provider: &str) -> String {
+    format!("krune-account-{provider}")
+}

@@ -11,11 +11,13 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   notificador, cambio de motor, listas de modelos en segundo plano), `EngineCatalog` (qué
   proveedores y modelos hay, cómo construir un motor), `MockAgent`, `MockCatalog`. No depende de Rune.
 - `crates/krune-providers` — motores reales: `sse` (parser), `http` (cliente `reqwest`, petición
-  SSE cancelable, `HttpError`), `OpenAiEngine`, `list_models` y `Catalog` (proveedores leídos del
-  entorno). No depende de Rune.
+  SSE cancelable, `HttpError`), `access` (URL + cabeceras por petición: clave fija o token de
+  cuenta), `OpenAiEngine`, `list_models`, `copilot` (device flow, token de Copilot), `accounts`
+  (iniciar/cerrar sesión), `secrets` (llavero del sistema) y `Catalog`. No depende de Rune.
 - `crates/krune-ui` — `KruneApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`
   (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
-  (piezas), `theme.rs` (único sitio de colores), `keys.rs` (claves estables), `sample.rs` (datos
+  (piezas), `accounts.rs` (diálogo de inicio de sesión), `theme.rs` (único sitio de colores),
+  `keys.rs` (claves estables), `sample.rs` (datos
   de ejemplo).
 - `crates/krune-app` — binario `krune`; sólo construye el catálogo y arranca.
 - Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
@@ -68,7 +70,12 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
 - Peticiones HTTP siempre con `http::client()` y `http::stream_sse` (cancelación y errores
   legibles ya resueltos). Cada motor se prueba contra el servidor falso de
   `crates/krune-providers/tests/` con un stream grabado real, no sólo con JSON inventado.
-- Las claves nunca se imprimen: `Debug` a mano en las configs que las llevan.
+- Las claves nunca se imprimen: `Debug` a mano en las configs que las llevan; cabeceras con
+  `access::bearer` (marcadas como sensibles).
+- Cuentas (Copilot…): lo que dependa de APIs no públicas va en su propio módulo (`copilot.rs`).
+  En el llavero sólo secretos pequeños y duraderos (Windows limita cada entrada a 2560 bytes);
+  los tokens de corta duración se renuevan en memoria. Las llamadas al llavero desde async van
+  por `spawn_blocking`. Los tests usan `MemoryStore` y un servidor falso, nunca el llavero real.
 
 ## Código
 

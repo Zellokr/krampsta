@@ -1,9 +1,11 @@
 //! Settings: a full-window page in the same frame as the chat.
 
-use rune::{Cx, El, Tx, col, row, text};
+use krune_agent::Provider;
+use rune::{Cx, El, ScrollSpec, Tx, col, row, text};
 use rune_kit::shell::Page;
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, SegmentedControl, Switch};
 
+use crate::accounts::signed_in_user;
 use crate::components::engine_picker::{self, Place};
 use crate::keys;
 use crate::state::{KruneApp, Screen};
@@ -32,19 +34,31 @@ pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit, layer: &mut Vec<El>) -
     let model_hint = warning.as_deref().unwrap_or("Used for new messages; a running reply keeps its model.");
     let version = text(concat!("Krune ", env!("CARGO_PKG_VERSION"))).font(k.ty.ui).color(k.c.text_muted);
 
-    let body = col().w_full().h_full().padding(28.0).items_center().child(
-        col()
-            .w_full()
-            .max_w(620.0)
-            .gap(12.0)
-            .child(text("General").font(k.ty.small_medium).color(k.c.text_faint))
-            .child(setting(k, "Appearance", "Krune uses the dark theme by default.", appearance))
-            .child(setting(k, "Changes panel", "Show file changes beside the conversation.", changes))
-            .child(text("Agent").font(k.ty.small_medium).color(k.c.text_faint).mt(12.0))
-            .child(setting(k, "Provider", "Ollama and LM Studio run on this computer.", provider))
-            .child(setting(k, "Model", model_hint, model))
-            .child(setting(k, "About", "Native AI Coding Agent, built with Rust and Rune.", version)),
-    );
+    let mut column = col()
+        .w_full()
+        .max_w(620.0)
+        .gap(12.0)
+        .child(section(k, "General"))
+        .child(setting(k, "Appearance", "Krune uses the dark theme by default.", appearance))
+        .child(setting(k, "Changes panel", "Show file changes beside the conversation.", changes))
+        .child(section(k, "Agent").mt(12.0))
+        .child(setting(k, "Provider", "Ollama and LM Studio run on this computer.", provider))
+        .child(setting(k, "Model", model_hint, model));
+    if s.account_providers().next().is_some() {
+        column = column.child(section(k, "Accounts").mt(12.0));
+        for p in s.account_providers() {
+            column = column.child(account(k, p));
+        }
+    }
+    column = column.child(setting(k, "About", "Native AI Coding Agent, built with Rust and Rune.", version));
+    // Scrolls when the window is too short for every row.
+    let body = col()
+        .key(keys::SETTINGS_SCROLL)
+        .w_full()
+        .h_full()
+        .min_h(0.0)
+        .scroll(ScrollSpec { stick_bottom: false })
+        .child(col().w_full().padding(28.0).items_center().child(column));
     let back = Button::new("Back")
         .variant(ButtonVariant::Ghost)
         .control_size(ControlSize::Regular)
@@ -58,6 +72,29 @@ pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit, layer: &mut Vec<El>) -
         .frame_inset(8.0)
         .toolbar_in_panel()
         .build(k)
+}
+
+fn section(k: &Kit, title: &str) -> El {
+    text(title.to_owned()).font(k.ty.small_medium).color(k.c.text_faint)
+}
+
+/// A provider used through an account: who is signed in, and the button to sign in or out.
+fn account(k: &Kit, p: &Provider) -> El {
+    let id = p.id.clone();
+    let (description, button) = match signed_in_user(p) {
+        Some(user) => (
+            format!("Signed in as {user}."),
+            Button::new("Sign out").variant(ButtonVariant::Neutral).on_press(move |s: &mut KruneApp| s.sign_out(&id)),
+        ),
+        None => (
+            "Use your own subscription: Krune opens the sign-in page for you.".to_owned(),
+            Button::new("Sign in")
+                .variant(ButtonVariant::Contrast)
+                .on_press(move |s: &mut KruneApp| s.start_sign_in(&id)),
+        ),
+    };
+    let control = button.control_size(ControlSize::Regular).build(k).key(keys::account(&p.id));
+    setting(k, &p.label, &description, control)
 }
 
 fn setting(k: &Kit, title: &str, description: &str, control: El) -> El {

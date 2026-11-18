@@ -7,6 +7,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use krune_core::{AgentEvent, IdGen, RunEvent, RunId};
 use tokio_util::sync::CancellationToken;
 
+use crate::catalog::{DeviceCode, LoginPrompt};
 use crate::engine::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
 
 /// Called from a worker thread after each event is queued, to wake the UI so it drains them.
@@ -28,6 +29,10 @@ pub struct AgentHost {
     ids: IdGen,
     lookups_tx: Sender<ModelList>,
     lookups_rx: Receiver<ModelList>,
+    accounts_tx: Sender<AccountEvent>,
+    accounts_rx: Receiver<AccountEvent>,
+    /// The sign-in in progress, if any (one at a time).
+    sign_in: Option<CancellationToken>,
 }
 
 /// The answer to [`AgentHost::fetch_models`].
@@ -37,10 +42,30 @@ pub struct ModelList {
     pub models: Result<Vec<String>, AgentError>,
 }
 
+/// What a sign-in or sign-out reports, through [`AgentHost::drain_accounts`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AccountEvent {
+    /// The sign-in has a code for the user to enter.
+    Code {
+        provider: String,
+        code: DeviceCode,
+    },
+    /// The sign-in ended: the account's name, or why not (`Cancelled` when the user gave up).
+    SignedIn {
+        provider: String,
+        result: Result<String, AgentError>,
+    },
+    SignedOut {
+        provider: String,
+        result: Result<(), AgentError>,
+    },
+}
+
 impl AgentHost {
     pub fn new(engine: Arc<dyn AgentEngine>) -> Self {
         let (events_tx, events_rx) = channel();
         let (lookups_tx, lookups_rx) = channel();
+        let (accounts_tx, accounts_rx) = channel();
         AgentHost {
             engine,
             runtime: None,
@@ -51,6 +76,9 @@ impl AgentHost {
             ids: IdGen::new(),
             lookups_tx,
             lookups_rx,
+            accounts_tx,
+            accounts_rx,
+            sign_in: None,
         }
     }
 
@@ -88,6 +116,69 @@ impl AgentHost {
     /// Takes every model list that has arrived, without blocking.
     pub fn drain_models(&mut self) -> Vec<ModelList> {
         self.lookups_rx.try_iter().collect()
+    }
+
+    /// Starts a device sign-in in the background, replacing (cancelling) one already going.
+    /// `login` receives the prompt to call with the code (a catalog's `login`). Its code, then
+    /// its outcome, arrive through [`drain_accounts`](Self::drain_accounts).
+    pub fn sign_in(
+        &mut self,
+        provider: &str,
+        login: impl FnOnce(LoginPrompt) -> BoxFuture<'static, Result<String, AgentError>>,
+    ) -> Result<(), AgentError> {
+        self.cancel_sign_in();
+        let (tx, notify) = (self.accounts_tx.clone(), self.notify.clone());
+        let send = move |event: AccountEvent| {
+            if tx.send(event).is_ok() {
+                notify();
+            }
+        };
+        let id = provider.to_owned();
+        let prompt_send = send.clone();
+        let prompt: LoginPrompt = Arc::new(move |code| prompt_send(AccountEvent::Code { provider: id.clone(), code }));
+        let work = login(prompt);
+        let cancel = CancellationToken::new();
+        let (token, provider) = (cancel.clone(), provider.to_owned());
+        self.runtime()?.spawn(async move {
+            let result = tokio::select! {
+                biased;
+                () = token.cancelled() => Err(AgentError::Cancelled),
+                result = work => result,
+            };
+            send(AccountEvent::SignedIn { provider, result });
+        });
+        self.sign_in = Some(cancel);
+        Ok(())
+    }
+
+    /// Stops the sign-in in progress; it still reports `SignedIn` with `Err(Cancelled)`.
+    pub fn cancel_sign_in(&mut self) -> bool {
+        self.sign_in.take().map(|t| t.cancel()).is_some()
+    }
+
+    /// Runs `logout` (a catalog's) in the background; reports `SignedOut`.
+    pub fn sign_out(
+        &mut self,
+        provider: &str,
+        logout: BoxFuture<'static, Result<(), AgentError>>,
+    ) -> Result<(), AgentError> {
+        let (tx, notify, provider) = (self.accounts_tx.clone(), self.notify.clone(), provider.to_owned());
+        self.runtime()?.spawn(async move {
+            let result = logout.await;
+            if tx.send(AccountEvent::SignedOut { provider, result }).is_ok() {
+                notify();
+            }
+        });
+        Ok(())
+    }
+
+    /// Takes every account event that has arrived, without blocking.
+    pub fn drain_accounts(&mut self) -> Vec<AccountEvent> {
+        let events: Vec<AccountEvent> = self.accounts_rx.try_iter().collect();
+        if events.iter().any(|e| matches!(e, AccountEvent::SignedIn { .. })) {
+            self.sign_in = None;
+        }
+        events
     }
 
     /// A fresh run id, to reserve a session before [`AgentHost::start`].
@@ -167,6 +258,7 @@ impl AgentHost {
 
 impl Drop for AgentHost {
     fn drop(&mut self) {
+        self.cancel_sign_in();
         for token in self.runs.values() {
             token.cancel();
         }

@@ -11,6 +11,7 @@ use rune::TextEdit;
 use rune_kit::PaneState;
 use rune_kit::diff::DiffState;
 
+use crate::accounts::SignIn;
 use crate::picker::EngineChoice;
 use crate::sample;
 use crate::theme::ThemeChoice;
@@ -50,6 +51,8 @@ pub struct KruneApp {
     pub diff: DiffState,
     /// The provider and model pickers.
     pub engine: EngineChoice,
+    /// The account sign-in dialog.
+    pub sign_in: SignIn,
     pub(crate) catalog: Arc<dyn EngineCatalog>,
     pub(crate) agent: AgentHost,
     ids: IdGen,
@@ -82,6 +85,7 @@ impl KruneApp {
             changes: PaneState::new(440.0).range(320.0, 760.0),
             diff: sample::diff(),
             engine,
+            sign_in: SignIn::Closed,
             catalog,
             agent,
             ids,
@@ -178,8 +182,10 @@ impl KruneApp {
 
     /// Applies every agent event that has arrived. True when anything visible changed.
     pub fn pump(&mut self) -> bool {
+        let accounts = self.agent.drain_accounts();
         let lists = self.agent.drain_models();
-        let mut changed = self.land_models(lists);
+        let mut changed = self.land_accounts(accounts);
+        changed |= self.land_models(lists);
         for e in self.agent.drain() {
             if let Some(s) = self.session_mut(e.session) {
                 changed |= s.apply(&e.event);

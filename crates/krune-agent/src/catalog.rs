@@ -18,7 +18,30 @@ pub struct Provider {
     pub default_model: Option<String>,
     /// Why it can't be used yet ("needs OPENAI_API_KEY"); `None` when it is ready.
     pub missing: Option<String>,
+    /// For providers used through a personal account (GitHub Copilot, a ChatGPT plan): whether
+    /// the user is signed in. `None` for providers without accounts.
+    pub account: Option<Account>,
 }
+
+/// The sign-in state of a provider that works through an account.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Account {
+    SignedOut,
+    /// `user` names the account ("octocat", "me@example.com").
+    SignedIn {
+        user: String,
+    },
+}
+
+/// What a device sign-in asks the user to do: open `url` and type `code`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeviceCode {
+    pub url: String,
+    pub code: String,
+}
+
+/// Called by a sign-in once it has a code for the user (from the host's runtime).
+pub type LoginPrompt = Arc<dyn Fn(DeviceCode) + Send + Sync>;
 
 /// A provider and one of its models.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -40,6 +63,21 @@ pub trait EngineCatalog: Send + Sync + 'static {
 
     /// The models `provider` offers right now (may ask the server). Runs on the host's runtime.
     fn models(&self, provider: &str) -> BoxFuture<'static, Result<Vec<String>, AgentError>>;
+
+    /// Signs in to `provider`'s account with a device code: calls `prompt` once the code is
+    /// known, then waits for the user to approve it, stores the credentials and resolves to the
+    /// account's name. Runs on the host's runtime; the host cancels it by dropping it.
+    fn login(&self, provider: &str, prompt: LoginPrompt) -> BoxFuture<'static, Result<String, AgentError>> {
+        let _ = prompt;
+        let error = AgentError::Provider(format!("`{provider}` has no account to sign in to"));
+        Box::pin(async move { Err(error) })
+    }
+
+    /// Forgets `provider`'s stored credentials.
+    fn logout(&self, provider: &str) -> BoxFuture<'static, Result<(), AgentError>> {
+        let _ = provider;
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// The simulated agent's id and its one model.
@@ -64,6 +102,7 @@ impl MockCatalog {
             label: "Simulated".into(),
             default_model: Some(MOCK_MODEL.into()),
             missing: None,
+            account: None,
         }
     }
 

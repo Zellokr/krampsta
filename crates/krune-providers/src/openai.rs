@@ -7,6 +7,7 @@ use krune_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
 use krune_core::{Message, MessageRole};
 use serde::{Deserialize, Serialize};
 
+use crate::access::{Access, StaticAccess};
 use crate::http::{self, Flow, HttpError};
 use crate::sse::SseEvent;
 
@@ -26,10 +27,6 @@ impl OpenAiConfig {
     fn url(&self, path: &str) -> String {
         format!("{}/{path}", self.base_url.trim_end_matches('/'))
     }
-
-    fn endpoint(&self) -> String {
-        self.url("chat/completions")
-    }
 }
 
 impl std::fmt::Debug for OpenAiConfig {
@@ -44,23 +41,30 @@ impl std::fmt::Debug for OpenAiConfig {
 }
 
 pub struct OpenAiEngine {
-    config: OpenAiConfig,
+    access: Arc<dyn Access>,
+    model: String,
     client: reqwest::Client,
     name: String,
 }
 
 impl OpenAiEngine {
     /// An engine with its own HTTP client, named after the server it talks to.
-    pub fn new(config: OpenAiConfig) -> Result<Self, HttpError> {
+    pub fn new(config: OpenAiConfig) -> Result<Self, AgentError> {
         let label =
             if config.base_url.trim_end_matches('/') == DEFAULT_BASE_URL { "OpenAI" } else { "OpenAI-compatible" };
-        Ok(Self::with_client(config, http::client()?, label))
+        Self::with_client(config, http::client()?, label)
     }
 
-    /// An engine sharing `client` (and its connection pool), shown as "<label> · <model>".
-    pub fn with_client(config: OpenAiConfig, client: reqwest::Client, label: &str) -> Self {
-        let name = format!("{label} · {}", config.model);
-        OpenAiEngine { client, config, name }
+    /// An engine for a fixed server and key, sharing `client` (and its connection pool), shown
+    /// as "<label> · <model>".
+    pub fn with_client(config: OpenAiConfig, client: reqwest::Client, label: &str) -> Result<Self, AgentError> {
+        let access = Arc::new(StaticAccess::new(&config.base_url, config.api_key.as_deref())?);
+        Ok(Self::with_access(access, &config.model, client, label))
+    }
+
+    /// An engine whose server and credentials come from `access` on every request.
+    pub fn with_access(access: Arc<dyn Access>, model: &str, client: reqwest::Client, label: &str) -> Self {
+        OpenAiEngine { access, model: model.to_owned(), client, name: format!("{label} · {model}") }
     }
 }
 
@@ -105,15 +109,20 @@ impl AgentEngine for OpenAiEngine {
 
     fn run(self: Arc<Self>, request: RunRequest, ctx: RunContext) -> BoxFuture<'static, Result<(), AgentError>> {
         Box::pin(async move {
-            let body =
-                ChatRequest { model: &self.config.model, stream: true, messages: wire_messages(&request.history) };
+            let endpoint = tokio::select! {
+                biased;
+                () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
+                endpoint = self.access.endpoint() => endpoint?,
+            };
+            let body = ChatRequest { model: &self.model, stream: true, messages: wire_messages(&request.history) };
             let body = serde_json::to_vec(&body)
                 .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
-            let mut req =
-                self.client.post(self.config.endpoint()).header("content-type", "application/json").body(body);
-            if let Some(key) = &self.config.api_key {
-                req = req.bearer_auth(key);
-            }
+            let req = self
+                .client
+                .post(endpoint.url("chat/completions"))
+                .headers(endpoint.headers)
+                .header("content-type", "application/json")
+                .body(body);
             http::stream_sse(req, &ctx, |event| on_event(&event, &ctx)).await
         })
     }
@@ -203,7 +212,7 @@ mod tests {
     #[test]
     fn endpoints_tolerate_a_trailing_slash() {
         let local = cfg("http://localhost:11434/v1/", None);
-        assert_eq!(local.endpoint(), "http://localhost:11434/v1/chat/completions");
+        assert_eq!(local.url("chat/completions"), "http://localhost:11434/v1/chat/completions");
         assert_eq!(local.url("models"), "http://localhost:11434/v1/models");
     }
 

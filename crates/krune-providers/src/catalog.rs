@@ -14,12 +14,16 @@
 use std::sync::Arc;
 
 use krune_agent::{
-    AgentEngine, AgentError, BoxFuture, EngineCatalog, MOCK_PROVIDER, MockCatalog, MockConfig, Provider, Selection,
+    AgentEngine, AgentError, BoxFuture, EngineCatalog, LoginPrompt, MOCK_PROVIDER, MockCatalog, MockConfig, Provider,
+    Selection,
 };
 
 use crate::ProviderError;
+use crate::accounts::{Accounts, COPILOT};
+use crate::copilot::GitHub;
 use crate::http;
 use crate::openai::{self, DEFAULT_BASE_URL, OpenAiConfig, OpenAiEngine};
+use crate::secrets::{KeyringStore, SecretStore};
 
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-4o-mini";
 pub const OLLAMA_URL: &str = "http://localhost:11434/v1";
@@ -53,19 +57,27 @@ struct Server {
 
 pub struct Catalog {
     servers: Vec<Server>,
+    accounts: Accounts,
     initial: Selection,
     client: reqwest::Client,
     mock: MockConfig,
 }
 
 impl Catalog {
-    /// The catalog the environment describes.
+    /// The catalog the environment describes, with the sessions saved in the system keychain.
     pub fn from_env() -> Result<Self, ProviderError> {
-        Self::from_vars(|name| std::env::var(name).ok())
+        Self::build(|name| std::env::var(name).ok(), Arc::new(KeyringStore), GitHub::default())
     }
 
-    fn from_vars(var: impl Fn(&str) -> Option<String>) -> Result<Self, ProviderError> {
+    /// A catalog over chosen variables, secret store and GitHub hosts (for tests).
+    pub fn build(
+        var: impl Fn(&str) -> Option<String>,
+        store: Arc<dyn SecretStore>,
+        github: GitHub,
+    ) -> Result<Self, ProviderError> {
         let var = |name: &str| var(name).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
+        let client = http::client()?;
+        let accounts = Accounts::load(client.clone(), store, github);
         let key = var("OPENAI_API_KEY");
         let mut servers = vec![Server {
             provider: Provider {
@@ -73,6 +85,7 @@ impl Catalog {
                 label: "OpenAI".into(),
                 default_model: Some(DEFAULT_OPENAI_MODEL.into()),
                 missing: key.is_none().then(|| "needs OPENAI_API_KEY".into()),
+                account: None,
             },
             base_url: DEFAULT_BASE_URL.into(),
             api_key: key.clone(),
@@ -85,6 +98,7 @@ impl Catalog {
                     label: format!("OpenAI-compatible ({})", host_of(&url)),
                     default_model: None,
                     missing: None,
+                    account: None,
                 },
                 base_url: url,
                 api_key: key,
@@ -99,7 +113,13 @@ impl Catalog {
         ];
         for (id, label, base_url, listing) in local {
             servers.push(Server {
-                provider: Provider { id: id.into(), label: label.into(), default_model: None, missing: None },
+                provider: Provider {
+                    id: id.into(),
+                    label: label.into(),
+                    default_model: None,
+                    missing: None,
+                    account: None,
+                },
                 base_url,
                 api_key: None,
                 listing,
@@ -107,19 +127,22 @@ impl Catalog {
         }
 
         let ready = |id: &str| servers.iter().any(|s| s.provider.id == id && s.provider.missing.is_none());
+        let known = |p: &str| p == MOCK_PROVIDER || Accounts::handles(p) || servers.iter().any(|s| s.provider.id == p);
         let provider = match var("KRUNE_PROVIDER").map(|p| p.to_ascii_lowercase()) {
-            Some(p) if p == MOCK_PROVIDER || servers.iter().any(|s| s.provider.id == p) => p,
+            Some(p) if known(&p) => p,
             Some(p) => return Err(ProviderError::Unknown(p)),
             None if ready("custom") => "custom".into(),
             None if ready("openai") => "openai".into(),
+            None if accounts.signed_in(COPILOT) => COPILOT.into(),
             None => MOCK_PROVIDER.into(),
         };
-        let default_model = servers
-            .iter()
-            .find(|s| s.provider.id == provider)
-            .map_or_else(|| MockCatalog::provider().default_model, |s| s.provider.default_model.clone());
+        let default_model = match servers.iter().find(|s| s.provider.id == provider) {
+            Some(s) => s.provider.default_model.clone(),
+            None if provider == MOCK_PROVIDER => MockCatalog::provider().default_model,
+            None => None,
+        };
         let initial = Selection { model: var("KRUNE_MODEL").or(default_model), provider };
-        Ok(Catalog { servers, initial, client: http::client()?, mock: MockConfig::default() })
+        Ok(Catalog { servers, accounts, initial, client, mock: MockConfig::default() })
     }
 
     fn server(&self, id: &str) -> Result<&Server, AgentError> {
@@ -135,8 +158,10 @@ impl Catalog {
 }
 
 impl EngineCatalog for Catalog {
+    /// OpenAI first, then the account providers, the other servers and the simulated agent.
     fn providers(&self) -> Vec<Provider> {
         let mut out: Vec<Provider> = self.servers.iter().map(|s| s.provider.clone()).collect();
+        out.splice(1..1, self.accounts.providers());
         out.push(MockCatalog::provider());
         out
     }
@@ -149,18 +174,32 @@ impl EngineCatalog for Catalog {
         if provider == MOCK_PROVIDER {
             return MockCatalog::engine_with(self.mock, model);
         }
+        if Accounts::handles(provider) {
+            return self.accounts.engine(provider, model);
+        }
         let server = self.server(provider)?;
         if let Some(missing) = &server.provider.missing {
             return Err(AgentError::Provider(format!("{} {missing}", server.provider.label)));
         }
         let engine =
-            OpenAiEngine::with_client(Self::config(server, model), self.client.clone(), &server.provider.label);
+            OpenAiEngine::with_client(Self::config(server, model), self.client.clone(), &server.provider.label)?;
         Ok(Arc::new(engine))
+    }
+
+    fn login(&self, provider: &str, prompt: LoginPrompt) -> BoxFuture<'static, Result<String, AgentError>> {
+        self.accounts.login(provider, prompt)
+    }
+
+    fn logout(&self, provider: &str) -> BoxFuture<'static, Result<(), AgentError>> {
+        self.accounts.logout(provider)
     }
 
     fn models(&self, provider: &str) -> BoxFuture<'static, Result<Vec<String>, AgentError>> {
         if provider == MOCK_PROVIDER {
             return MockCatalog::default().models(provider);
+        }
+        if Accounts::handles(provider) {
+            return self.accounts.models(provider);
         }
         let server = match self.server(provider) {
             Ok(s) if s.provider.missing.is_none() => s.clone(),
@@ -208,7 +247,8 @@ mod tests {
 
     fn catalog(pairs: &[(&str, &str)]) -> Result<Catalog, ProviderError> {
         let pairs: Vec<(String, String)> = pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
-        Catalog::from_vars(move |name| pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()))
+        let var = move |name: &str| pairs.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
+        Catalog::build(var, Arc::new(crate::secrets::MemoryStore::default()), GitHub::default())
     }
 
     fn ids(c: &Catalog) -> Vec<String> {
@@ -218,7 +258,7 @@ mod tests {
     #[test]
     fn with_nothing_configured_the_simulated_agent_is_selected() {
         let c = catalog(&[]).unwrap();
-        assert_eq!(ids(&c), ["openai", "llamacpp", "ollama", "lmstudio", "mock"]);
+        assert_eq!(ids(&c), ["openai", "copilot", "llamacpp", "ollama", "lmstudio", "mock"]);
         assert_eq!(c.initial(), MockCatalog::default().initial());
         assert_eq!(c.providers()[0].missing.as_deref(), Some("needs OPENAI_API_KEY"));
         let err = c.engine("openai", "gpt-4o-mini").err().unwrap();
@@ -232,9 +272,9 @@ mod tests {
         assert_eq!(c.engine("openai", "gpt-4o").unwrap().name(), "OpenAI · gpt-4o");
 
         let c = catalog(&[("OPENAI_BASE_URL", "http://gpu-box:8000/v1"), ("KRUNE_MODEL", "qwen3")]).unwrap();
-        assert_eq!(ids(&c), ["openai", "custom", "llamacpp", "ollama", "lmstudio", "mock"]);
+        assert_eq!(ids(&c), ["openai", "copilot", "custom", "llamacpp", "ollama", "lmstudio", "mock"]);
         assert_eq!(c.initial(), Selection { provider: "custom".into(), model: Some("qwen3".into()) });
-        assert_eq!(c.providers()[1].label, "OpenAI-compatible (gpu-box:8000)");
+        assert_eq!(c.providers()[2].label, "OpenAI-compatible (gpu-box:8000)");
     }
 
     #[test]

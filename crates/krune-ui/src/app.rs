@@ -1,12 +1,13 @@
 //! Rune wiring: the app spec, the root view, `poll`, keyboard shortcuts and headless scenes.
 
-use krune_agent::{MockCatalog, Provider, Selection};
+use krune_agent::{Account, DeviceCode, MockCatalog, Provider, Selection};
 use krune_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult};
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, TextEdit, Tx, Waker, row, text};
 use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit};
 
-use crate::components::status;
+use crate::accounts::SignIn;
+use crate::components::{sign_in, status};
 use crate::keys;
 use crate::picker::{Models, Picker};
 use crate::state::{KruneApp, Screen};
@@ -50,6 +51,10 @@ pub fn poll(s: &mut KruneApp, _clock: f64, _tx: &mut Tx) -> bool {
 }
 
 pub fn on_key(s: &mut KruneApp, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+    if ev.key == Key::Escape && s.sign_in != SignIn::Closed {
+        s.close_sign_in();
+        return true;
+    }
     if ev.key == Key::Escape && s.engine.open.is_some() {
         s.close_picker();
         return true;
@@ -85,6 +90,7 @@ pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>) -> El {
         Screen::Settings => settings::view(s, cx, k, &mut layer),
         Screen::Chat => workspace(s, cx, k, &mut layer),
     };
+    sign_in::dialog(s, k, &mut layer);
     // The root's rect is the window: refit the side panes whenever its width changes.
     let base = rune::el()
         .key("krune-root")
@@ -149,7 +155,20 @@ const SCENES: &[Scene] = &[
         let run = staged(s, "Rewrite the build script");
         apply(s, &[AgentEvent::Cancelled { run }]);
     }),
-    ("settings", |s| s.screen = Screen::Settings),
+    ("settings", |s| {
+        stage_copilot(s, Account::SignedOut);
+        s.screen = Screen::Settings;
+    }),
+    ("signed-in", |s| {
+        stage_copilot(s, Account::SignedIn { user: "octocat".into() });
+        s.screen = Screen::Settings;
+    }),
+    ("sign-in", |s| {
+        stage_copilot(s, Account::SignedOut);
+        s.screen = Screen::Settings;
+        let code = DeviceCode { url: "https://github.com/login/device".into(), code: "ABCD-1234".into() };
+        s.sign_in = SignIn::Code { provider: "copilot".into(), code };
+    }),
     ("changes-hidden", |s| s.toggle_changes()),
     ("sidebar-hidden", |s| s.sidebar.toggle()),
     ("provider-picker", |s| {
@@ -226,18 +245,30 @@ fn scene_failed(s: &mut KruneApp) {
     );
 }
 
-/// The providers of an environment without keys, whatever the real environment offers, so
-/// the snapshot is the same on every machine.
+/// The providers of an environment without keys and not signed in to Copilot, whatever the
+/// real environment and keychain hold, so the snapshot is the same on every machine.
 fn stage_providers(s: &mut KruneApp) {
     s.new_session();
+    stage_copilot(s, Account::SignedOut);
+}
+
+/// [`stage_providers`]'s list with Copilot in the given state.
+fn stage_copilot(s: &mut KruneApp, account: Account) {
     let provider = |id: &str, label: &str, missing: Option<&str>| Provider {
         id: id.into(),
         label: label.into(),
         default_model: None,
         missing: missing.map(str::to_owned),
+        account: None,
+    };
+    let copilot = Provider {
+        missing: (account == Account::SignedOut).then(|| "needs signing in (Settings › Accounts)".into()),
+        account: Some(account),
+        ..provider("copilot", "GitHub Copilot", None)
     };
     s.engine.providers = vec![
         provider("openai", "OpenAI", Some("needs OPENAI_API_KEY")),
+        copilot,
         provider("llamacpp", "llama.cpp", None),
         provider("ollama", "Ollama", None),
         provider("lmstudio", "LM Studio", None),

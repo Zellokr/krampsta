@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use krune_agent::{AgentError, MOCK_MODEL, MOCK_PROVIDER, ModelList, Provider, Selection};
+use krune_agent::{Account, AgentError, MOCK_MODEL, MOCK_PROVIDER, ModelList, Provider, Selection};
 
 use crate::state::KruneApp;
 
@@ -98,11 +98,16 @@ impl KruneApp {
         self.engine.open = None;
     }
 
-    /// Switches provider (by id), restoring the model last used with it or its default.
+    /// Switches provider (by id), restoring the model last used with it or its default. An
+    /// account provider that isn't signed in opens the sign-in instead of loading models.
     pub fn choose_provider(&mut self, id: &str) {
         self.engine.open = None;
         let Some(provider) = self.engine.providers.iter().find(|p| p.id == id).cloned() else { return };
+        let signed_out = provider.account == Some(Account::SignedOut);
         if provider.id == self.engine.selection.provider {
+            if signed_out {
+                self.start_sign_in(id);
+            }
             return;
         }
         let listed_first = match self.engine.models.get(id) {
@@ -112,7 +117,9 @@ impl KruneApp {
         let model = self.engine.remembered.get(id).cloned().or(provider.default_model).or(listed_first);
         self.engine.selection = Selection { provider: provider.id, model };
         self.rebuild_engine();
-        if !matches!(self.engine.current_models(), Some(Models::Ready(_) | Models::Loading)) {
+        if signed_out {
+            self.start_sign_in(id);
+        } else if !matches!(self.engine.current_models(), Some(Models::Ready(_) | Models::Loading)) {
             self.refresh_models();
         }
     }
@@ -199,12 +206,13 @@ fn reason(e: &AgentError) -> String {
     }
 }
 
-/// What a picker shows for a provider: its name, marked when it can't be used yet (the hint
-/// line says why once it is chosen).
+/// What a picker shows for a provider: its name, marked "(no key)" when a key is missing (the
+/// hint line says which once it is chosen). Account providers carry no mark: choosing one that
+/// is signed out opens the sign-in.
 pub fn provider_text(p: &Provider) -> String {
     match &p.missing {
-        Some(_) => format!("{} (no key)", p.label),
-        None => p.label.clone(),
+        Some(_) if p.account.is_none() => format!("{} (no key)", p.label),
+        _ => p.label.clone(),
     }
 }
 
@@ -224,7 +232,13 @@ mod tests {
     struct Fake;
 
     fn provider(id: &str, missing: Option<&str>) -> Provider {
-        Provider { id: id.into(), label: id.to_uppercase(), default_model: None, missing: missing.map(Into::into) }
+        Provider {
+            id: id.into(),
+            label: id.to_uppercase(),
+            default_model: None,
+            missing: missing.map(Into::into),
+            account: None,
+        }
     }
 
     impl EngineCatalog for Fake {
