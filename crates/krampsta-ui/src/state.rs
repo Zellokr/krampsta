@@ -93,6 +93,7 @@ impl KrampstaApp {
             auto_hidden: AutoHidden::default(),
             keep: Pane::Sidebar,
         };
+        app.keep_selection_usable();
         app.rebuild_engine();
         app
     }

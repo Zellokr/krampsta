@@ -126,7 +126,7 @@ fn catalog(base: &str, store: Arc<MemoryStore>) -> Catalog {
 }
 
 fn account(c: &Catalog) -> Option<Account> {
-    c.providers().into_iter().find(|p| p.id == "chatgpt").and_then(|p| p.account)
+    c.providers().into_iter().find(|p| p.id == "chatgpt").and_then(|p| p.account().cloned())
 }
 
 fn block_on<T>(fut: impl std::future::Future<Output = T>) -> T {

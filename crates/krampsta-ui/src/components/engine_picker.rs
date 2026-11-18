@@ -5,7 +5,7 @@ use rune::{El, Tx};
 use rune_kit::{Kit, Placement, Select, SelectAppearance};
 
 use crate::keys;
-use crate::picker::{Models, Picker, provider_text};
+use crate::picker::{Models, Picker};
 use crate::state::KrampstaApp;
 
 /// Where a pair of pickers sits.
@@ -47,17 +47,17 @@ pub fn provider(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>, place: Place) -> 
     let (picker, _) = place.pickers();
     let (key, _) = place.keys();
     let choice = &s.engine;
-    // Unusable providers are marked in their own row ("OpenAI (no key)").
-    let labels: Vec<String> = choice.providers.iter().map(provider_text).collect();
+    // Only what can run now, under a header per kind: signing in and keys are settings' business.
+    let options: Vec<(&str, &str)> = choice.grouped().into_iter().map(|(g, p)| (g, p.label.as_str())).collect();
     place
-        .style(Select::new(key, &labels))
+        .style(Select::grouped(key, &options))
         .label("Provider")
-        .current(choice.provider().map(provider_text).as_deref())
+        .current(Some(choice.provider_label()))
         .open(choice.open == Some(picker))
         .on_toggle(move |s: &mut KrampstaApp| s.toggle_picker(picker))
         .on_close(|s: &mut KrampstaApp| s.close_picker())
         .on_choose(|s: &mut KrampstaApp, label: &str, _: &mut Tx| {
-            let id = s.engine.providers.iter().find(|p| provider_text(p) == label).map(|p| p.id.clone());
+            let id = s.engine.usable().find(|p| p.label == label).map(|p| p.id.clone());
             if let Some(id) = id {
                 s.choose_provider(&id);
             }

@@ -1,6 +1,6 @@
 //! Rune wiring: the app spec, the root view, `poll`, keyboard shortcuts and headless scenes.
 
-use krampsta_agent::{Account, DeviceCode, MockCatalog, Provider, Selection};
+use krampsta_agent::{Account, DeviceCode, MockCatalog, Provider, ProviderKind, Selection};
 use krampsta_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult};
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, TextEdit, Tx, Waker, row, text};
 use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
@@ -171,8 +171,12 @@ const SCENES: &[Scene] = &[
     }),
     ("changes-hidden", |s| s.toggle_changes()),
     ("sidebar-hidden", |s| s.sidebar.toggle()),
+    // Signed in and on a real provider: the list shows its groups, the simulated agent hidden.
     ("provider-picker", |s| {
-        stage_providers(s);
+        s.new_session();
+        stage_accounts(s, true);
+        stage_local(s, Models::Ready(vec!["qwen3:4b".into()]));
+        s.engine.selection.model = Some("qwen3:4b".into());
         s.engine.open = Some(Picker::ComposerProvider);
     }),
     ("model-picker", |s| {
@@ -254,25 +258,26 @@ fn stage_providers(s: &mut KrampstaApp) {
 
 /// [`stage_providers`]'s list, with the ChatGPT and Copilot accounts signed in or not.
 fn stage_accounts(s: &mut KrampstaApp, signed_in: bool) {
-    let provider = |id: &str, label: &str, missing: Option<&str>| Provider {
+    let provider = |id: &str, label: &str, missing: Option<&str>, kind: ProviderKind| Provider {
         id: id.into(),
         label: label.into(),
         default_model: None,
         missing: missing.map(str::to_owned),
-        account: None,
+        kind,
     };
-    let account = |id: &str, label: &str, user: &str| Provider {
-        missing: (!signed_in).then(|| "needs signing in (Settings › Accounts)".into()),
-        account: Some(if signed_in { Account::SignedIn { user: user.into() } } else { Account::SignedOut }),
-        ..provider(id, label, None)
+    let local = |id: &str, label: &str| provider(id, label, None, ProviderKind::Local);
+    let account = |id: &str, label: &str, user: &str| {
+        let state = if signed_in { Account::SignedIn { user: user.into() } } else { Account::SignedOut };
+        let missing = (!signed_in).then_some("needs signing in (Settings › Accounts)");
+        provider(id, label, missing, ProviderKind::Account(state))
     };
     s.engine.providers = vec![
-        provider("openai", "OpenAI", Some("needs OPENAI_API_KEY")),
+        provider("openai", "OpenAI", Some("needs OPENAI_API_KEY"), ProviderKind::Cloud),
         account("chatgpt", "ChatGPT", "me@example.com"),
         account("copilot", "GitHub Copilot", "octocat"),
-        provider("llamacpp", "llama.cpp", None),
-        provider("ollama", "Ollama", None),
-        provider("lmstudio", "LM Studio", None),
+        local("llamacpp", "llama.cpp"),
+        local("ollama", "Ollama"),
+        local("lmstudio", "LM Studio"),
         MockCatalog::provider(),
     ];
 }

@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use krampsta_agent::{Account, AgentError, MOCK_MODEL, MOCK_PROVIDER, ModelList, Provider, Selection};
+use krampsta_agent::{AgentError, MOCK_MODEL, MOCK_PROVIDER, ModelList, Provider, ProviderKind, Selection};
 
 use crate::state::KrampstaApp;
 
@@ -62,6 +62,24 @@ impl EngineChoice {
         self.providers.iter().find(|p| p.id == self.selection.provider)
     }
 
+    /// The providers that can run now, the only ones the pickers list: an account provider once
+    /// signed in, a cloud one once it has its key. Local servers always count: whether one is up
+    /// shows when its models load.
+    pub fn usable(&self) -> impl Iterator<Item = &Provider> {
+        self.providers.iter().filter(|p| p.missing.is_none())
+    }
+
+    /// The usable providers under their group's header, groups in [`group`] order and providers
+    /// in catalog order within each. The simulated agent only shows when nothing real can run,
+    /// or while it is the one selected.
+    pub fn grouped(&self) -> Vec<(&'static str, &Provider)> {
+        let real = self.usable().any(|p| p.kind != ProviderKind::Simulated);
+        let shown = |p: &&Provider| p.kind != ProviderKind::Simulated || !real || p.id == self.selection.provider;
+        let mut list: Vec<_> = self.usable().filter(shown).map(|p| (group(&p.kind), p)).collect();
+        list.sort_by_key(|((rank, _), _)| *rank);
+        list.into_iter().map(|((_, header), p)| (header, p)).collect()
+    }
+
     pub fn provider_label(&self) -> &str {
         self.provider().map_or(self.selection.provider.as_str(), |p| p.label.as_str())
     }
@@ -98,30 +116,40 @@ impl KrampstaApp {
         self.engine.open = None;
     }
 
-    /// Switches provider (by id), restoring the model last used with it or its default. An
-    /// account provider that isn't signed in opens the sign-in instead of loading models.
+    /// Switches to a usable provider (by id), restoring the model last used with it or its default.
     pub fn choose_provider(&mut self, id: &str) {
         self.engine.open = None;
-        let Some(provider) = self.engine.providers.iter().find(|p| p.id == id).cloned() else { return };
-        let signed_out = provider.account == Some(Account::SignedOut);
-        if provider.id == self.engine.selection.provider {
-            if signed_out {
-                self.start_sign_in(id);
-            }
+        if id == self.engine.selection.provider || !self.engine.usable().any(|p| p.id == id) {
             return;
         }
+        self.select_provider(id);
+        self.rebuild_engine();
+        if !matches!(self.engine.current_models(), Some(Models::Ready(_) | Models::Loading)) {
+            self.refresh_models();
+        }
+    }
+
+    /// Moves the selection off a provider that can't run (signed out, no key) to the first one
+    /// that can, the simulated agent last. True when it moved; the caller rebuilds the engine.
+    pub(crate) fn keep_selection_usable(&mut self) -> bool {
+        if self.engine.usable().any(|p| p.id == self.engine.selection.provider) {
+            return false;
+        }
+        let next = self.engine.usable().find(|p| p.id != MOCK_PROVIDER).or_else(|| self.engine.usable().next());
+        let Some(id) = next.map(|p| p.id.clone()) else { return false };
+        self.select_provider(&id);
+        true
+    }
+
+    /// Points the selection at `id` with the model last used with it, its default or its first.
+    fn select_provider(&mut self, id: &str) {
+        let Some(provider) = self.engine.providers.iter().find(|p| p.id == id) else { return };
         let listed_first = match self.engine.models.get(id) {
             Some(Models::Ready(list)) => list.first().cloned(),
             _ => None,
         };
-        let model = self.engine.remembered.get(id).cloned().or(provider.default_model).or(listed_first);
-        self.engine.selection = Selection { provider: provider.id, model };
-        self.rebuild_engine();
-        if signed_out {
-            self.start_sign_in(id);
-        } else if !matches!(self.engine.current_models(), Some(Models::Ready(_) | Models::Loading)) {
-            self.refresh_models();
-        }
+        let model = self.engine.remembered.get(id).cloned().or_else(|| provider.default_model.clone()).or(listed_first);
+        self.engine.selection = Selection { provider: provider.id.clone(), model };
     }
 
     /// Picks a model of the selected provider. Only listed models (or the current one) count:
@@ -206,14 +234,26 @@ fn reason(e: &AgentError) -> String {
     }
 }
 
-/// What a picker shows for a provider: its name, marked "(no key)" when a key is missing (the
-/// hint line says which once it is chosen). Account providers carry no mark: choosing one that
-/// is signed out opens the sign-in.
-pub fn provider_text(p: &Provider) -> String {
-    match &p.missing {
-        Some(_) if p.account.is_none() => format!("{} (no key)", p.label),
-        _ => p.label.clone(),
+/// A provider kind's place in the picker and the header it shows under.
+pub fn group(kind: &ProviderKind) -> (u8, &'static str) {
+    match kind {
+        ProviderKind::Account(_) => (0, "Accounts"),
+        ProviderKind::Cloud => (1, "API keys"),
+        ProviderKind::Local => (2, "Local"),
+        ProviderKind::Simulated => (3, "Testing"),
     }
+}
+
+/// What settings says about the providers the pickers leave out for a missing key ("OpenAI
+/// needs OPENAI_API_KEY."). Accounts have their own cards. `None` when none is left out.
+pub fn hidden_hint(choice: &EngineChoice) -> Option<String> {
+    let hidden: Vec<String> = choice
+        .providers
+        .iter()
+        .filter(|p| p.account().is_none())
+        .filter_map(|p| p.missing.as_ref().map(|why| format!("{} {why}.", p.label)))
+        .collect();
+    (!hidden.is_empty()).then(|| hidden.join(" "))
 }
 
 #[cfg(test)]
@@ -221,7 +261,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use krampsta_agent::{AgentEngine, BoxFuture, EngineCatalog, MockAgent, MockCatalog, MockConfig};
+    use krampsta_agent::{Account, AgentEngine, BoxFuture, EngineCatalog, MockAgent, MockCatalog, MockConfig};
     use rune::TextEdit;
 
     use super::*;
@@ -237,7 +277,7 @@ mod tests {
             label: id.to_uppercase(),
             default_model: None,
             missing: missing.map(Into::into),
-            account: None,
+            kind: ProviderKind::Local,
         }
     }
 
@@ -348,12 +388,74 @@ mod tests {
     }
 
     #[test]
-    fn a_provider_without_its_key_explains_and_refuses_to_send() {
+    fn a_provider_without_its_key_is_left_out_and_settings_says_why() {
         let mut app = app();
-        assert_eq!(provider_text(&app.engine.providers[2]), "CLOUD (no key)");
-        app.engine.providers[2].default_model = Some("big".into());
+        let listed: Vec<&str> = app.engine.usable().map(|p| p.id.as_str()).collect();
+        assert_eq!(listed, ["local", "down", MOCK_PROVIDER]);
         app.choose_provider("cloud");
-        assert_eq!(app.engine.problem.as_deref(), Some("CLOUD needs KEY"));
-        assert!(matches!(send(&mut app), Err(SendError::Engine(_))));
+        assert_eq!(app.engine.selection.provider, MOCK_PROVIDER, "not choosable");
+        assert_eq!(hidden_hint(&app.engine).as_deref(), Some("CLOUD needs KEY."));
+    }
+
+    #[test]
+    fn an_unusable_starting_provider_gives_way_to_a_usable_one() {
+        struct StartsOnCloud;
+        impl EngineCatalog for StartsOnCloud {
+            fn providers(&self) -> Vec<Provider> {
+                Fake.providers()
+            }
+            fn initial(&self) -> Selection {
+                Selection { provider: "cloud".into(), model: Some("big".into()) }
+            }
+            fn engine(&self, provider: &str, model: &str) -> Result<Arc<dyn AgentEngine>, AgentError> {
+                Fake.engine(provider, model)
+            }
+            fn models(&self, provider: &str) -> BoxFuture<'static, Result<Vec<String>, AgentError>> {
+                Fake.models(provider)
+            }
+        }
+        let app = KrampstaApp::new(Arc::new(StartsOnCloud));
+        assert_eq!(app.engine.selection.provider, "local", "the first usable one, not the simulated agent");
+    }
+
+    #[test]
+    fn the_picker_groups_providers_by_kind_in_a_fixed_order() {
+        let of = |id: &str, kind: ProviderKind| Provider { kind, ..provider(id, None) };
+        let signed_out = Provider {
+            missing: Some("needs signing in".into()),
+            ..of("copilot", ProviderKind::Account(Account::SignedOut))
+        };
+        let choice = EngineChoice::new(
+            vec![
+                of("ollama", ProviderKind::Local),
+                MockCatalog::provider(),
+                of("openai", ProviderKind::Cloud),
+                of("chatgpt", ProviderKind::Account(Account::SignedIn { user: "me".into() })),
+                signed_out,
+                of("lmstudio", ProviderKind::Local),
+            ],
+            MockCatalog::default().initial(),
+        );
+        let shown: Vec<(&str, &str)> = choice.grouped().into_iter().map(|(g, p)| (g, p.id.as_str())).collect();
+        assert_eq!(
+            shown,
+            [
+                ("Accounts", "chatgpt"),
+                ("API keys", "openai"),
+                ("Local", "ollama"),
+                ("Local", "lmstudio"),
+                ("Testing", MOCK_PROVIDER),
+            ],
+            "the simulated agent shows while it is selected"
+        );
+
+        let mut choice = choice;
+        choice.selection = Selection { provider: "ollama".into(), model: None };
+        let groups: Vec<&str> = choice.grouped().into_iter().map(|(g, _)| g).collect();
+        assert!(!groups.contains(&"Testing"), "hidden once something real is selected: {groups:?}");
+
+        choice.providers.retain(|p| p.kind == ProviderKind::Simulated);
+        let ids: Vec<&str> = choice.grouped().into_iter().map(|(_, p)| p.id.as_str()).collect();
+        assert_eq!(ids, [MOCK_PROVIDER], "the only one that can run always shows");
     }
 }

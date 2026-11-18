@@ -18,9 +18,31 @@ pub struct Provider {
     pub default_model: Option<String>,
     /// Why it can't be used yet ("needs OPENAI_API_KEY"); `None` when it is ready.
     pub missing: Option<String>,
-    /// For providers used through a personal account (GitHub Copilot, a ChatGPT plan): whether
-    /// the user is signed in. `None` for providers without accounts.
-    pub account: Option<Account>,
+    /// Where it runs and how it is reached; pickers group providers by it.
+    pub kind: ProviderKind,
+}
+
+impl Provider {
+    /// The sign-in state, for providers used through an account.
+    pub fn account(&self) -> Option<&Account> {
+        match &self.kind {
+            ProviderKind::Account(account) => Some(account),
+            _ => None,
+        }
+    }
+}
+
+/// What kind of provider it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProviderKind {
+    /// A server on this computer (Ollama, LM Studio, llama.cpp).
+    Local,
+    /// An API reached with a key (OpenAI, an OpenAI-compatible URL).
+    Cloud,
+    /// Used through the user's own account (GitHub Copilot, a ChatGPT plan).
+    Account(Account),
+    /// The simulated agent.
+    Simulated,
 }
 
 /// The sign-in state of a provider that works through an account.
@@ -102,7 +124,7 @@ impl MockCatalog {
             label: "Simulated".into(),
             default_model: Some(MOCK_MODEL.into()),
             missing: None,
-            account: None,
+            kind: ProviderKind::Simulated,
         }
     }
 

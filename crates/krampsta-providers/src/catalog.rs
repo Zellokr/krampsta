@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use krampsta_agent::{
     AgentEngine, AgentError, BoxFuture, EngineCatalog, LoginPrompt, MOCK_PROVIDER, MockCatalog, MockConfig, Provider,
-    Selection,
+    ProviderKind, Selection,
 };
 
 use crate::ProviderError;
@@ -85,7 +85,7 @@ impl Catalog {
                 label: "OpenAI".into(),
                 default_model: Some(DEFAULT_OPENAI_MODEL.into()),
                 missing: key.is_none().then(|| "needs OPENAI_API_KEY".into()),
-                account: None,
+                kind: ProviderKind::Cloud,
             },
             base_url: DEFAULT_BASE_URL.into(),
             api_key: key.clone(),
@@ -98,7 +98,7 @@ impl Catalog {
                     label: format!("OpenAI-compatible ({})", host_of(&url)),
                     default_model: None,
                     missing: None,
-                    account: None,
+                    kind: ProviderKind::Cloud,
                 },
                 base_url: url,
                 api_key: key,
@@ -118,7 +118,7 @@ impl Catalog {
                     label: label.into(),
                     default_model: None,
                     missing: None,
-                    account: None,
+                    kind: ProviderKind::Local,
                 },
                 base_url,
                 api_key: None,

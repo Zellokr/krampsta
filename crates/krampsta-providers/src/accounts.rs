@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, PoisonError, RwLock};
 
-use krampsta_agent::{Account, AgentEngine, AgentError, BoxFuture, LoginPrompt, Provider};
+use krampsta_agent::{Account, AgentEngine, AgentError, BoxFuture, LoginPrompt, Provider, ProviderKind};
 use serde::{Deserialize, Serialize};
 
 use crate::chatgpt::{self, ChatGptAccess, OpenAiAccount};
@@ -109,7 +109,7 @@ impl Accounts {
             label: label.into(),
             default_model: None,
             missing: user.is_none().then(|| SIGN_IN_HINT.into()),
-            account: Some(match user {
+            kind: ProviderKind::Account(match user {
                 Some(user) => Account::SignedIn { user },
                 None => Account::SignedOut,
             }),

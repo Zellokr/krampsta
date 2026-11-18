@@ -1,13 +1,15 @@
 //! Settings: a full-window page in the same frame as the chat.
 
 use krampsta_agent::Provider;
-use rune::{Cx, El, ScrollSpec, Tx, col, row, text};
+use rune::{Cx, El, Icon, ScrollSpec, Tx, col, icon, row, text};
 use rune_kit::shell::Page;
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, SegmentedControl, Switch};
 
 use crate::accounts::signed_in_user;
 use crate::components::engine_picker::{self, Place};
+use crate::components::icons;
 use crate::keys;
+use crate::picker::hidden_hint;
 use crate::state::{KrampstaApp, Screen};
 use crate::theme::ThemeChoice;
 
@@ -27,9 +29,14 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec<
     let changes = Switch::new(s.changes.is_open())
         .on_toggle(|s: &mut KrampstaApp| s.toggle_changes())
         .build(k)
-        .key(keys::SETTING_CHANGES);
+        .key(keys::SETTING_CHANGES)
+        .label("Changes panel");
     let provider = engine_picker::provider(s, k, layer, Place::Settings);
     let model = engine_picker::model(s, k, layer, Place::Settings);
+    let provider_hint = match hidden_hint(&s.engine) {
+        Some(missing) => format!("Only providers ready to use are listed. {missing}"),
+        None => "Only providers ready to use are listed; sign in below to add an account.".to_owned(),
+    };
     let warning = s.engine.warning();
     let model_hint = warning.as_deref().unwrap_or("Used for new messages; a running reply keeps its model.");
     let version = text(concat!("Krampsta ", env!("CARGO_PKG_VERSION"))).font(k.ty.ui).color(k.c.text_muted);
@@ -42,13 +49,11 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec<
         .child(setting(k, "Appearance", "Krampsta uses the dark theme by default.", appearance))
         .child(setting(k, "Changes panel", "Show file changes beside the conversation.", changes))
         .child(section(k, "Agent").mt(12.0))
-        .child(setting(k, "Provider", "Ollama and LM Studio run on this computer.", provider))
+        .child(setting(k, "Provider", &provider_hint, provider))
         .child(setting(k, "Model", model_hint, model));
     if s.account_providers().next().is_some() {
-        column = column.child(section(k, "Accounts").mt(12.0));
-        for p in s.account_providers() {
-            column = column.child(account(k, p));
-        }
+        let cards = row().w_full().gap(CARD_GAP).flex_wrap().children(s.account_providers().map(|p| account(k, p)));
+        column = column.child(section(k, "Accounts").mt(12.0)).child(cards);
     }
     column = column.child(setting(k, "About", "Native AI Coding Agent, built with Rust and Rune.", version));
     // Scrolls when the window is too short for every row.
@@ -78,25 +83,51 @@ fn section(k: &Kit, title: &str) -> El {
     text(title.to_owned()).font(k.ty.small_medium).color(k.c.text_faint)
 }
 
-/// A provider used through an account: who is signed in, and the button to sign in or out.
+const CARD_GAP: f32 = 12.0;
+/// Two cards a row across the settings column (620 points wide).
+const CARD_W: f32 = (620.0 - CARD_GAP) / 2.0;
+
+/// The mark shown on an account's card.
+fn account_icon(id: &str) -> &'static Icon {
+    match id {
+        "chatgpt" => &icons::OPENAI,
+        "copilot" => &icons::GITHUB,
+        _ => &icons::KRAMPSTA,
+    }
+}
+
+/// A provider used through an account, as a card: its mark, who is signed in, and the button
+/// to sign in or out.
 fn account(k: &Kit, p: &Provider) -> El {
     let id = p.id.clone();
-    let (description, button) = match signed_in_user(p) {
+    let (status, button) = match signed_in_user(p) {
         Some(user) => (
-            format!("Signed in as {user}."),
+            user.to_owned(),
             Button::new("Sign out")
                 .variant(ButtonVariant::Neutral)
                 .on_press(move |s: &mut KrampstaApp| s.sign_out(&id)),
         ),
         None => (
-            "Use your own subscription: Krampsta opens the sign-in page for you.".to_owned(),
+            "Not signed in".to_owned(),
             Button::new("Sign in")
                 .variant(ButtonVariant::Contrast)
                 .on_press(move |s: &mut KrampstaApp| s.start_sign_in(&id)),
         ),
     };
     let control = button.control_size(ControlSize::Regular).build(k).key(keys::account(&p.id));
-    setting(k, &p.label, &description, control)
+    col()
+        .w(CARD_W)
+        .py(20.0)
+        .px(16.0)
+        .gap(6.0)
+        .radius(k.radius.md)
+        .fill(k.c.layer_01)
+        .border(1.0, k.c.border_weak)
+        .items_center()
+        .child(icon(account_icon(&p.id), 36.0).color(k.c.text_base))
+        .child(text(p.label.clone()).font(k.ty.ui_medium).color(k.c.text_base).mt(6.0))
+        .child(text(status).font(k.ty.small).color(k.c.text_muted).truncate())
+        .child(control.mt(8.0))
 }
 
 fn setting(k: &Kit, title: &str, description: &str, control: El) -> El {

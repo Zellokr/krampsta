@@ -41,7 +41,7 @@ impl SignIn {
 impl KrampstaApp {
     /// The providers that work through an account, for the settings' Accounts section.
     pub fn account_providers(&self) -> impl Iterator<Item = &Provider> {
-        self.engine.providers.iter().filter(|p| p.account.is_some())
+        self.engine.providers.iter().filter(|p| p.account().is_some())
     }
 
     pub fn provider_label<'a>(&'a self, id: &'a str) -> &'a str {
@@ -114,11 +114,12 @@ impl KrampstaApp {
     }
 
     /// After signing in or out: reread the providers, forget the old model list and rebuild the
-    /// engine if this provider is the selected one.
+    /// engine if this provider is the selected one. Signing out of the selected provider moves
+    /// the selection to one that can still run.
     fn accounts_changed(&mut self, provider: &str) {
         self.engine.providers = self.catalog.providers();
         self.engine.models.remove(provider);
-        if self.engine.selection.provider == provider {
+        if self.keep_selection_usable() || self.engine.selection.provider == provider {
             self.rebuild_engine();
             self.ensure_models();
         }
@@ -127,7 +128,7 @@ impl KrampstaApp {
 
 /// Whether `p` is signed in, and as whom.
 pub fn signed_in_user(p: &Provider) -> Option<&str> {
-    match &p.account {
+    match p.account() {
         Some(Account::SignedIn { user }) => Some(user),
         _ => None,
     }
@@ -147,7 +148,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use krampsta_agent::{
-        AgentEngine, BoxFuture, EngineCatalog, LoginPrompt, MockAgent, MockCatalog, MockConfig, Selection,
+        AgentEngine, BoxFuture, EngineCatalog, LoginPrompt, MOCK_PROVIDER, MockAgent, MockCatalog, MockConfig,
+        ProviderKind, Selection,
     };
 
     use super::*;
@@ -170,7 +172,11 @@ mod tests {
                     label: "Acct".into(),
                     default_model: Some("m".into()),
                     missing: (!on).then(|| "needs signing in".into()),
-                    account: Some(if on { Account::SignedIn { user: "me".into() } } else { Account::SignedOut }),
+                    kind: ProviderKind::Account(if on {
+                        Account::SignedIn { user: "me".into() }
+                    } else {
+                        Account::SignedOut
+                    }),
                 },
                 MockCatalog::provider(),
             ]
@@ -222,11 +228,18 @@ mod tests {
         app.account_providers().next().unwrap()
     }
 
+    fn listed(app: &KrampstaApp) -> Vec<&str> {
+        app.engine.usable().map(|p| p.id.as_str()).collect()
+    }
+
     #[test]
-    fn signing_in_shows_the_code_then_unlocks_the_selected_provider() {
+    fn signing_in_lists_the_account_and_signing_out_moves_off_it() {
         let mut app = KrampstaApp::new(Arc::new(Fake::default()));
-        assert!(app.engine.problem.is_some(), "the account provider can't run signed out");
-        assert_eq!(signed_in_user(acct(&app)), None);
+        assert_eq!(listed(&app), [MOCK_PROVIDER], "signed out: not in the pickers");
+        assert_eq!(app.engine.selection.provider, MOCK_PROVIDER, "it starts on what can run");
+        app.choose_provider("acct");
+        assert_eq!(app.engine.selection.provider, MOCK_PROVIDER);
+        assert_eq!(app.sign_in, SignIn::Closed, "choosing doesn't sign in: the settings card does");
 
         app.start_sign_in("acct");
         assert_eq!(app.sign_in, SignIn::Starting { provider: "acct".into() });
@@ -236,24 +249,15 @@ mod tests {
 
         pump_until(&mut app, |a| a.sign_in == SignIn::Closed);
         assert_eq!(signed_in_user(acct(&app)), Some("me"));
-        assert_eq!(app.engine.problem, None, "the engine was rebuilt for the signed-in account");
+        assert_eq!(listed(&app), ["acct", MOCK_PROVIDER]);
+        app.choose_provider("acct");
+        assert_eq!(app.engine.selection.provider, "acct");
+        assert_eq!(app.engine.problem, None);
 
         app.sign_out("acct");
         pump_until(&mut app, |a| signed_in_user(acct(a)).is_none());
-        assert!(app.engine.problem.is_some());
-    }
-
-    #[test]
-    fn choosing_a_signed_out_account_provider_opens_the_sign_in() {
-        let mut app = KrampstaApp::new(Arc::new(Fake::default()));
-        app.choose_provider(krampsta_agent::MOCK_PROVIDER);
-        assert_eq!(app.sign_in, SignIn::Closed);
-        app.choose_provider("acct");
-        assert_eq!(app.sign_in, SignIn::Starting { provider: "acct".into() });
-        assert_eq!(crate::picker::provider_text(acct(&app)), "Acct", "no mark: choosing it signs in");
-        pump_until(&mut app, |a| a.sign_in == SignIn::Closed);
-        assert_eq!(app.engine.selection.provider, "acct");
-        assert_eq!(app.engine.problem, None);
+        assert_eq!(app.engine.selection.provider, MOCK_PROVIDER);
+        assert_eq!(app.engine.problem, None, "the simulated agent can run");
     }
 
     #[test]
