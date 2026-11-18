@@ -1,0 +1,4 @@
+[toolchain]
+# Same channel as Rune's rust-toolchain.toml at the pinned revision.
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]

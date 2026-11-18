@@ -1,0 +1,18 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Headless tooling output (keep curated stills under assets/screenshots/)
+/out/
+/krune.png
+/krune-tree.json
+
+# Local secrets / editor state
+.env
+.env.*
+.idea/
+.vscode/
+.DS_Store
+
+# Large generated tree dumps (regenerate with scripts/snapshots.sh)
+/assets/screenshots/*.json

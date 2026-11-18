@@ -1,0 +1,62 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/krune-app",
+    "crates/krune-core",
+    "crates/krune-agent",
+    "crates/krune-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.99.1"
+
+[workspace.dependencies]
+krune-core = { path = "crates/krune-core" }
+krune-agent = { path = "crates/krune-agent" }
+krune-ui = { path = "crates/krune-ui" }
+
+# Rune and rune-kit are pinned to ONE commit of Rune's `dev` branch (never a floating branch).
+# When bumping, change RUNE_REV everywhere in this file at once — including every entry in
+# [patch.crates-io] below — and re-read Rune's root Cargo.toml at the new revision. See README.md.
+rune = { git = "https://github.com/anomalyco/rune", rev = "47eaa86eba751687597d0aaf6ee325baeecd4666" }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "47eaa86eba751687597d0aaf6ee325baeecd4666", features = ["markdown"] }
+# OpenCode's design language (tokens, Inter + IBM Plex Mono, icons) — the theme Rugents uses.
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune", rev = "47eaa86eba751687597d0aaf6ee325baeecd4666" }
+
+thiserror = "2"
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time", "macros", "sync"] }
+tokio-util = { version = "0.7", default-features = false }
+
+# Rune ships patched copies of these crates (see the comments in Rune's root Cargo.toml).
+# Cargo does not inherit a dependency's [patch] table, so an app that builds Rune repeats it.
+# Same revision as `rune` above.
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "47eaa86eba751687597d0aaf6ee325baeecd4666" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "47eaa86eba751687597d0aaf6ee325baeecd4666" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "47eaa86eba751687597d0aaf6ee325baeecd4666" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "47eaa86eba751687597d0aaf6ee325baeecd4666" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "47eaa86eba751687597d0aaf6ee325baeecd4666" }
+
+# Full debug info for Rune makes test builds enormous; line tables keep backtraces useful.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+codegen-units = 16
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+await_holding_lock = "deny"
+dbg_macro = "deny"
+expect_used = "warn"
+unwrap_used = "warn"
+todo = "warn"

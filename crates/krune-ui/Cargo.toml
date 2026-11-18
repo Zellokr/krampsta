@@ -1,0 +1,18 @@
+[package]
+name = "krune-ui"
+description = "Krune's desktop interface: state, theme, views and components, built with Rune and rune-kit."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+krune-core.workspace = true
+krune-agent.workspace = true
+rune.workspace = true
+rune-kit.workspace = true
+rune-theme-opencode.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

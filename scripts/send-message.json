@@ -1,0 +1,7 @@
+[
+  {"t": 0.2, "type": "tap", "key": "krune-new-session"},
+  {"t": 0.6, "type": "tap", "key": "krune-composer"},
+  {"t": 0.8, "type": "type", "text": "Explain how sessions and runs fit together"},
+  {"t": 2.6, "type": "key", "name": "Enter"},
+  {"t": 2.9, "type": "mark", "name": "end"}
+]

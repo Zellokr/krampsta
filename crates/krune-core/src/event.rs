@@ -1,0 +1,115 @@
+//! What an agent run reports while it works.
+
+use crate::{RunId, SessionId, ToolCallId};
+
+/// The state of a session's agent. A plain enum: each variant carries only what is valid in it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum AgentStatus {
+    /// Nothing has run yet in this session.
+    #[default]
+    Idle,
+    /// A run is in progress.
+    Running,
+    /// The last run finished normally.
+    Completed,
+    /// The last run stopped with an error.
+    Failed { error: String },
+    /// The last run was cancelled by the user.
+    Cancelled,
+}
+
+impl AgentStatus {
+    pub fn is_running(&self) -> bool {
+        matches!(self, AgentStatus::Running)
+    }
+
+    /// A short label for status indicators.
+    pub fn label(&self) -> &'static str {
+        match self {
+            AgentStatus::Idle => "Idle",
+            AgentStatus::Running => "Running",
+            AgentStatus::Completed => "Completed",
+            AgentStatus::Failed { .. } => "Failed",
+            AgentStatus::Cancelled => "Cancelled",
+        }
+    }
+}
+
+/// A tool the model asked to run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolCall {
+    pub id: ToolCallId,
+    /// The tool's name, such as `read_file`.
+    pub name: String,
+    /// Arguments as the provider sent them (JSON text).
+    pub arguments: String,
+}
+
+/// What a tool returned.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolResult {
+    pub call_id: ToolCallId,
+    pub output: String,
+    pub is_error: bool,
+}
+
+/// One step of a run, in the order the engine produced it.
+///
+/// A run always starts with [`AgentEvent::Started`] and ends with exactly one of
+/// [`AgentEvent::Completed`], [`AgentEvent::Failed`] or [`AgentEvent::Cancelled`]. In between,
+/// an engine streams text and reports tool calls.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentEvent {
+    Started {
+        run: RunId,
+    },
+    /// More of the assistant's reply (streaming). Appended to the run's assistant message.
+    TextDelta {
+        run: RunId,
+        text: String,
+    },
+    ToolCallStarted {
+        run: RunId,
+        call: ToolCall,
+    },
+    ToolCallFinished {
+        run: RunId,
+        result: ToolResult,
+    },
+    Completed {
+        run: RunId,
+    },
+    Failed {
+        run: RunId,
+        error: String,
+    },
+    Cancelled {
+        run: RunId,
+    },
+}
+
+impl AgentEvent {
+    pub fn run(&self) -> RunId {
+        match self {
+            AgentEvent::Started { run }
+            | AgentEvent::TextDelta { run, .. }
+            | AgentEvent::ToolCallStarted { run, .. }
+            | AgentEvent::ToolCallFinished { run, .. }
+            | AgentEvent::Completed { run }
+            | AgentEvent::Failed { run, .. }
+            | AgentEvent::Cancelled { run } => *run,
+        }
+    }
+
+    /// Whether this event ends its run.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, AgentEvent::Completed { .. } | AgentEvent::Failed { .. } | AgentEvent::Cancelled { .. })
+    }
+}
+
+/// An [`AgentEvent`] addressed to the session whose run produced it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunEvent {
+    pub session: SessionId,
+    pub event: AgentEvent,
+}

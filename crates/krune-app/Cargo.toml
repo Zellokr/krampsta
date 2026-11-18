@@ -1,0 +1,25 @@
+[package]
+name = "krune-app"
+description = "Krune — Native AI Coding Agent. The desktop executable."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "krune"
+path = "src/main.rs"
+
+[dependencies]
+krune-agent.workspace = true
+krune-ui.workspace = true
+rune.workspace = true
+
+[features]
+default = []
+# Headless agent tooling (--snap, --tree, --script, ...) in release builds.
+# Debug builds always accept those flags.
+tooling = ["rune/tooling"]
+
+[lints]
+workspace = true
