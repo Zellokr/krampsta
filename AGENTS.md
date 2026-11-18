@@ -97,6 +97,25 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
 - Sin secretos en el repositorio (claves de API por entorno o llavero del sistema).
 - Commits pequeños y descriptivos; `Cargo.lock` siempre versionado.
 
+## Rust idiomático y rendimiento
+
+- Presta por defecto (`&T`, `&str`, `&[T]` en parámetros); clona sólo si hace falta la propiedad.
+  `Arc`/`Rc` sólo cuando el modelo de propiedad lo exige. `Copy` pequeños, por valor.
+- Nada de clones ni asignaciones grandes en `view` ni en `poll` (se llaman en cada frame): presta
+  del estado de `KrampstaApp`; si un dato se comparte mucho, `Arc<str>` / `Arc<[T]>`.
+- Evita asignar de más: `_or_else` en vez de `_or` con valores costosos, `with_capacity` cuando
+  se sabe el tamaño, reutiliza buffers en bucles (p. ej. el parser SSE).
+- Despacho estático (`impl Trait`, genéricos) por defecto; `dyn` para polimorfismo en tiempo de
+  ejecución (motores, catálogo). Retrasa el `Box` hasta una frontera de diseño.
+- Async: ningún `Mutex` ni guarda de `RefCell` vivos a través de un `.await`; trabajo síncrono o
+  de CPU a `spawn_blocking`; canales acotados salvo razón escrita; nada de `block_on` en tokio.
+- Errores: `?` y `let … else`; nunca tragues un `Err` en silencio (propágalo o muéstralo).
+  Un `expect` en tests explica el invariante.
+- Lints: no añadas `#[allow]` nuevos (salvo la cabecera de `tests/*.rs`); si hace falta,
+  `#[expect(lint, reason = "…")]` local.
+- Optimiza sólo con medidas: `criterion` para tiempos, `dhat` para memoria, flamegraph para
+  perfiles. Una mejora de rendimiento lleva su número antes/después en el commit.
+
 ## Hoja de ruta
 
 La lista de tareas del proyecto, con casillas, es un documento de Claude Docs (no está en el
