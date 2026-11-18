@@ -1,11 +1,11 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/krune-app",
-    "crates/krune-core",
-    "crates/krune-agent",
-    "crates/krune-providers",
-    "crates/krune-ui",
+    "crates/krampsta-app",
+    "crates/krampsta-core",
+    "crates/krampsta-agent",
+    "crates/krampsta-providers",
+    "crates/krampsta-ui",
 ]
 
 [workspace.package]
@@ -15,10 +15,10 @@ license = "MIT"
 rust-version = "1.99.1"
 
 [workspace.dependencies]
-krune-core = { path = "crates/krune-core" }
-krune-agent = { path = "crates/krune-agent" }
-krune-providers = { path = "crates/krune-providers" }
-krune-ui = { path = "crates/krune-ui" }
+krampsta-core = { path = "crates/krampsta-core" }
+krampsta-agent = { path = "crates/krampsta-agent" }
+krampsta-providers = { path = "crates/krampsta-providers" }
+krampsta-ui = { path = "crates/krampsta-ui" }
 
 # Rune and rune-kit are pinned to ONE commit of Rune's `dev` branch (never a floating branch).
 # When bumping, change RUNE_REV everywhere in this file at once — including every entry in

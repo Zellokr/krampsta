@@ -1,0 +1,22 @@
+[package]
+name = "krampsta-ui"
+description = "Krampsta's desktop interface: state, theme, views and components, built with Rune and rune-kit."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+krampsta-core.workspace = true
+krampsta-agent.workspace = true
+rune.workspace = true
+rune-kit.workspace = true
+rune-theme-opencode.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# Only for the fake catalogs in tests (a sign-in that takes a moment).
+tokio.workspace = true

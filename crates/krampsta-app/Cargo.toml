@@ -1,0 +1,26 @@
+[package]
+name = "krampsta-app"
+description = "Krampsta — Native AI Coding Agent. The desktop executable."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "krampsta"
+path = "src/main.rs"
+
+[dependencies]
+krampsta-agent.workspace = true
+krampsta-providers.workspace = true
+krampsta-ui.workspace = true
+rune.workspace = true
+
+[features]
+default = []
+# Headless agent tooling (--snap, --tree, --script, ...) in release builds.
+# Debug builds always accept those flags.
+tooling = ["rune/tooling"]
+
+[lints]
+workspace = true

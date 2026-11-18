@@ -4,8 +4,8 @@
 
 # Headless tooling output (keep curated stills under assets/screenshots/)
 /out/
-/krune.png
-/krune-tree.json
+/krampsta.png
+/krampsta-tree.json
 
 # Local secrets / editor state
 .env

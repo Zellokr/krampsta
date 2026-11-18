@@ -1,13 +1,13 @@
-# Krune
+# Krampsta
 
 **Native AI Coding Agent** — una aplicación de escritorio nativa, escrita en Rust y dibujada con
 [Rune](https://github.com/anomalyco/rune), para trabajar con agentes de IA que exploran
 repositorios, editan código y ejecutan herramientas.
 
-Krune = **K**ristian + **Rune**. Sin Electron, sin Tauri, sin WebView, sin HTML/CSS: la interfaz
+Krampsta = **K**ristian + **Rune**. Sin Electron, sin Tauri, sin WebView, sin HTML/CSS: la interfaz
 la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
 
-![Krune](assets/screenshots/krune.png)
+![Krampsta](assets/screenshots/krampsta.png)
 
 > Estado: **bootstrap funcional (v0.1)** y primer proveedor real: OpenAI y servidores compatibles
 > (llama.cpp, vLLM, Ollama…). Sin proveedor configurado, el agente es un `MockAgent` simulado (sin red).
@@ -16,9 +16,9 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
 
 - Ventana nativa de 1200×800, redimensionable (mínimo 760×520), tema oscuro por defecto: el
   tema **OpenCode** de Rune (`rune-theme-opencode`, el mismo de Rugents), con Inter e IBM Plex Mono.
-- **Sidebar**: identidad de Krune, *New session*, lista de sesiones con la activa resaltada
+- **Sidebar**: identidad de Krampsta, *New session*, lista de sesiones con la activa resaltada
   (spinner mientras corre, punto de aviso si falló) y acceso a *Settings*.
-- **Panel principal**: título de la sesión, historial (usuario a la derecha, Krune a la
+- **Panel principal**: título de la sesión, historial (usuario a la derecha, Krampsta a la
   izquierda con Markdown y bloques de código coloreados), indicador de estado del agente
   (`Idle`, `Running`, `Completed`, `Failed`, `Cancelled`) y *composer* que crece con el texto.
 - **Panel derecho**: vista de diferencias (`rune-kit` `DiffView`) con datos de ejemplo;
@@ -40,43 +40,43 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
 ## Arquitectura
 
 ```text
-krune/
+krampsta/
 ├── Cargo.toml              workspace, Rune fijado a un commit + [patch.crates-io]
 ├── rust-toolchain.toml     1.99.1 (la misma que Rune)
 ├── crates/
-│   ├── krune-core/         dominio puro: Session, Message, AgentStatus, AgentEvent, ToolCall…
-│   ├── krune-agent/        contrato AgentEngine, AgentHost (runtime async) y MockAgent
-│   ├── krune-providers/    motores reales: HTTP + SSE (reqwest) y OpenAI/compatibles
+│   ├── krampsta-core/         dominio puro: Session, Message, AgentStatus, AgentEvent, ToolCall…
+│   ├── krampsta-agent/        contrato AgentEngine, AgentHost (runtime async) y MockAgent
+│   ├── krampsta-providers/    motores reales: HTTP + SSE (reqwest) y OpenAI/compatibles
 │   │   └── tests/          servidor HTTP falso que reproduce streams grabados
-│   ├── krune-ui/           estado de la UI, tema, vistas y componentes Rune/rune-kit
+│   ├── krampsta-ui/           estado de la UI, tema, vistas y componentes Rune/rune-kit
 │   │   └── tests/ui.rs     pruebas de interacción con el Runtime headless de Rune
-│   └── krune-app/          binario `krune`: elige el motor y arranca la app
+│   └── krampsta-app/          binario `krampsta`: elige el motor y arranca la app
 ├── scripts/                snapshots.sh, send-message.json (script headless)
 └── assets/screenshots/     capturas de referencia generadas headless
 ```
 
 ```text
-krune-app ──▶ krune-ui ─────────▶ krune-agent ──▶ krune-core
-krune-app ──▶ krune-providers ──▶ krune-agent
-       (krune-ui y krune-providers también usan krune-core)
-          (Rune y rune-kit sólo en krune-ui y krune-app)
+krampsta-app ──▶ krampsta-ui ─────────▶ krampsta-agent ──▶ krampsta-core
+krampsta-app ──▶ krampsta-providers ──▶ krampsta-agent
+       (krampsta-ui y krampsta-providers también usan krampsta-core)
+          (Rune y rune-kit sólo en krampsta-ui y krampsta-app)
 ```
 
-- **krune-core** no depende de Rune ni de ningún proveedor. `Session::apply(&AgentEvent)` es la
+- **krampsta-core** no depende de Rune ni de ningún proveedor. `Session::apply(&AgentEvent)` es la
   máquina de estados que pliega los eventos de una ejecución en la sesión; los eventos de una
   ejecución obsoleta (p. ej. una cancelada que sigue hablando) se ignoran.
-- **krune-agent** define `AgentEngine` (objeto `Arc<dyn AgentEngine>`, futuro `Send`),
+- **krampsta-agent** define `AgentEngine` (objeto `Arc<dyn AgentEngine>`, futuro `Send`),
   `RunContext` (emitir texto/herramientas, token de cancelación, `sleep` cancelable) y
   `AgentHost`, que posee un runtime **tokio** creado perezosamente, lanza ejecuciones, garantiza
   `Started` + exactamente un evento terminal (incluso si el motor hace *panic*) y entrega los
   eventos por un canal más un `Notifier` (`Arc<dyn Fn() + Send + Sync>`).
-- **krune-ui**: `KruneApp` es todo el estado. En `AppSpec::setup` el `Waker` de Rune se instala
-  como notificador; cuando llega un evento, Rune ejecuta `poll`, que llama a `KruneApp::pump`.
+- **krampsta-ui**: `KrampstaApp` es todo el estado. En `AppSpec::setup` el `Waker` de Rune se instala
+  como notificador; cuando llega un evento, Rune ejecuta `poll`, que llama a `KrampstaApp::pump`.
   El hilo gráfico nunca bloquea y las vistas son funciones puras del estado (sin I/O).
-- **krune-app** sólo cablea: `rune::App::new(krune_ui::spec()).init(|| KruneApp::new(catalog()))`,
-  con el `Catalog` de `krune-providers`. La UI sólo conoce el contrato `EngineCatalog` de
-  `krune-agent`: lista los proveedores, pide sus modelos en segundo plano y cambia de motor.
-- **krune-providers**: `sse` (parser incremental de `text/event-stream`), `http` (petición
+- **krampsta-app** sólo cablea: `rune::App::new(krampsta_ui::spec()).init(|| KrampstaApp::new(catalog()))`,
+  con el `Catalog` de `krampsta-providers`. La UI sólo conoce el contrato `EngineCatalog` de
+  `krampsta-agent`: lista los proveedores, pide sus modelos en segundo plano y cambia de motor.
+- **krampsta-providers**: `sse` (parser incremental de `text/event-stream`), `http` (petición
   cancelable: cancelar suelta la respuesta y cierra la conexión; errores legibles para 401/403,
   429, red y *timeouts*), `OpenAiEngine` (Chat Completions con streaming), `list_models`
   (`GET /models`) y `Catalog`.
@@ -96,9 +96,9 @@ krune-app ──▶ krune-providers ──▶ krune-agent
 ## Instalación y ejecución
 
 ```bash
-git clone <este repositorio> krune && cd krune
-cargo run -p krune-app             # abre la ventana (binario: target/debug/krune)
-cargo run -p krune-app --release   # versión optimizada
+git clone <este repositorio> krampsta && cd krampsta
+cargo run -p krampsta-app             # abre la ventana (binario: target/debug/krampsta)
+cargo run -p krampsta-app --release   # versión optimizada
 ```
 
 La primera compilación descarga y compila Rune (varios minutos).
@@ -120,16 +120,16 @@ modelos se leen del propio servidor (`GET /v1/models`). Los proveedores disponib
 | Simulated | el `MockAgent` | nada |
 
 Las claves se leen del entorno, nunca del repositorio. Las cuentas (ChatGPT, Copilot) se inician en la app
-con un código de dispositivo: Krune muestra el código, abre la página y guarda la sesión en el
+con un código de dispositivo: Krampsta muestra el código, abre la página y guarda la sesión en el
 llavero del sistema (Administrador de credenciales en Windows). Elegir en el selector un proveedor
 de cuenta sin sesión abre el inicio de sesión. Para elegir lo que sale seleccionado al
-abrir: `KRUNE_PROVIDER` (`openai`, `chatgpt`, `copilot`, `custom`, `llamacpp`, `ollama`, `lmstudio` o `mock`) y
-`KRUNE_MODEL`. Con llama.cpp el desplegable muestra el nombre del `.gguf` cargado.
+abrir: `KRAMPSTA_PROVIDER` (`openai`, `chatgpt`, `copilot`, `custom`, `llamacpp`, `ollama`, `lmstudio` o `mock`) y
+`KRAMPSTA_MODEL`. Con llama.cpp el desplegable muestra el nombre del `.gguf` cargado.
 Sin nada definido, arranca con el simulado. Con Ollama, por ejemplo:
 
 ```bash
 ollama pull qwen3:4b
-cargo run -p krune-app        # y elige Ollama › qwen3:4b bajo el composer
+cargo run -p krampsta-app        # y elige Ollama › qwen3:4b bajo el composer
 ```
 
 ## Tests y comprobaciones
@@ -141,16 +141,16 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-- `krune-core`: transiciones de sesión (envío, streaming, fallo, cancelación, eventos obsoletos).
-- `krune-agent`: el host enmarca cada ejecución, convierte errores y *panics* en `Failed`,
+- `krampsta-core`: transiciones de sesión (envío, streaming, fallo, cancelación, eventos obsoletos).
+- `krampsta-agent`: el host enmarca cada ejecución, convierte errores y *panics* en `Failed`,
   notifica cada evento; el mock llama herramientas, falla con `/fail` y se cancela rápido.
-- `krune-providers`: parser SSE (eventos partidos, UTF-8 a medias, `
+- `krampsta-providers`: parser SSE (eventos partidos, UTF-8 a medias, `
 `), errores HTTP y, contra
   un servidor falso, streaming grabado, 401, 429, error dentro del stream, servidor caído y que
   cancelar cierra la conexión.
-- `krune-ui` (unitarias): enviar/recibir con el mock real, plegado responsive de paneles y el
+- `krampsta-ui` (unitarias): enviar/recibir con el mock real, plegado responsive de paneles y el
   selector (lista de modelos que llega, primer modelo, recordar el último, servidor caído, sin clave).
-- `krune-ui/tests/ui.rs`: la vista real en el `Runtime` headless de Rune, con clics y teclado:
+- `krampsta-ui/tests/ui.rs`: la vista real en el `Runtime` headless de Rune, con clics y teclado:
   componentes presentes, crear/seleccionar sesiones, escribir en el composer, Enter y botón de
   enviar, estados running → completed/failed/cancelled, panel de cambios, ajustes y que el
   layout no se salga de la ventana ni se solape a 760×520, 1000×700, 1200×800 y 1680×1050.
@@ -161,12 +161,12 @@ Las builds de depuración aceptan siempre las herramientas de Rune; en release, 
 `--features tooling`.
 
 ```bash
-cargo run -p krune-app -- --snap krune.png --size 1200x800 --scale 1
-cargo run -p krune-app -- --tree krune-tree.json
-cargo run -p krune-app -- --list-scenes
-cargo run -p krune-app -- --snap running.png --scene running        # escenas deterministas
-cargo run -p krune-app -- --script scripts/send-message.json --snap send.png --at mark:end
-cargo run -p krune-app --release --features tooling -- --snap krune.png
+cargo run -p krampsta-app -- --snap krampsta.png --size 1200x800 --scale 1
+cargo run -p krampsta-app -- --tree krampsta-tree.json
+cargo run -p krampsta-app -- --list-scenes
+cargo run -p krampsta-app -- --snap running.png --scene running        # escenas deterministas
+cargo run -p krampsta-app -- --script scripts/send-message.json --snap send.png --at mark:end
+cargo run -p krampsta-app --release --features tooling -- --snap krampsta.png
 bash scripts/snapshots.sh            # regenera assets/screenshots/
 ```
 
@@ -174,7 +174,7 @@ Escenas: `light`, `empty`, `draft`, `running`, `completed`, `failed`, `cancelled
 `changes-hidden`, `sidebar-hidden`, `provider-picker`, `model-picker`, `model-error`, `signed-in`,
 `sign-in`. Para tamaños estrechos usa `--at 1.0`: los paneles se pliegan
 tras el primer layout. Todos los elementos importantes tienen claves estables con el prefijo
-`krune-` (ver `crates/krune-ui/src/keys.rs`), útiles en scripts (`"key": "krune-composer"`) y
+`krampsta-` (ver `crates/krampsta-ui/src/keys.rs`), útiles en scripts (`"key": "krampsta-composer"`) y
 en el árbol JSON.
 
 ## Actualizar Rune de forma segura
@@ -185,7 +185,7 @@ Commit actual: **`47eaa86eba751687597d0aaf6ee325baeecd4666`**.
 1. `git ls-remote https://github.com/anomalyco/rune refs/heads/dev` → nuevo SHA.
 2. Lee el `Cargo.toml` raíz de Rune **en ese SHA**: la tabla `[patch.crates-io]` (hoy `winit`,
    `parley_engine`, `wgpu-hal`, `accesskit_windows`, `accesskit_macos`) y su `rust-toolchain.toml`.
-3. En el `Cargo.toml` de Krune sustituye el SHA en `rune`, `rune-kit` **y en cada parche**
+3. En el `Cargo.toml` de Krampsta sustituye el SHA en `rune`, `rune-kit` **y en cada parche**
    (todos iguales); añade o quita parches según la lista de Rune. Cargo no hereda los
    `[patch]` de una dependencia. Ajusta `rust-toolchain.toml` si Rune cambió de versión.
 4. Revisa el `CHANGELOG.md` de Rune por cambios incompatibles.

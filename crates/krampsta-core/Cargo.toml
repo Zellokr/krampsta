@@ -1,0 +1,13 @@
+[package]
+name = "krampsta-core"
+description = "Krampsta domain model: sessions, messages, agent status and events. No UI, no providers."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

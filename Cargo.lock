@@ -1833,41 +1833,41 @@ dependencies = [
 ]
 
 [[package]]
-name = "krune-agent"
+name = "krampsta-agent"
 version = "0.1.0"
 dependencies = [
- "krune-core",
+ "krampsta-core",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
 ]
 
 [[package]]
-name = "krune-app"
+name = "krampsta-app"
 version = "0.1.0"
 dependencies = [
- "krune-agent",
- "krune-providers",
- "krune-ui",
+ "krampsta-agent",
+ "krampsta-providers",
+ "krampsta-ui",
  "rune",
 ]
 
 [[package]]
-name = "krune-core"
+name = "krampsta-core"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
-name = "krune-providers"
+name = "krampsta-providers"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
  "keyring",
- "krune-agent",
- "krune-core",
+ "krampsta-agent",
+ "krampsta-core",
  "reqwest",
  "serde",
  "serde_json",
@@ -1876,11 +1876,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "krune-ui"
+name = "krampsta-ui"
 version = "0.1.0"
 dependencies = [
- "krune-agent",
- "krune-core",
+ "krampsta-agent",
+ "krampsta-core",
  "rune",
  "rune-kit",
  "rune-theme-opencode",
