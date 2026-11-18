@@ -44,6 +44,12 @@ Para una escena suelta:
 
 Detalles que ya costaron una iteración:
 
+- **El binario usa el catálogo del entorno**, no `KruneApp::with_mock`. `snapshots.sh` fija
+  `KRUNE_PROVIDER=mock`; si lanzas `--snap` a mano, exporta lo mismo o la captura dependerá
+  de las claves de tu máquina.
+- **Desplegables abiertos**: revisa que el listbox no corte etiquetas (mide 160 pt como
+  mínimo) y que el trigger no se salga del panel (en `narrow` sobre todo).
+
 - **Tamaños estrechos llevan `--at 1.0`.** Los paneles se pliegan en `on_layout`, después del
   primer frame; sin `--at` la captura muestra el layout aún sin plegar.
 - **El tema es estado de la app, no del sistema.** `--theme light` no cambia nada (Krune es

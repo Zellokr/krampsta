@@ -78,7 +78,12 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
 - Tests unitarios junto al código (`#[cfg(test)] mod tests` al final del archivo); tests de
   interacción en `crates/krune-ui/tests/` con `rune::Runtime` (ver `tests/ui.rs`: `click`,
   `type_text` con `Ime::Commit`, `press`, `pump_until_finished`).
+- Los helpers de `tests/*.rs` (fuera de funciones `#[test]`) no están cubiertos por
+  `allow-unwrap-in-tests`: esos archivos empiezan con `#![allow(clippy::unwrap_used, clippy::expect_used)]`.
 - Una escena headless nueva (`SCENES` en `app.rs`) por cada estado visual nuevo importante.
+  Las escenas **asignan** el estado que muestran (p. ej. la lista de proveedores entera), no
+  añaden a lo que haya: `krune --snap` arranca con el catálogo real del entorno.
+- El runtime del `AgentHost` usa `enable_all()`: HTTP necesita el driver de I/O, no sólo el de tiempo.
 - Archivos de menos de ~800 líneas; si crecen, divide por capacidad.
 - Sin secretos en el repositorio (claves de API por entorno o llavero del sistema).
 - Commits pequeños y descriptivos; `Cargo.lock` siempre versionado.
@@ -93,7 +98,8 @@ repo): https://claude.ai/artifact/Dp946THS8hdANaaJg2uxiV
 - Al terminar una tarea según los criterios del propio documento (validación + `verify-ui` si
   cambia la UI), marca su casilla (`set` `checked: true` en su listItem). No marques lo que no
   esté hecho y comprobado.
-- Una tarea nueva que surja va al hito que corresponda, en una línea y con un verbo.
+- Una tarea nueva que surja va al hito que corresponda, en una línea y con un verbo. Antes de
+  añadirla, relee las tareas de **todos** los hitos: puede que otra ya la cubra.
 - Si la sesión no tiene acceso a Claude Docs, dilo al usuario en vez de suponer el estado.
 
 ## Skills
