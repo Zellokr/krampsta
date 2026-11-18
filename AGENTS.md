@@ -9,11 +9,14 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `Session::apply` es la única forma de cambiar una sesión a partir de eventos.
 - `crates/krune-agent` — `AgentEngine` (contrato), `RunContext`, `AgentHost` (tokio, canal +
   notificador), `MockAgent`. No depende de Rune.
+- `crates/krune-providers` — motores reales: `sse` (parser), `http` (cliente `reqwest`, petición
+  SSE cancelable, `HttpError`), `OpenAiEngine`; `engine_from_env()` elige el motor. No depende de Rune.
 - `crates/krune-ui` — `KruneApp` (estado), `app.rs` (spec, vista raíz, poll, teclas, escenas),
   `views/` (pantallas y paneles), `components/` (piezas), `theme.rs` (único sitio de colores),
   `keys.rs` (claves estables), `sample.rs` (datos de ejemplo).
 - `crates/krune-app` — binario `krune`; sólo elige el motor y arranca.
-- Dependencias permitidas: `app → ui → agent → core`, `ui → core`. Sin ciclos.
+- Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
+  `providers → core`. Sin ciclos; la UI nunca depende de `krune-providers`.
 
 ## Comandos (todos deben pasar antes de terminar)
 
@@ -52,7 +55,12 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
 - **No** emitas `Started` ni eventos terminales: los pone el host. Devuelve `Ok(())`,
   `Err(AgentError::..)` o `Err(AgentError::Cancelled)`.
 - Nunca bloquees un hilo de tokio (nada de I/O síncrona en el motor).
-- Se cablea en `crates/krune-app/src/main.rs` (`engine()`); la UI no cambia.
+- Los motores de proveedor viven en `krune-providers` y se eligen en `engine_from_env()`
+  (llamado desde `engine()` en `crates/krune-app/src/main.rs`); la UI no cambia.
+- Peticiones HTTP siempre con `http::client()` y `http::stream_sse` (cancelación y errores
+  legibles ya resueltos). Cada motor se prueba contra el servidor falso de
+  `crates/krune-providers/tests/` con un stream grabado real, no sólo con JSON inventado.
+- Las claves nunca se imprimen: `Debug` a mano en las configs que las llevan.
 
 ## Código
 

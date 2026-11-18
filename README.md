@@ -9,8 +9,8 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
 
 ![Krune](assets/screenshots/krune.png)
 
-> Estado: **bootstrap funcional (v0.1)**. La interfaz y el flujo de sesiones son reales; el
-> agente es un `MockAgent` simulado (sin red). Los proveedores reales llegan en los próximos hitos.
+> Estado: **bootstrap funcional (v0.1)** y primer proveedor real: OpenAI y servidores compatibles
+> (llama.cpp, vLLM, Ollama…). Sin proveedor configurado, el agente es un `MockAgent` simulado (sin red).
 
 ## Qué hace hoy
 
@@ -46,6 +46,8 @@ krune/
 ├── crates/
 │   ├── krune-core/         dominio puro: Session, Message, AgentStatus, AgentEvent, ToolCall…
 │   ├── krune-agent/        contrato AgentEngine, AgentHost (runtime async) y MockAgent
+│   ├── krune-providers/    motores reales: HTTP + SSE (reqwest) y OpenAI/compatibles
+│   │   └── tests/          servidor HTTP falso que reproduce streams grabados
 │   ├── krune-ui/           estado de la UI, tema, vistas y componentes Rune/rune-kit
 │   │   └── tests/ui.rs     pruebas de interacción con el Runtime headless de Rune
 │   └── krune-app/          binario `krune`: elige el motor y arranca la app
@@ -54,9 +56,9 @@ krune/
 ```
 
 ```text
-krune-app ──▶ krune-ui ──▶ krune-agent ──▶ krune-core
-                 │                            ▲
-                 └────────────────────────────┘
+krune-app ──▶ krune-ui ─────────▶ krune-agent ──▶ krune-core
+krune-app ──▶ krune-providers ──▶ krune-agent
+       (krune-ui y krune-providers también usan krune-core)
           (Rune y rune-kit sólo en krune-ui y krune-app)
 ```
 
@@ -72,7 +74,10 @@ krune-app ──▶ krune-ui ──▶ krune-agent ──▶ krune-core
   como notificador; cuando llega un evento, Rune ejecuta `poll`, que llama a `KruneApp::pump`.
   El hilo gráfico nunca bloquea y las vistas son funciones puras del estado (sin I/O).
 - **krune-app** sólo cablea: `rune::App::new(krune_ui::spec()).init(|| KruneApp::new(engine()))`.
-  Cambiar el `MockAgent` por un proveedor real es cambiar `engine()`, no la interfaz.
+  `engine()` elige el proveedor con `krune_providers::engine_from_env()`; la interfaz no cambia.
+- **krune-providers**: `sse` (parser incremental de `text/event-stream`), `http` (petición
+  cancelable: cancelar suelta la respuesta y cierra la conexión; errores legibles para 401/403,
+  429, red y *timeouts*) y `OpenAiEngine` (Chat Completions con streaming).
 
 ## Requisitos
 
@@ -96,6 +101,25 @@ cargo run -p krune-app --release   # versión optimizada
 
 La primera compilación descarga y compila Rune (varios minutos).
 
+### Elegir el proveedor
+
+Krune lee la configuración del entorno (nunca del repositorio):
+
+| Variable | Para qué |
+| --- | --- |
+| `OPENAI_API_KEY` | Clave de OpenAI (u otro servicio compatible). Con ella se usa OpenAI. |
+| `OPENAI_BASE_URL` | Raíz de la API, hasta `/v1`. Por defecto `https://api.openai.com/v1`. |
+| `KRUNE_MODEL` | Modelo. Por defecto `gpt-4o-mini`. |
+| `KRUNE_PROVIDER` | `openai` o `mock` para forzar uno. |
+
+Con un servidor local no hace falta clave, por ejemplo con Ollama:
+
+```bash
+OPENAI_BASE_URL=http://localhost:11434/v1 KRUNE_MODEL=qwen3 cargo run -p krune-app
+```
+
+El motor activo aparece bajo el composer y en *Settings*.
+
 ## Tests y comprobaciones
 
 ```bash
@@ -108,6 +132,10 @@ cargo test --workspace
 - `krune-core`: transiciones de sesión (envío, streaming, fallo, cancelación, eventos obsoletos).
 - `krune-agent`: el host enmarca cada ejecución, convierte errores y *panics* en `Failed`,
   notifica cada evento; el mock llama herramientas, falla con `/fail` y se cancela rápido.
+- `krune-providers`: parser SSE (eventos partidos, UTF-8 a medias, `
+`), errores HTTP y, contra
+  un servidor falso, streaming grabado, 401, 429, error dentro del stream, servidor caído y que
+  cancelar cierra la conexión.
 - `krune-ui` (unitarias): enviar/recibir con el mock real, plegado responsive de paneles.
 - `krune-ui/tests/ui.rs`: la vista real en el `Runtime` headless de Rune, con clics y teclado:
   componentes presentes, crear/seleccionar sesiones, escribir en el composer, Enter y botón de
@@ -153,9 +181,8 @@ Commit actual: **`47eaa86eba751687597d0aaf6ee325baeecd4666`**.
 
 ## Próximos hitos
 
-1. **Proveedores reales** detrás de `AgentEngine`: Anthropic, OpenAI, Google y modelos locales
-   (streaming SSE con `reqwest`, claves desde el llavero del sistema o variables de entorno,
-   nunca en el repositorio).
+1. **Proveedores reales** detrás de `AgentEngine`: OpenAI y compatibles (hecho), GitHub Copilot,
+   Anthropic y Google; claves desde el llavero del sistema, selector de modelo y coste por sesión.
 2. **Herramientas**: lectura de archivos, búsqueda, edición con diff propuesto → aceptado en el
    panel de cambios; ejecución de comandos con **sistema de permisos** y sandbox.
 3. **Persistencia** de sesiones (fuera del hilo gráfico) y apertura de un proyecto/carpeta.

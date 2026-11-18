@@ -66,7 +66,7 @@ impl AgentHost {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .thread_name("krune-agent")
-                .enable_time()
+                .enable_all()
                 .build()
                 .map_err(|e| AgentError::Runtime(e.to_string()))?;
             self.runtime = Some(rt);

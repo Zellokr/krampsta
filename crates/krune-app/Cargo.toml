@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 krune-agent.workspace = true
+krune-providers.workspace = true
 krune-ui.workspace = true
 rune.workspace = true
 

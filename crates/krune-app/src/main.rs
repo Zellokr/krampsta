@@ -1,8 +1,8 @@
 //! Krune — Native AI Coding Agent.
 //!
-//! The executable only wires things together: it picks the agent engine (the `MockAgent` for
-//! now) and hands it to the UI. Swapping in a real provider means changing the engine here,
-//! not the interface.
+//! The executable only wires things together: it picks the agent engine and hands it to the
+//! UI. A provider configured in the environment (see `krune_providers::engine_from_env`) wins;
+//! otherwise Krune runs the simulated `MockAgent`.
 //!
 //! `cargo run -p krune-app` opens the window. Debug builds (or `--features tooling`) also run
 //! headless: `-- --snap krune.png --size 1200x800 --scale 1`, `-- --tree krune-tree.json`,
@@ -16,7 +16,15 @@ use krune_agent::{AgentEngine, MockAgent, MockConfig};
 use krune_ui::KruneApp;
 
 fn engine() -> Arc<dyn AgentEngine> {
-    Arc::new(MockAgent::new(MockConfig::default()))
+    match krune_providers::engine_from_env() {
+        Ok(Some(engine)) => engine,
+        Ok(None) => Arc::new(MockAgent::new(MockConfig::default())),
+        Err(e) => {
+            // The composer shows "engine: mock", so the fallback is visible in the window too.
+            eprintln!("krune: {e}; using the simulated agent instead");
+            Arc::new(MockAgent::new(MockConfig::default()))
+        }
+    }
 }
 
 fn main() {

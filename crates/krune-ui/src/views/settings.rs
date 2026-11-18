@@ -25,7 +25,16 @@ pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit) -> El {
         .on_toggle(|s: &mut KruneApp| s.toggle_changes())
         .build(k)
         .key(keys::SETTING_CHANGES);
-    let engine = text(format!("{} (simulated, no network)", s.engine_name())).font(k.ty.ui).color(k.c.text_muted);
+    let simulated = s.engine_name() == "mock";
+    let (engine_label, engine_hint) = if simulated {
+        (
+            format!("{} (simulated, no network)", s.engine_name()),
+            "Set OPENAI_API_KEY, or OPENAI_BASE_URL for a local server.",
+        )
+    } else {
+        (s.engine_name().to_owned(), "Chosen from the environment (KRUNE_PROVIDER, OPENAI_*).")
+    };
+    let engine = text(engine_label).font(k.ty.ui).color(k.c.text_muted);
     let version = text(concat!("Krune ", env!("CARGO_PKG_VERSION"))).font(k.ty.ui).color(k.c.text_muted);
 
     let body = col().w_full().h_full().padding(28.0).items_center().child(
@@ -36,7 +45,7 @@ pub fn view(s: &KruneApp, cx: &mut Cx<KruneApp>, k: &Kit) -> El {
             .child(text("General").font(k.ty.small_medium).color(k.c.text_faint))
             .child(setting(k, "Appearance", "Krune uses the dark theme by default.", appearance))
             .child(setting(k, "Changes panel", "Show file changes beside the conversation.", changes))
-            .child(setting(k, "Agent engine", "Real providers arrive in a later milestone.", engine))
+            .child(setting(k, "Agent engine", engine_hint, engine))
             .child(setting(k, "About", "Native AI Coding Agent, built with Rust and Rune.", version)),
     );
     let back = Button::new("Back")
