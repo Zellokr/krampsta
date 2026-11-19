@@ -63,18 +63,12 @@ pub fn view(s: &KrampstaApp, running: bool, k: &Kit, layer: &mut Vec<El>) -> El 
     if s.engine.takes_effort() {
         pickers = pickers.child(engine_picker::effort(s, k, layer, Place::Composer));
     }
-    let footer = row()
-        .w_full()
-        .gap(12.0)
-        .items_center()
-        .justify_between()
-        .child(hint.key(keys::COMPOSER_HINT).truncate().shrink().min_w(0.0))
-        .child(pickers);
-
+    // Pickers above the field, on the right; the hint under it.
     col()
         .w_full()
         .max_w(820.0)
         .gap(8.0)
+        .child(row().w_full().items_center().justify_end().child(pickers))
         .child(row().w_full().gap(8.0).items_end().child(col().grow(1.0).min_w(0.0).child(field)).child(action))
-        .child(footer)
+        .child(row().w_full().child(hint.key(keys::COMPOSER_HINT).truncate().shrink().min_w(0.0)))
 }
