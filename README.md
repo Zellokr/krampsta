@@ -110,7 +110,7 @@ modelos se leen del propio servidor (`GET /v1/models`). Los proveedores disponib
 
 | Proveedor | Servidor | Necesita |
 | --- | --- | --- |
-| OpenAI | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| OpenAI | `https://api.openai.com/v1` | una clave: *Settings › API keys*, o `OPENAI_API_KEY` |
 | ChatGPT | el backend de Codex de tu cuenta (API Responses) | tu plan de ChatGPT: *Settings › Accounts › Sign in* |
 | GitHub Copilot | la API de Copilot de tu cuenta | tu suscripción: *Settings › Accounts › Sign in* |
 | OpenAI-compatible | `OPENAI_BASE_URL` (sólo aparece si está definida) | `OPENAI_API_KEY`, si el servidor la pide |
@@ -119,7 +119,9 @@ modelos se leen del propio servidor (`GET /v1/models`). Los proveedores disponib
 | LM Studio | `http://localhost:1234/v1` | el servidor de LM Studio en marcha |
 | Simulated | el `MockAgent` | nada |
 
-Las claves se leen del entorno, nunca del repositorio. Las cuentas (ChatGPT, Copilot) se inician en la app
+Las claves nunca van al repositorio. La de OpenAI se guarda desde *Settings › API keys* en el
+llavero del sistema (entrada `openai-api-key`) y manda sobre `OPENAI_API_KEY`; sin clave guardada
+se usa la variable. Las demás se leen del entorno. Las cuentas (ChatGPT, Copilot) se inician en la app
 con un código de dispositivo: Krampsta muestra el código, abre la página y guarda la sesión en el
 llavero del sistema (Administrador de credenciales en Windows). Elegir en el selector un proveedor
 de cuenta sin sesión abre el inicio de sesión. Para elegir lo que sale seleccionado al
@@ -195,8 +197,9 @@ Commit actual: **`47eaa86eba751687597d0aaf6ee325baeecd4666`**.
 
 ## Próximos hitos
 
-1. **Proveedores reales** detrás de `AgentEngine`: OpenAI y compatibles (hecho), GitHub Copilot,
-   Anthropic y Google; claves desde el llavero del sistema, selector de modelo y coste por sesión.
+1. **Proveedores reales** detrás de `AgentEngine` (hecho): OpenAI y compatibles, ChatGPT y GitHub
+   Copilot, clave de OpenAI en el llavero, selector de modelo y esfuerzo, tokens por sesión.
+   Anthropic y Google, aplazados (sólo admiten clave de API, sin cuenta).
 2. **Herramientas**: lectura de archivos, búsqueda, edición con diff propuesto → aceptado en el
    panel de cambios; ejecución de comandos con **sistema de permisos** y sandbox.
 3. **Persistencia** de sesiones (fuera del hilo gráfico) y apertura de un proyecto/carpeta.

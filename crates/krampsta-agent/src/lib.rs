@@ -16,8 +16,8 @@ mod host;
 mod mock;
 
 pub use catalog::{
-    Account, DeviceCode, EngineCatalog, LoginPrompt, MOCK_MODEL, MOCK_PROVIDER, MockCatalog, Provider, ProviderKind,
-    Selection,
+    Account, DeviceCode, EngineCatalog, KeySource, LoginPrompt, MOCK_MODEL, MOCK_PROVIDER, MockCatalog, Provider,
+    ProviderKind, Selection,
 };
 pub use engine::AgentEngine;
 pub use engine::AgentError;

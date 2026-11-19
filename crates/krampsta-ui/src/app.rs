@@ -1,6 +1,8 @@
 //! Rune wiring: the app spec, the root view, `poll`, keyboard shortcuts and headless scenes.
 
-use krampsta_agent::{Account, DeviceCode, Effort, EffortLevel, MockCatalog, Provider, ProviderKind, Selection};
+use krampsta_agent::{
+    Account, DeviceCode, Effort, EffortLevel, KeySource, MockCatalog, Provider, ProviderKind, Selection,
+};
 use krampsta_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult, Usage};
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, PointerPress, TextEdit, Tx, Waker, row, text};
 use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
@@ -166,6 +168,16 @@ const SCENES: &[Scene] = &[
     }),
     ("settings", |s| {
         stage_accounts(s, false);
+        s.screen = Screen::Settings;
+    }),
+    // A key typed into the masked field, ready to save.
+    ("api-key", |s| {
+        stage_accounts(s, false);
+        s.screen = Screen::Settings;
+        s.api_key.draft = TextEdit::new("sk-proj-0123456789").secure();
+    }),
+    ("api-key-saved", |s| {
+        stage_saved_key(s);
         s.screen = Screen::Settings;
     }),
     ("signed-in", |s| {
@@ -383,6 +395,7 @@ fn stage_accounts(s: &mut KrampstaApp, signed_in: bool) {
         missing: missing.map(str::to_owned),
         kind,
         reasoning_effort: false,
+        api_key: None,
     };
     let local = |id: &str, label: &str| provider(id, label, None, ProviderKind::Local);
     let account = |id: &str, label: &str, user: &str| {
@@ -392,7 +405,10 @@ fn stage_accounts(s: &mut KrampstaApp, signed_in: bool) {
         Provider { reasoning_effort: id == "chatgpt", ..provider(id, label, missing, ProviderKind::Account(state)) }
     };
     s.engine.providers = vec![
-        provider("openai", "OpenAI", Some("needs OPENAI_API_KEY"), ProviderKind::Cloud),
+        Provider {
+            api_key: Some(KeySource::Missing),
+            ..provider("openai", "OpenAI", Some(OPENAI_KEY_HINT), ProviderKind::Cloud)
+        },
         account("chatgpt", "ChatGPT", "me@example.com"),
         account("copilot", "GitHub Copilot", "octocat"),
         local("llamacpp", "llama.cpp"),
@@ -400,6 +416,18 @@ fn stage_accounts(s: &mut KrampstaApp, signed_in: bool) {
         local("lmstudio", "LM Studio"),
         MockCatalog::provider(),
     ];
+}
+
+/// What the real catalog says while OpenAI has no key.
+const OPENAI_KEY_HINT: &str = "needs an API key (Settings › API keys, or OPENAI_API_KEY)";
+
+/// [`stage_accounts`]'s list with an OpenAI key saved in the app.
+fn stage_saved_key(s: &mut KrampstaApp) {
+    stage_accounts(s, false);
+    if let Some(openai) = s.engine.providers.iter_mut().find(|p| p.id == "openai") {
+        openai.api_key = Some(KeySource::Saved);
+        openai.missing = None;
+    }
 }
 
 /// Ollama selected, its model list in `models`.

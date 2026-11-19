@@ -325,6 +325,7 @@ mod tests {
             missing: missing.map(Into::into),
             kind: ProviderKind::Local,
             reasoning_effort: false,
+            api_key: None,
         }
     }
 

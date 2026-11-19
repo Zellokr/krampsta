@@ -1,11 +1,11 @@
 //! Settings: a full-window page in the same frame as the chat.
 
-use krampsta_agent::Provider;
+use krampsta_agent::{KeySource, Provider};
 use rune::{Cx, El, Icon, ScrollSpec, Tx, col, icon, row, text};
 use rune_kit::shell::Page;
-use rune_kit::{Button, ButtonVariant, ControlSize, Kit, SegmentedControl, Switch};
+use rune_kit::{Button, ButtonVariant, ControlSize, Kit, SegmentedControl, Switch, TextInput};
 
-use crate::accounts::signed_in_user;
+use crate::accounts::{KeyState, signed_in_user};
 use crate::components::engine_picker::{self, Place};
 use crate::components::icons;
 use crate::keys;
@@ -55,6 +55,9 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec<
         let effort = engine_picker::effort(s, k, layer, Place::Settings);
         let hint = "How long the model thinks first. Auto uses each model's own default.";
         column = column.child(setting(k, "Reasoning effort", hint, effort));
+    }
+    if s.key_providers().next().is_some() {
+        column = column.child(section(k, "API keys").mt(12.0)).children(s.key_providers().map(|p| api_key(s, k, p)));
     }
     if s.account_providers().next().is_some() {
         let cards = row().w_full().gap(CARD_GAP).flex_wrap().children(s.account_providers().map(|p| account(k, p)));
@@ -133,6 +136,51 @@ fn account(k: &Kit, p: &Provider) -> El {
         .child(text(p.label.clone()).font(k.ty.ui_medium).color(k.c.text_base).mt(6.0))
         .child(text(status).font(k.ty.small).color(k.c.text_muted).truncate())
         .child(control.mt(8.0))
+}
+
+/// A provider's API key: where it comes from, and a masked field to save one (or a button to
+/// remove the saved one).
+fn api_key(s: &KrampstaApp, k: &Kit, p: &Provider) -> El {
+    let id = p.id.as_str();
+    let field = &s.api_key;
+    let busy = matches!(&field.state, KeyState::Saving { provider } if provider == id);
+    let description = match (&field.state, &p.api_key) {
+        (KeyState::Failed { provider, error }, _) if provider == id => error.clone(),
+        (_, Some(KeySource::Saved)) => "Saved in the system keychain.".to_owned(),
+        (_, Some(KeySource::Environment(var))) => format!("Read from {var}. A key saved here takes its place."),
+        _ => "Not set. A key saved here goes to the system keychain.".to_owned(),
+    };
+    let control = if p.api_key == Some(KeySource::Saved) {
+        let remove_id = p.id.clone();
+        Button::new("Remove")
+            .variant(ButtonVariant::Neutral)
+            .control_size(ControlSize::Regular)
+            .disabled(busy)
+            .on_press(move |s: &mut KrampstaApp| s.remove_api_key(&remove_id))
+            .build(k)
+            .key(keys::api_key_remove(id))
+    } else {
+        let (submit_id, save_id) = (p.id.clone(), p.id.clone());
+        let input = TextInput::new(&field.draft)
+            .secure()
+            .placeholder("sk-…")
+            .label(format!("{} API key", p.label))
+            .width(Some(200.0))
+            .disabled(busy)
+            .on_edit(|s: &mut KrampstaApp| &mut s.api_key.draft)
+            .on_submit(move |s: &mut KrampstaApp, _: &mut Tx| s.save_api_key(&submit_id))
+            .build(k)
+            .key(keys::api_key(id));
+        let save = Button::new("Save")
+            .variant(ButtonVariant::Contrast)
+            .control_size(ControlSize::Regular)
+            .disabled(busy || field.draft.text.trim().is_empty())
+            .on_press(move |s: &mut KrampstaApp| s.save_api_key(&save_id))
+            .build(k)
+            .key(keys::api_key_save(id));
+        row().gap(8.0).items_center().child(input).child(save)
+    };
+    setting(k, &p.label, &description, control)
 }
 
 fn setting(k: &Kit, title: &str, description: &str, control: El) -> El {

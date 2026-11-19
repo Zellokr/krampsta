@@ -1,9 +1,9 @@
-//! Signing in to account providers (GitHub Copilot, a ChatGPT plan) from the UI: the dialog's
-//! state and what its buttons do. The catalog does the work on the host's runtime; its code and
-//! outcome land through [`KrampstaApp::pump`].
+//! Signing in to account providers (GitHub Copilot, a ChatGPT plan) and saving API keys from the
+//! UI: the dialog's and the key field's state, and what their buttons do. The catalog does the
+//! work on the host's runtime; codes and outcomes land through [`KrampstaApp::pump`].
 
 use krampsta_agent::{Account, AccountEvent, AgentError, DeviceCode, Provider};
-use rune::Tx;
+use rune::{TextEdit, Tx};
 
 use crate::state::KrampstaApp;
 
@@ -38,7 +38,61 @@ impl SignIn {
     }
 }
 
+/// The API key field in settings: what is typed (masked) and how the last save went.
+#[derive(Clone, Debug)]
+pub struct KeyField {
+    pub draft: TextEdit,
+    pub state: KeyState,
+}
+
+impl Default for KeyField {
+    fn default() -> Self {
+        KeyField { draft: TextEdit::new("").secure(), state: KeyState::Idle }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum KeyState {
+    #[default]
+    Idle,
+    /// Saving or removing `provider`'s key in the keychain.
+    Saving {
+        provider: String,
+    },
+    Failed {
+        provider: String,
+        error: String,
+    },
+}
+
 impl KrampstaApp {
+    /// The providers whose API key can be saved here, for the settings' API keys section.
+    pub fn key_providers(&self) -> impl Iterator<Item = &Provider> {
+        self.engine.providers.iter().filter(|p| p.api_key.is_some())
+    }
+
+    /// Saves the typed key for `provider` in the system keychain.
+    pub fn save_api_key(&mut self, provider: &str) {
+        let key = self.api_key.draft.text.trim().to_owned();
+        if key.is_empty() {
+            return;
+        }
+        self.change_api_key(provider, Some(key));
+    }
+
+    /// Forgets `provider`'s saved key (the environment's, if any, takes over).
+    pub fn remove_api_key(&mut self, provider: &str) {
+        self.change_api_key(provider, None);
+    }
+
+    fn change_api_key(&mut self, provider: &str, key: Option<String>) {
+        let work = self.catalog.set_api_key(provider, key);
+        self.api_key.state = match self.agent.save_api_key(provider, work) {
+            Ok(()) => KeyState::Saving { provider: provider.to_owned() },
+            Err(e) => KeyState::Failed { provider: provider.to_owned(), error: reason(&e) },
+        };
+    }
+
     /// The providers that work through an account, for the settings' Accounts section.
     pub fn account_providers(&self) -> impl Iterator<Item = &Provider> {
         self.engine.providers.iter().filter(|p| p.account().is_some())
@@ -108,6 +162,14 @@ impl KrampstaApp {
                     Ok(()) => self.accounts_changed(&provider),
                     Err(e) => self.notice = Some(reason(&e)),
                 },
+                AccountEvent::KeySaved { provider, result } => match result {
+                    Ok(()) => {
+                        // A fresh secure field: the old one's buffer is wiped as it drops.
+                        self.api_key = KeyField::default();
+                        self.accounts_changed(&provider);
+                    }
+                    Err(e) => self.api_key.state = KeyState::Failed { provider, error: reason(&e) },
+                },
             }
         }
         changed
@@ -148,8 +210,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use krampsta_agent::{
-        AgentEngine, BoxFuture, EngineCatalog, LoginPrompt, MOCK_PROVIDER, MockAgent, MockCatalog, MockConfig,
-        ProviderKind, Selection,
+        AgentEngine, BoxFuture, EngineCatalog, KeySource, LoginPrompt, MOCK_PROVIDER, MockAgent, MockCatalog,
+        MockConfig, ProviderKind, Selection,
     };
 
     use super::*;
@@ -178,6 +240,7 @@ mod tests {
                         Account::SignedOut
                     }),
                     reasoning_effort: false,
+                    api_key: None,
                 },
                 MockCatalog::provider(),
             ]
@@ -277,5 +340,84 @@ mod tests {
         std::thread::sleep(Duration::from_millis(60));
         app.pump();
         assert_eq!(app.sign_in, SignIn::Closed);
+    }
+
+    /// One provider, "keyed", that needs an API key saved here (refused when it is "bad"),
+    /// and the simulated agent.
+    #[derive(Default)]
+    struct Keyed {
+        key: Arc<Mutex<Option<String>>>,
+    }
+
+    impl EngineCatalog for Keyed {
+        fn providers(&self) -> Vec<Provider> {
+            let saved = self.key.lock().unwrap().is_some();
+            vec![
+                Provider {
+                    id: "keyed".into(),
+                    label: "Keyed".into(),
+                    default_model: Some("m".into()),
+                    missing: (!saved).then(|| "needs an API key".into()),
+                    kind: ProviderKind::Cloud,
+                    reasoning_effort: false,
+                    api_key: Some(if saved { KeySource::Saved } else { KeySource::Missing }),
+                },
+                MockCatalog::provider(),
+            ]
+        }
+        fn initial(&self) -> Selection {
+            MockCatalog::default().initial()
+        }
+        fn engine(&self, _: &str, _: &str) -> Result<Arc<dyn AgentEngine>, AgentError> {
+            Ok(Arc::new(MockAgent::new(MockConfig::instant())))
+        }
+        fn models(&self, _: &str) -> BoxFuture<'static, Result<Vec<String>, AgentError>> {
+            Box::pin(async { Ok(vec!["m".to_owned()]) })
+        }
+        fn set_api_key(&self, _: &str, key: Option<String>) -> BoxFuture<'static, Result<(), AgentError>> {
+            let slot = self.key.clone();
+            Box::pin(async move {
+                if key.as_deref() == Some("bad") {
+                    return Err(AgentError::Provider("the keychain is locked".into()));
+                }
+                *slot.lock().unwrap() = key;
+                Ok(())
+            })
+        }
+    }
+
+    fn keyed(app: &KrampstaApp) -> Option<KeySource> {
+        app.key_providers().next().and_then(|p| p.api_key.clone())
+    }
+
+    #[test]
+    fn a_saved_key_lists_the_provider_and_removing_it_takes_it_away() {
+        let catalog = Arc::new(Keyed::default());
+        let mut app = KrampstaApp::new(catalog.clone());
+        assert_eq!(keyed(&app), Some(KeySource::Missing));
+        assert_eq!(listed(&app), [MOCK_PROVIDER]);
+
+        app.save_api_key("keyed");
+        assert_eq!(app.api_key.state, KeyState::Idle, "nothing typed, nothing saved");
+
+        app.api_key.draft = TextEdit::new("  sk-typed  ").secure();
+        app.save_api_key("keyed");
+        assert_eq!(app.api_key.state, KeyState::Saving { provider: "keyed".into() });
+        pump_until(&mut app, |a| keyed(a) == Some(KeySource::Saved));
+        assert_eq!(catalog.key.lock().unwrap().as_deref(), Some("sk-typed"), "trimmed");
+        assert_eq!(app.api_key.state, KeyState::Idle);
+        assert!(app.api_key.draft.text.is_empty() && app.api_key.draft.is_secure(), "a fresh masked field");
+        assert_eq!(listed(&app), ["keyed", MOCK_PROVIDER]);
+
+        app.remove_api_key("keyed");
+        pump_until(&mut app, |a| keyed(a) == Some(KeySource::Missing));
+        assert_eq!(listed(&app), [MOCK_PROVIDER]);
+
+        app.api_key.draft = TextEdit::new("bad").secure();
+        app.save_api_key("keyed");
+        pump_until(&mut app, |a| matches!(a.api_key.state, KeyState::Failed { .. }));
+        let error = "the keychain is locked".to_owned();
+        assert_eq!(app.api_key.state, KeyState::Failed { provider: "keyed".into(), error });
+        assert_eq!(app.api_key.draft.text, "bad", "what was typed stays to try again");
     }
 }

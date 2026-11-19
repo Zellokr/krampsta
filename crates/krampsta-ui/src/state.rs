@@ -12,7 +12,7 @@ use rune::TextEdit;
 use rune_kit::PaneState;
 use rune_kit::diff::DiffState;
 
-use crate::accounts::SignIn;
+use crate::accounts::{KeyField, SignIn};
 use crate::menus::OpenMenu;
 use crate::picker::EngineChoice;
 use crate::sample;
@@ -55,6 +55,8 @@ pub struct KrampstaApp {
     pub engine: EngineChoice,
     /// The account sign-in dialog.
     pub sign_in: SignIn,
+    /// The API key field in settings.
+    pub api_key: KeyField,
     /// Tool cards the user opened in the transcript.
     pub open_tools: HashSet<ToolCallId>,
     /// Messages whose reasoning the user opened.
@@ -96,6 +98,7 @@ impl KrampstaApp {
             diff: sample::diff(),
             engine,
             sign_in: SignIn::Closed,
+            api_key: KeyField::default(),
             open_tools: HashSet::new(),
             open_reasoning: HashSet::new(),
             menu: None,

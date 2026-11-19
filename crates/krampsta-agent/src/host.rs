@@ -59,6 +59,11 @@ pub enum AccountEvent {
         provider: String,
         result: Result<(), AgentError>,
     },
+    /// An API key was saved or forgotten.
+    KeySaved {
+        provider: String,
+        result: Result<(), AgentError>,
+    },
 }
 
 impl AgentHost {
@@ -162,10 +167,29 @@ impl AgentHost {
         provider: &str,
         logout: BoxFuture<'static, Result<(), AgentError>>,
     ) -> Result<(), AgentError> {
-        let (tx, notify, provider) = (self.accounts_tx.clone(), self.notify.clone(), provider.to_owned());
+        let provider = provider.to_owned();
+        self.report(logout, move |result| AccountEvent::SignedOut { provider, result })
+    }
+
+    /// Runs `save` (a catalog's `set_api_key`) in the background; reports `KeySaved`.
+    pub fn save_api_key(
+        &mut self,
+        provider: &str,
+        save: BoxFuture<'static, Result<(), AgentError>>,
+    ) -> Result<(), AgentError> {
+        let provider = provider.to_owned();
+        self.report(save, move |result| AccountEvent::KeySaved { provider, result })
+    }
+
+    /// Runs `work` in the background, then sends the event `event` makes of its outcome.
+    fn report(
+        &mut self,
+        work: BoxFuture<'static, Result<(), AgentError>>,
+        event: impl FnOnce(Result<(), AgentError>) -> AccountEvent + Send + 'static,
+    ) -> Result<(), AgentError> {
+        let (tx, notify) = (self.accounts_tx.clone(), self.notify.clone());
         self.runtime()?.spawn(async move {
-            let result = logout.await;
-            if tx.send(AccountEvent::SignedOut { provider, result }).is_ok() {
+            if tx.send(event(work.await)).is_ok() {
                 notify();
             }
         });

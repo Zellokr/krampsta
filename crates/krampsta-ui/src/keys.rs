@@ -62,6 +62,19 @@ pub fn account(provider: &str) -> String {
     format!("krampsta-account-{provider}")
 }
 
+/// A provider's API key field in settings, and its Save and Remove buttons.
+pub fn api_key(provider: &str) -> String {
+    format!("krampsta-api-key-{provider}")
+}
+
+pub fn api_key_save(provider: &str) -> String {
+    format!("krampsta-api-key-save-{provider}")
+}
+
+pub fn api_key_remove(provider: &str) -> String {
+    format!("krampsta-api-key-remove-{provider}")
+}
+
 /// A session row's context menu; rune-kit keys its items `<key>-item<i>`.
 pub fn session_menu(id: krampsta_core::SessionId) -> String {
     format!("krampsta-session-menu-{id}")

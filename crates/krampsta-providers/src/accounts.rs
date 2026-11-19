@@ -115,6 +115,7 @@ impl Accounts {
             }),
             // Its Responses engine takes a reasoning effort; Copilot's chat API may reject one.
             reasoning_effort: id == CHATGPT,
+            api_key: None,
         };
         vec![
             provider(CHATGPT, CHATGPT_LABEL, read(&self.chatgpt).map(|(u, _)| u)),
@@ -235,7 +236,7 @@ fn to_json(value: &impl Serialize) -> Result<String, AgentError> {
 }
 
 /// Runs a keychain call off the async workers (it may block on the OS).
-async fn blocking(f: impl FnOnce() -> Result<(), String> + Send + 'static) -> Result<(), AgentError> {
+pub(crate) async fn blocking(f: impl FnOnce() -> Result<(), String> + Send + 'static) -> Result<(), AgentError> {
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|e| AgentError::Provider(format!("the keychain call ended abnormally: {e}")))?

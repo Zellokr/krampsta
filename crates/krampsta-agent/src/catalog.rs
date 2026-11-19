@@ -22,6 +22,20 @@ pub struct Provider {
     pub kind: ProviderKind,
     /// Whether runs can choose how hard its models think ([`crate::Effort`]).
     pub reasoning_effort: bool,
+    /// Where its API key comes from, for providers whose key can be saved in the app
+    /// ([`EngineCatalog::set_api_key`]); `None` for the others.
+    pub api_key: Option<KeySource>,
+}
+
+/// Where a provider's API key comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KeySource {
+    /// No key yet.
+    Missing,
+    /// Saved from the app, in the system keychain. Wins over the environment.
+    Saved,
+    /// Read from this environment variable at start.
+    Environment(String),
 }
 
 impl Provider {
@@ -103,6 +117,14 @@ pub trait EngineCatalog: Send + Sync + 'static {
         Box::pin(async { Ok(()) })
     }
 
+    /// Saves `provider`'s API key in the system keychain, or forgets the saved one (`None`).
+    /// Engines built afterwards use it. Runs on the host's runtime.
+    fn set_api_key(&self, provider: &str, key: Option<String>) -> BoxFuture<'static, Result<(), AgentError>> {
+        let _ = key;
+        let error = AgentError::Provider(format!("`{provider}` takes no API key"));
+        Box::pin(async move { Err(error) })
+    }
+
     /// The reasoning efforts `model` takes, from what the provider already knows (no network:
     /// a model list fetched earlier). Empty when unknown, or for providers that take none.
     fn efforts(&self, provider: &str, model: &str) -> Vec<crate::EffortLevel> {
@@ -135,6 +157,7 @@ impl MockCatalog {
             missing: None,
             kind: ProviderKind::Simulated,
             reasoning_effort: false,
+            api_key: None,
         }
     }
 
