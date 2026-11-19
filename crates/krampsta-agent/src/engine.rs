@@ -9,6 +9,7 @@ use krampsta_core::{AgentEvent, Message, RunEvent, RunId, SessionId, ToolCall, T
 use tokio_util::sync::CancellationToken;
 
 use crate::host::Notifier;
+use crate::tools::{ToolSpec, Toolbox};
 
 /// A boxed, sendable future, so [`AgentEngine`] stays object safe (`Arc<dyn AgentEngine>`).
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -102,6 +103,8 @@ pub struct RunContext {
     events: Sender<RunEvent>,
     notify: Notifier,
     cancel: CancellationToken,
+    tools: Option<Arc<dyn Toolbox>>,
+    specs: Arc<[ToolSpec]>,
 }
 
 impl RunContext {
@@ -111,8 +114,51 @@ impl RunContext {
         events: Sender<RunEvent>,
         notify: Notifier,
         cancel: CancellationToken,
+        tools: Option<Arc<dyn Toolbox>>,
     ) -> Self {
-        RunContext { session, run, events, notify, cancel }
+        let specs = tools.as_ref().map_or_else(|| Arc::from([]), |t| t.specs());
+        RunContext { session, run, events, notify, cancel, tools, specs }
+    }
+
+    /// A context with no audience and no tools, for engine tests that drive `run` by hand.
+    pub fn detached(tools: Option<Arc<dyn Toolbox>>) -> (Self, std::sync::mpsc::Receiver<RunEvent>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = Self::new(SessionId(0), RunId(0), tx, Arc::new(|| {}), CancellationToken::new(), tools);
+        (ctx, rx)
+    }
+
+    /// The tools this run may offer the model; empty when it has none.
+    pub fn tool_specs(&self) -> &[ToolSpec] {
+        &self.specs
+    }
+
+    /// Runs one tool call the model made: shows it starting, runs it on a blocking thread and
+    /// shows its result, which goes back to the model. `Err` only when the run is cancelled
+    /// (the card then shows it was stopped).
+    pub async fn run_tool(&self, call: ToolCall) -> Result<ToolResult, AgentError> {
+        self.tool_started(call.clone());
+        let outcome = match self.tools.clone() {
+            None => Err(format!("there is no tool named `{}`", call.name)),
+            Some(tools) => {
+                let (name, arguments, cancel) = (call.name.clone(), call.arguments.clone(), self.cancel.clone());
+                let job = tokio::task::spawn_blocking(move || tools.run(&name, &arguments, &cancel));
+                tokio::select! {
+                    biased;
+                    () = self.cancel.cancelled() => {
+                        self.tool_finished(ToolResult { call_id: call.id, output: "Stopped.".into(), is_error: true });
+                        return Err(AgentError::Cancelled);
+                    }
+                    joined = job => joined.unwrap_or_else(|e| Err(format!("the tool stopped abnormally: {e}"))),
+                }
+            }
+        };
+        let (output, is_error) = match outcome {
+            Ok(output) => (output, false),
+            Err(reason) => (reason, true),
+        };
+        let result = ToolResult { call_id: call.id, output, is_error };
+        self.tool_finished(result.clone());
+        Ok(result)
     }
 
     pub fn run(&self) -> RunId {

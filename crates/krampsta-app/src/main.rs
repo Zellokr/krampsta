@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use krampsta_agent::{EngineCatalog, MockCatalog, MockConfig};
+use krampsta_agent::{EngineCatalog, MockCatalog, MockConfig, Toolbox};
 use krampsta_ui::KrampstaApp;
 
 fn catalog() -> Arc<dyn EngineCatalog> {
@@ -26,7 +26,27 @@ fn catalog() -> Arc<dyn EngineCatalog> {
     }
 }
 
+/// The tools, over the folder Krampsta was started in (choosing another comes with projects).
+fn tools() -> Option<Arc<dyn Toolbox>> {
+    match std::env::current_dir().and_then(krampsta_tools::Workspace::open) {
+        Ok(workspace) => Some(Arc::new(workspace)),
+        Err(e) => {
+            eprintln!("krampsta: the current folder can't be used as the project ({e}); the agent runs without tools");
+            None
+        }
+    }
+}
+
 fn main() {
     rune::prewarm_gpu();
-    rune::App::new(krampsta_ui::spec()).chrome(krampsta_ui::chrome()).init(|| KrampstaApp::new(catalog())).run();
+    rune::App::new(krampsta_ui::spec())
+        .chrome(krampsta_ui::chrome())
+        .init(|| {
+            let app = KrampstaApp::new(catalog());
+            match tools() {
+                Some(tools) => app.with_tools(tools),
+                None => app,
+            }
+        })
+        .run();
 }

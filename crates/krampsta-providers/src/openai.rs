@@ -1,15 +1,17 @@
 //! The OpenAI Chat Completions engine, which also drives compatible servers (llama.cpp, vLLM,
 //! Ollama, LM Studio…): same request, same `data: {…}` stream ending in `data: [DONE]`.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
-use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
-use krampsta_core::{Message, MessageRole, Usage};
+use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest, ToolSpec};
+use krampsta_core::{Message, MessageRole, ToolCall, ToolCallId, ToolResult, Usage};
 use serde::{Deserialize, Serialize};
 
 use crate::access::{Access, StaticAccess};
 use crate::http::{self, Flow, HttpError};
 use crate::sse::SseEvent;
+use crate::steps::{self, MAX_STEPS, Paragraphs};
 
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -109,31 +111,117 @@ impl AgentEngine for OpenAiEngine {
 
     fn run(self: Arc<Self>, request: RunRequest, ctx: RunContext) -> BoxFuture<'static, Result<(), AgentError>> {
         Box::pin(async move {
-            let endpoint = tokio::select! {
-                biased;
-                () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
-                endpoint = self.access.endpoint() => endpoint?,
-            };
-            let body = ChatRequest {
-                model: &self.model,
-                stream: true,
-                stream_options: StreamOptions { include_usage: true },
-                messages: wire_messages(&request.history),
-            };
-            let body = serde_json::to_vec(&body)
-                .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
-            let req = self
-                .client
-                .post(endpoint.url("chat/completions"))
-                .headers(endpoint.headers)
-                .header("content-type", "application/json")
-                .body(body);
-            let mut counted = Counted::default();
-            let result = http::stream_sse(req, &ctx, |event| on_event(&event, &ctx, &mut counted)).await;
-            // Tokens a run read are spent even when it fails or is stopped after the count arrived.
-            ctx.usage(counted.usage());
-            result
+            // Built once per run; each step only adds its own turn to the conversation.
+            let tools: Vec<WireTool<'_>> = ctx.tool_specs().iter().map(WireTool::from).collect();
+            let mut messages = wire_messages(&request.history);
+            if !tools.is_empty() {
+                // With tools the model must know it works in a project; without, it is a plain chat.
+                let instructions = format!("{} {}", crate::responses::INSTRUCTIONS, steps::TOOLS_HINT);
+                messages.insert(
+                    0,
+                    WireMessage { role: "system", content: Some(Cow::Owned(instructions)), ..WireMessage::default() },
+                );
+            }
+            let mut paragraphs = Paragraphs::default();
+            for number in 0..MAX_STEPS {
+                let endpoint = tokio::select! {
+                    biased;
+                    () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
+                    endpoint = self.access.endpoint() => endpoint?,
+                };
+                let body = ChatRequest {
+                    model: &self.model,
+                    stream: true,
+                    stream_options: StreamOptions { include_usage: true },
+                    messages: &messages,
+                    tools: &tools,
+                };
+                let body = serde_json::to_vec(&body)
+                    .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
+                let req = self
+                    .client
+                    .post(endpoint.url("chat/completions"))
+                    .headers(endpoint.headers)
+                    .header("content-type", "application/json")
+                    .body(body);
+                let mut step = Step::default();
+                let result =
+                    http::stream_sse(req, &ctx, |event| on_event(&event, &ctx, &mut step, &mut paragraphs)).await;
+                // Tokens a request read are spent even when it fails or is stopped after the count.
+                ctx.usage(step.counted.usage());
+                result?;
+
+                let calls = step.calls(number);
+                if calls.is_empty() {
+                    return Ok(());
+                }
+                paragraphs.next_step();
+                let results = steps::run_calls(&ctx, &calls).await?;
+                messages.push(WireMessage::assistant(step.text, &calls));
+                messages.extend(results.into_iter().map(WireMessage::tool));
+            }
+            Err(steps::too_many_steps())
         })
+    }
+}
+
+/// What one request's stream brought: its reply text, the tool calls it asked for (assembled
+/// from their streamed pieces) and its token counts.
+#[derive(Default)]
+struct Step {
+    text: String,
+    calls: Vec<PartialCall>,
+    counted: Counted,
+}
+
+/// A tool call as its pieces arrive: the id and name first, the arguments in fragments.
+#[derive(Default)]
+struct PartialCall {
+    id: Option<String>,
+    name: String,
+    arguments: String,
+}
+
+impl Step {
+    /// Adds a streamed piece of a call. Pieces name their call by `index`; a server that sends
+    /// none (or reuses one for a call with a new id) starts a new call.
+    fn add(&mut self, piece: DeltaCall) {
+        let fresh =
+            |id: &Option<String>, existing: &PartialCall| matches!((id, &existing.id), (Some(a), Some(b)) if a != b);
+        let at = match piece.index {
+            Some(i) if i < self.calls.len() && !fresh(&piece.id, &self.calls[i]) => i,
+            Some(i) if i == self.calls.len() => i,
+            _ => self.calls.len(),
+        };
+        if at == self.calls.len() {
+            self.calls.push(PartialCall::default());
+        }
+        let call = &mut self.calls[at];
+        if piece.id.is_some() {
+            call.id = piece.id;
+        }
+        if let Some(f) = piece.function {
+            if let Some(name) = f.name {
+                call.name.push_str(&name);
+            }
+            if let Some(arguments) = f.arguments {
+                call.arguments.push_str(&arguments);
+            }
+        }
+    }
+
+    /// The finished calls, in order (unnamed fragments dropped).
+    fn calls(&mut self, step: usize) -> Vec<ToolCall> {
+        std::mem::take(&mut self.calls)
+            .into_iter()
+            .filter(|c| !c.name.is_empty())
+            .enumerate()
+            .map(|(i, c)| ToolCall {
+                id: c.id.map_or_else(|| steps::call_id(step, i), ToolCallId),
+                name: c.name,
+                arguments: c.arguments,
+            })
+            .collect()
     }
 }
 
@@ -154,7 +242,13 @@ impl Counted {
 
 /// Handles one stream event: text goes to the UI, counts are kept, `[DONE]` ends the run, an
 /// error fails it.
-fn on_event(event: &SseEvent, ctx: &RunContext, counted: &mut Counted) -> Result<Flow, AgentError> {
+fn on_event(
+    event: &SseEvent,
+    ctx: &RunContext,
+    step: &mut Step,
+    paragraphs: &mut Paragraphs,
+) -> Result<Flow, AgentError> {
+    let counted = &mut step.counted;
     let data = event.data.trim();
     if data == "[DONE]" {
         return Ok(Flow::Done);
@@ -172,19 +266,24 @@ fn on_event(event: &SseEvent, ctx: &RunContext, counted: &mut Counted) -> Result
         counted.timings = Some(Usage { input: t.prompt_n.saturating_add(t.cache_n), output: t.predicted_n });
     }
     for choice in chunk.choices {
-        let Delta { content, reasoning_content, reasoning } = choice.delta;
+        let Delta { content, reasoning_content, reasoning, tool_calls } = choice.delta;
         if let Some(thought) = reasoning_content.or(reasoning).filter(|t| !t.is_empty()) {
             ctx.reasoning(thought);
         }
         if let Some(text) = content.filter(|t| !t.is_empty()) {
-            ctx.text(text);
+            paragraphs.text(ctx, &text);
+            step.text.push_str(&text);
+        }
+        for piece in tool_calls.into_iter().flatten() {
+            step.add(piece);
         }
     }
     Ok(Flow::Continue)
 }
 
-/// The conversation as the API expects it. Empty assistant turns (a run that failed before
-/// writing) and tool output (no tool calling yet) are left out.
+/// The conversation as the API expects it. Earlier turns go as their text: empty assistant
+/// turns (a run that failed before writing) are left out, and so is their tool traffic, which
+/// served those turns and would only cost tokens now.
 fn wire_messages(history: &[Message]) -> Vec<WireMessage<'_>> {
     history
         .iter()
@@ -195,7 +294,7 @@ fn wire_messages(history: &[Message]) -> Vec<WireMessage<'_>> {
                 MessageRole::System => "system",
                 MessageRole::Assistant | MessageRole::Tool => return None,
             };
-            Some(WireMessage { role, content: &m.content })
+            Some(WireMessage { role, content: Some(Cow::Borrowed(&m.content)), ..WireMessage::default() })
         })
         .collect()
 }
@@ -205,7 +304,48 @@ struct ChatRequest<'a> {
     model: &'a str,
     stream: bool,
     stream_options: StreamOptions,
-    messages: Vec<WireMessage<'a>>,
+    messages: &'a [WireMessage<'a>],
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    tools: &'a [WireTool<'a>],
+}
+
+/// A tool as Chat Completions declares it: `{"type": "function", "function": {…}}`.
+#[derive(Serialize)]
+struct WireTool<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: WireFunction<'a>,
+}
+
+#[derive(Serialize)]
+struct WireFunction<'a> {
+    name: &'a str,
+    description: &'a str,
+    parameters: &'a serde_json::Value,
+}
+
+impl<'a> From<&'a ToolSpec> for WireTool<'a> {
+    fn from(spec: &'a ToolSpec) -> Self {
+        WireTool {
+            kind: "function",
+            function: WireFunction { name: &spec.name, description: &spec.description, parameters: &spec.parameters },
+        }
+    }
+}
+
+/// A call as the assistant's turn carries it back to the model.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct WireCall {
+    id: String,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: WireCallFunction,
+}
+
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct WireCallFunction {
+    name: String,
+    arguments: String,
 }
 
 /// Asks for the token counts at the end of the stream (OpenAI sends none unless asked).
@@ -214,10 +354,42 @@ struct StreamOptions {
     include_usage: bool,
 }
 
-#[derive(Serialize, Debug, PartialEq, Eq)]
+/// One message of the conversation. History is borrowed; what the run adds is owned.
+#[derive(Serialize, Debug, Default, PartialEq, Eq)]
 struct WireMessage<'a> {
     role: &'static str,
-    content: &'a str,
+    /// `null` for an assistant turn that only called tools.
+    content: Option<Cow<'a, str>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<WireCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+}
+
+impl WireMessage<'_> {
+    /// The assistant's turn in a step that asked for tools.
+    fn assistant(text: String, calls: &[ToolCall]) -> Self {
+        let tool_calls = calls
+            .iter()
+            .map(|c| WireCall {
+                id: c.id.0.clone(),
+                kind: "function",
+                function: WireCallFunction { name: c.name.clone(), arguments: c.arguments.clone() },
+            })
+            .collect();
+        let content = (!text.is_empty()).then_some(Cow::Owned(text));
+        WireMessage { role: "assistant", content, tool_calls, tool_call_id: None }
+    }
+
+    /// A tool's result, answering the call with its id.
+    fn tool(result: ToolResult) -> Self {
+        WireMessage {
+            role: "tool",
+            content: Some(Cow::Owned(result.output)),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(result.call_id.0),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -261,6 +433,21 @@ struct Delta {
     /// (llama.cpp, vLLM, DeepSeek) or `reasoning` (Ollama, OpenRouter).
     reasoning_content: Option<String>,
     reasoning: Option<String>,
+    /// Pieces of the tool calls the reply asks for.
+    tool_calls: Option<Vec<DeltaCall>>,
+}
+
+#[derive(Deserialize)]
+struct DeltaCall {
+    index: Option<usize>,
+    id: Option<String>,
+    function: Option<DeltaFunction>,
+}
+
+#[derive(Deserialize)]
+struct DeltaFunction {
+    name: Option<String>,
+    arguments: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -315,7 +502,8 @@ mod tests {
             answered,
             Message::new(MessageId(5), MessageRole::Tool, "output"),
         ];
-        let roles: Vec<_> = wire_messages(&history).iter().map(|m| (m.role, m.content)).collect();
+        let wire = wire_messages(&history);
+        let roles: Vec<_> = wire.iter().map(|m| (m.role, m.content.as_deref().unwrap_or_default())).collect();
         assert_eq!(roles, [("system", "be brief"), ("user", "first"), ("user", "again"), ("assistant", "hi")]);
     }
 }

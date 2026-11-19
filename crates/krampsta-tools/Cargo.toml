@@ -1,0 +1,23 @@
+[package]
+name = "krampsta-tools"
+description = "The tools Krampsta's agent calls on the project folder: reading, listing and searching files."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+krampsta-agent.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# ripgrep's own crates: gitignore-aware (parallel) walking, and SIMD line search with binary detection.
+ignore = "0.4"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+grep-matcher = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

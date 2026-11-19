@@ -5,6 +5,7 @@ members = [
     "crates/krampsta-core",
     "crates/krampsta-agent",
     "crates/krampsta-providers",
+    "crates/krampsta-tools",
     "crates/krampsta-ui",
 ]
 
@@ -18,6 +19,7 @@ rust-version = "1.99.1"
 krampsta-core = { path = "crates/krampsta-core" }
 krampsta-agent = { path = "crates/krampsta-agent" }
 krampsta-providers = { path = "crates/krampsta-providers" }
+krampsta-tools = { path = "crates/krampsta-tools" }
 krampsta-ui = { path = "crates/krampsta-ui" }
 
 # Rune and rune-kit are pinned to ONE commit of Rune's `dev` branch (never a floating branch).

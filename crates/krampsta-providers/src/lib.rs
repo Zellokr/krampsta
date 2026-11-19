@@ -19,11 +19,13 @@ mod openai;
 mod responses;
 pub mod secrets;
 pub mod sse;
+mod steps;
 
 pub use accounts::Hosts;
 pub use catalog::{Catalog, DEFAULT_OPENAI_MODEL, LLAMA_CPP_URL, LM_STUDIO_URL, OLLAMA_URL};
 pub use http::HttpError;
 pub use openai::{DEFAULT_BASE_URL, OpenAiConfig, OpenAiEngine, list_models};
+pub use responses::ResponsesEngine;
 
 /// Why the configured provider could not be set up.
 #[derive(Debug, thiserror::Error)]

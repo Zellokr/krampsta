@@ -15,6 +15,9 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   cuenta), `OpenAiEngine`, `responses` (motor de la API Responses), `list_models`, `copilot`
   (device flow, token de Copilot), `chatgpt` (código de dispositivo de OpenAI, refresh), `accounts`
   (iniciar/cerrar sesión), `secrets` (llavero del sistema) y `Catalog`. No depende de Rune.
+- `crates/krampsta-tools` — las herramientas del agente sobre la carpeta del proyecto
+  (`Workspace`, un `Toolbox`): `project` (ninguna ruta sale de la carpeta), `read_file`,
+  `list_files`, `search` (crates de ripgrep: `ignore`, `grep-searcher`). No depende de Rune.
 - `crates/krampsta-ui` — `KrampstaApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`
   (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
   (piezas), `accounts.rs` (diálogo de inicio de sesión), `theme.rs` (único sitio de colores),
@@ -22,7 +25,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   de ejemplo).
 - `crates/krampsta-app` — binario `krampsta`; sólo construye el catálogo y arranca.
 - Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
-  `providers → core`. Sin ciclos; la UI nunca depende de `krampsta-providers`.
+  `providers → core`, `app → tools → agent`. Sin ciclos; la UI nunca depende de
+  `krampsta-providers` ni de `krampsta-tools`.
 
 ## Comandos (todos deben pasar antes de terminar)
 
@@ -59,6 +63,14 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   emite `ctx.text(..)`, `ctx.tool_started(..)`, `ctx.tool_finished(..)` y, una vez por petición
   al proveedor, `ctx.usage(..)` con los tokens que contó (también si falla tras contarlos); espera con
   `ctx.sleep(..)` o futuros cancelables; comprueba `ctx.check_cancelled()` entre pasos.
+- Herramientas: el motor manda `ctx.tool_specs()` al proveedor y ejecuta cada llamada con
+  `ctx.run_tool(..)` (hilo bloqueante, cancelable, emite la tarjeta); las de un paso van a la vez
+  con `steps::run_calls`. El bucle (pedir → herramientas → resultados → pedir) vive en cada motor,
+  porque el formato es de cada API, con el tope `steps::MAX_STEPS`. Los turnos anteriores se
+  mandan sólo como texto; el tráfico de herramientas vive en memoria durante la ejecución.
+- Una herramienta nueva va en `krampsta-tools`: lee sólo lo necesario (streaming, sin cargar
+  archivos enteros), pone tope a su salida, comprueba la cancelación en los bucles largos y
+  resuelve rutas con `Project::resolve`. Se prueba con `tempfile`, nunca con el disco real.
 - **No** emitas `Started` ni eventos terminales: los pone el host. Devuelve `Ok(())`,
   `Err(AgentError::..)` o `Err(AgentError::Cancelled)`.
 - Nunca bloquees un hilo de tokio (nada de I/O síncrona en el motor).

@@ -6,7 +6,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use krampsta_agent::{AgentError, AgentHost, EngineCatalog, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest};
+use krampsta_agent::{
+    AgentError, AgentHost, EngineCatalog, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest, Toolbox,
+};
 use krampsta_core::{AgentEvent, IdGen, MessageId, RunId, Session, SessionError, SessionId, ToolCallId};
 use rune::TextEdit;
 use rune_kit::PaneState;
@@ -74,6 +76,12 @@ pub struct KrampstaApp {
 }
 
 impl KrampstaApp {
+    /// Lets runs started from now on call `tools` (the project folder's).
+    pub fn with_tools(mut self, tools: Arc<dyn Toolbox>) -> Self {
+        self.agent.set_toolbox(Some(tools));
+        self
+    }
+
     /// A fresh app running what `catalog` offers, starting from its initial selection, with
     /// the sample sessions.
     pub fn new(catalog: Arc<dyn EngineCatalog>) -> Self {

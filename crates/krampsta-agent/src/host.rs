@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{DeviceCode, LoginPrompt};
 use crate::engine::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
+use crate::tools::Toolbox;
 
 /// Called from a worker thread after each event is queued, to wake the UI so it drains them.
 /// Rune's `Waker` (`Arc<dyn Fn() + Send + Sync>`) is one.
@@ -21,6 +22,8 @@ pub type Notifier = Arc<dyn Fn() + Send + Sync>;
 /// on the first run, so an app that never sends a message never starts its threads.
 pub struct AgentHost {
     engine: Arc<dyn AgentEngine>,
+    /// The tools runs started from now on may call.
+    tools: Option<Arc<dyn Toolbox>>,
     runtime: Option<tokio::runtime::Runtime>,
     events_tx: Sender<RunEvent>,
     events_rx: Receiver<RunEvent>,
@@ -73,6 +76,7 @@ impl AgentHost {
         let (accounts_tx, accounts_rx) = channel();
         AgentHost {
             engine,
+            tools: None,
             runtime: None,
             events_tx,
             events_rx,
@@ -99,6 +103,11 @@ impl AgentHost {
     /// Runs started from now on use `engine`; runs already going keep theirs.
     pub fn set_engine(&mut self, engine: Arc<dyn AgentEngine>) {
         self.engine = engine;
+    }
+
+    /// Runs started from now on may call `tools` (none: the model gets no tools).
+    pub fn set_toolbox(&mut self, tools: Option<Arc<dyn Toolbox>>) {
+        self.tools = tools;
     }
 
     /// Resolves `lookup` (a catalog's model list) in the background; the answer arrives through
@@ -233,7 +242,14 @@ impl AgentHost {
     pub fn start(&mut self, request: RunRequest) -> Result<RunId, AgentError> {
         let run = request.run;
         let cancel = CancellationToken::new();
-        let ctx = RunContext::new(request.session, run, self.events_tx.clone(), self.notify.clone(), cancel.clone());
+        let ctx = RunContext::new(
+            request.session,
+            run,
+            self.events_tx.clone(),
+            self.notify.clone(),
+            cancel.clone(),
+            self.tools.clone(),
+        );
         let engine = self.engine.clone();
         let runtime = self.runtime()?;
         let handle = runtime.handle().clone();

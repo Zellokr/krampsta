@@ -3,13 +3,15 @@
 
 use std::sync::Arc;
 
-use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
-use krampsta_core::{Message, MessageRole, Usage};
+use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest, ToolSpec};
+use krampsta_core::{Message, MessageRole, ToolCall, ToolCallId, Usage};
+use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::access::Access;
 use crate::http::{self, Flow};
 use crate::sse::SseEvent;
+use crate::steps::{self, MAX_STEPS, Paragraphs};
 
 /// Krampsta's standing instructions to the model.
 pub const INSTRUCTIONS: &str = "You are Krampsta, a coding assistant in a desktop app. Answer the user's \
@@ -80,32 +82,150 @@ impl AgentEngine for ResponsesEngine {
                 shape.effort = Some(effort.as_str().to_owned());
             }
             trace_shape(&self.model, &shape);
-            let endpoint = tokio::select! {
-                biased;
-                () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
-                endpoint = self.access.endpoint() => endpoint?,
-            };
-            let body = serde_json::to_vec(&body(&self.model, &request.history, &shape))
-                .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
-            let mut req = self
-                .client
-                .post(endpoint.url("responses"))
-                .headers(endpoint.headers)
-                .header("content-type", "application/json");
-            if shape.lite {
-                req = req.header(crate::chatgpt::RESPONSES_LITE_HEADER, "true");
+            // Built once per run; each step appends its output items and the tools' results.
+            let reasoning = reasoning(&shape);
+            let tools: Vec<Value> = ctx.tool_specs().iter().map(wire_tool).collect();
+            let mut input = input(&request.history, !tools.is_empty());
+            let mut paragraphs = Paragraphs::default();
+            for number in 0..MAX_STEPS {
+                let endpoint = tokio::select! {
+                    biased;
+                    () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
+                    endpoint = self.access.endpoint() => endpoint?,
+                };
+                let body = serde_json::to_vec(&Request::new(&self.model, &input, &reasoning, &tools))
+                    .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
+                let mut req = self
+                    .client
+                    .post(endpoint.url("responses"))
+                    .headers(endpoint.headers)
+                    .header("content-type", "application/json");
+                if shape.lite {
+                    req = req.header(crate::chatgpt::RESPONSES_LITE_HEADER, "true");
+                }
+                let req = req.body(body);
+                let mut step = Step::default();
+                http::stream_sse(req, &ctx, |event| on_event(&event, &ctx, &mut step, &mut paragraphs)).await?;
+
+                if step.calls.is_empty() {
+                    return Ok(());
+                }
+                paragraphs.next_step();
+                let calls: Vec<ToolCall> = step.calls.into_iter().map(|c| c.into_call(number)).collect();
+                let results = steps::run_calls(&ctx, &calls).await?;
+                input.extend(step.items);
+                input.extend(
+                    results
+                        .into_iter()
+                        .map(|r| json!({"type": "function_call_output", "call_id": r.call_id.0, "output": r.output})),
+                );
             }
-            let req = req.body(body);
-            http::stream_sse(req, &ctx, |event| on_event(&event, &ctx)).await
+            Err(steps::too_many_steps())
         })
     }
 }
 
-/// The request, worded as Codex CLI words it: Krampsta's instructions (plus any system messages)
-/// as a leading developer message, then the conversation, streamed and not stored on OpenAI's
-/// side, with the reasoning settings `shape` allows.
-fn body(model: &str, history: &[Message], shape: &ModelShape) -> Value {
+/// What one response streamed that the next request needs: its output items, as the backend
+/// sent them (reasoning with its encrypted content, the message, the calls), and the calls.
+#[derive(Default)]
+struct Step {
+    items: Vec<Value>,
+    calls: Vec<WireCall>,
+}
+
+/// A `function_call` output item.
+struct WireCall {
+    call_id: Option<String>,
+    name: String,
+    arguments: String,
+}
+
+impl WireCall {
+    fn into_call(self, step: usize) -> ToolCall {
+        ToolCall {
+            id: self.call_id.map_or_else(|| steps::call_id(step, 0), ToolCallId),
+            name: self.name,
+            arguments: self.arguments,
+        }
+    }
+}
+
+/// The request, worded as Codex CLI words it: streamed and not stored on OpenAI's side, with
+/// the reasoning settings the model's shape allows. Borrows everything: a step re-sends the
+/// conversation without copying it.
+#[derive(Serialize)]
+struct Request<'a> {
+    model: &'a str,
+    input: &'a [Value],
+    stream: bool,
+    store: bool,
+    tool_choice: &'static str,
+    /// A Lite model rejects parallel tool calls; Codex never asks for them.
+    parallel_tool_calls: bool,
+    reasoning: &'a serde_json::Map<String, Value>,
+    /// Not stored, the backend leaves reasoning items (and their summary) out of the stream
+    /// unless asked for their encrypted content, as Codex CLI asks. They go back as they came.
+    include: [&'static str; 1],
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    tools: &'a [Value],
+}
+
+impl<'a> Request<'a> {
+    fn new(
+        model: &'a str,
+        input: &'a [Value],
+        reasoning: &'a serde_json::Map<String, Value>,
+        tools: &'a [Value],
+    ) -> Self {
+        Request {
+            model,
+            input,
+            stream: true,
+            store: false,
+            tool_choice: "auto",
+            parallel_tool_calls: false,
+            reasoning,
+            include: ["reasoning.encrypted_content"],
+            tools,
+        }
+    }
+}
+
+/// A tool as the Responses API declares it.
+fn wire_tool(spec: &ToolSpec) -> Value {
+    json!({
+        "type": "function",
+        "name": spec.name,
+        "description": spec.description,
+        "parameters": spec.parameters,
+        "strict": false,
+    })
+}
+
+/// The reasoning settings `shape` allows.
+fn reasoning(shape: &ModelShape) -> serde_json::Map<String, Value> {
+    let mut reasoning = serde_json::Map::new();
+    if let Some(effort) = &shape.effort {
+        reasoning.insert("effort".into(), json!(effort));
+    }
+    if shape.summary {
+        reasoning.insert("summary".into(), json!("auto"));
+    }
+    if shape.lite {
+        reasoning.insert("context".into(), json!("all_turns"));
+    }
+    reasoning
+}
+
+/// The conversation as input items: Krampsta's instructions (plus any system messages) as a
+/// leading developer message, then each earlier turn's text (its tool traffic served that turn
+/// and would only cost tokens now).
+fn input(history: &[Message], tools: bool) -> Vec<Value> {
     let mut instructions = INSTRUCTIONS.to_owned();
+    if tools {
+        instructions.push(' ');
+        instructions.push_str(steps::TOOLS_HINT);
+    }
     let mut conversation = Vec::new();
     for m in history {
         match m.role {
@@ -126,33 +246,17 @@ fn body(model: &str, history: &[Message], shape: &ModelShape) -> Value {
         json!({"type": "message", "role": "developer", "content": [{"type": "input_text", "text": instructions}]}),
     ];
     input.extend(conversation);
-    let mut reasoning = serde_json::Map::new();
-    if let Some(effort) = &shape.effort {
-        reasoning.insert("effort".into(), json!(effort));
-    }
-    if shape.summary {
-        reasoning.insert("summary".into(), json!("auto"));
-    }
-    if shape.lite {
-        reasoning.insert("context".into(), json!("all_turns"));
-    }
-    json!({
-        "model": model,
-        "input": input,
-        "stream": true,
-        "store": false,
-        // As Codex sends them; a Lite model rejects parallel tool calls (and Krampsta has no tools yet).
-        "tool_choice": "auto",
-        "parallel_tool_calls": false,
-        "reasoning": reasoning,
-        // Not stored, the backend leaves reasoning items (and their summary) out of the stream
-        // unless asked for their encrypted content, as Codex CLI asks. Krampsta ignores it.
-        "include": ["reasoning.encrypted_content"],
-    })
+    input
 }
 
-/// Text and reasoning deltas go to the UI; `response.completed` ends the run; a failure fails it.
-fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
+/// Text and reasoning deltas go to the UI; finished output items are kept for the next step;
+/// `response.completed` ends the request; a failure fails it.
+fn on_event(
+    event: &SseEvent,
+    ctx: &RunContext,
+    step: &mut Step,
+    paragraphs: &mut Paragraphs,
+) -> Result<Flow, AgentError> {
     let v: Value = serde_json::from_str(event.data.trim())
         .map_err(|e| AgentError::Provider(format!("the provider sent an event Krampsta could not read ({e})")))?;
     let kind = v["type"].as_str().unwrap_or(event.event.as_str());
@@ -160,8 +264,24 @@ fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
     match kind {
         "response.output_text.delta" => {
             if let Some(text) = v["delta"].as_str().filter(|t| !t.is_empty()) {
-                ctx.text(text);
+                paragraphs.text(ctx, text);
             }
+            Ok(Flow::Continue)
+        }
+        "response.output_item.done" => {
+            // Cloned once per finished item (a few per response), not per delta.
+            let Some(mut item) = v["item"].as_object().cloned() else { return Ok(Flow::Continue) };
+            if item.get("type").and_then(Value::as_str) == Some("function_call") {
+                let text = |key: &str| item.get(key).and_then(Value::as_str).map(str::to_owned);
+                step.calls.push(WireCall {
+                    call_id: text("call_id"),
+                    name: text("name").unwrap_or_default(),
+                    arguments: text("arguments").unwrap_or_default(),
+                });
+            }
+            // Not stored, an item's id points at nothing on the backend: it goes back without one.
+            item.remove("id");
+            step.items.push(Value::Object(item));
             Ok(Flow::Continue)
         }
         "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
@@ -217,7 +337,8 @@ fn trace_shape(model: &str, shape: &ModelShape) {
 }
 
 /// The event kinds this engine acts on; others pass by.
-const HANDLED: [&str; 8] = [
+const HANDLED: [&str; 9] = [
+    "response.output_item.done",
     "response.output_text.delta",
     "response.reasoning_summary_text.delta",
     "response.reasoning_text.delta",
@@ -254,6 +375,27 @@ mod tests {
     use krampsta_core::{MessageId, RunId};
 
     use super::*;
+
+    /// The first request of a run without tools, as JSON.
+    fn body(model: &str, history: &[Message], shape: &ModelShape) -> Value {
+        let (input, reasoning) = (input(history, false), reasoning(shape));
+        serde_json::to_value(Request::new(model, &input, &reasoning, &[])).unwrap()
+    }
+
+    #[test]
+    fn tools_go_as_functions_and_are_left_out_when_there_are_none() {
+        let spec =
+            ToolSpec { name: "search".into(), description: "Find".into(), parameters: json!({"type": "object"}) };
+        let (input, reasoning) = (input(&[Message::user(MessageId(1), "hi")], true), reasoning(&ModelShape::default()));
+        let tools = [wire_tool(&spec)];
+        let with = serde_json::to_value(Request::new("m", &input, &reasoning, &tools)).unwrap();
+        assert_eq!(
+            with["tools"],
+            json!([{"type": "function", "name": "search", "description": "Find", "parameters": {"type": "object"}, "strict": false}])
+        );
+        assert_eq!(with["parallel_tool_calls"], false);
+        assert_eq!(body("m", &[], &ModelShape::default()).get("tools"), None);
+    }
 
     #[test]
     fn the_conversation_becomes_input_items_and_system_text_joins_the_instructions() {

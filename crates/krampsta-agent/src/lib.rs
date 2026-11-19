@@ -14,6 +14,7 @@ mod catalog;
 mod engine;
 mod host;
 mod mock;
+mod tools;
 
 pub use catalog::{
     Account, DeviceCode, EngineCatalog, KeySource, LoginPrompt, MOCK_MODEL, MOCK_PROVIDER, MockCatalog, Provider,
@@ -31,3 +32,4 @@ pub use host::{AccountEvent, ModelList};
 pub use mock::MockAgent;
 pub use mock::MockConfig;
 pub use tokio_util::sync::CancellationToken;
+pub use tools::{ToolSpec, Toolbox};

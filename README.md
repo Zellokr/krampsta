@@ -26,6 +26,9 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
 - **MockAgent**: al enviar un mensaje publica `Started`, «piensa», llama a una herramienta
   simulada (`list_files`), transmite la respuesta palabra a palabra y termina con `Completed`.
   Un mensaje que empieza por `/fail` simula un fallo; **Stop** cancela la ejecución.
+- **Herramientas**: con un proveedor real, el agente lee el proyecto (la carpeta desde la que
+  se abre Krampsta) con `list_files`, `search` y `read_file`, y cada llamada aparece como tarjeta
+  plegable en el chat. Nada sale de esa carpeta y aún no escribe nada.
 - **Responsive**: al estrechar la ventana se pliegan los paneles laterales (primero el de
   cambios, después la sidebar) y vuelven a abrirse al ensancharla.
 - Atajos: `Ctrl+N`/`⌘N` nueva sesión, `Ctrl+Shift+B`/`⇧⌘B` sidebar, `Ctrl+J`/`⌘J` cambios,
@@ -48,6 +51,7 @@ krampsta/
 │   ├── krampsta-agent/        contrato AgentEngine, AgentHost (runtime async) y MockAgent
 │   ├── krampsta-providers/    motores reales: HTTP + SSE (reqwest) y OpenAI/compatibles
 │   │   └── tests/          servidor HTTP falso que reproduce streams grabados
+│   ├── krampsta-tools/        herramientas del agente: read_file, list_files, search
 │   ├── krampsta-ui/           estado de la UI, tema, vistas y componentes Rune/rune-kit
 │   │   └── tests/ui.rs     pruebas de interacción con el Runtime headless de Rune
 │   └── krampsta-app/          binario `krampsta`: elige el motor y arranca la app
@@ -58,6 +62,7 @@ krampsta/
 ```text
 krampsta-app ──▶ krampsta-ui ─────────▶ krampsta-agent ──▶ krampsta-core
 krampsta-app ──▶ krampsta-providers ──▶ krampsta-agent
+krampsta-app ──▶ krampsta-tools ──────▶ krampsta-agent
        (krampsta-ui y krampsta-providers también usan krampsta-core)
           (Rune y rune-kit sólo en krampsta-ui y krampsta-app)
 ```
@@ -79,7 +84,14 @@ krampsta-app ──▶ krampsta-providers ──▶ krampsta-agent
 - **krampsta-providers**: `sse` (parser incremental de `text/event-stream`), `http` (petición
   cancelable: cancelar suelta la respuesta y cierra la conexión; errores legibles para 401/403,
   429, red y *timeouts*), `OpenAiEngine` (Chat Completions con streaming), `list_models`
-  (`GET /models`) y `Catalog`.
+  (`GET /models`) y `Catalog`. Cada motor hace el bucle del agente: pide, ejecuta las
+  herramientas que pida el modelo (a la vez si son varias) y le devuelve los resultados, hasta
+  una respuesta sin llamadas (tope de 50 pasos).
+- **krampsta-tools**: `Workspace` implementa el `Toolbox` de `krampsta-agent` sobre la carpeta
+  del proyecto, con los crates de ripgrep: recorrido que respeta `.gitignore` y búsqueda en
+  paralelo con detección de binarios. Cada herramienta lee sólo lo necesario, pone tope a su
+  salida y se detiene al cancelar. Peor caso medido (764 MB, 31 495 archivos, sin
+  coincidencias): ~340 ms, a la par que `rg`.
 
 ## Requisitos
 
