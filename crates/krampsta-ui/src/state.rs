@@ -15,6 +15,7 @@ use rune_kit::PaneState;
 use rune_kit::diff::DiffState;
 
 use crate::accounts::{KeyField, SignIn};
+use crate::changes::Changes;
 use crate::menus::OpenMenu;
 use crate::picker::EngineChoice;
 use crate::sample;
@@ -53,6 +54,8 @@ pub struct KrampstaApp {
     /// The right-hand changes panel.
     pub changes: PaneState,
     pub diff: DiffState,
+    /// The changes the agent proposed, under review in the changes panel.
+    pub review: Changes,
     /// The provider and model pickers.
     pub engine: EngineChoice,
     /// The account sign-in dialog.
@@ -103,7 +106,8 @@ impl KrampstaApp {
             theme: ThemeChoice::Dark,
             sidebar: PaneState::new(264.0).range(200.0, 420.0),
             changes: PaneState::new(440.0).range(320.0, 760.0),
-            diff: sample::diff(),
+            diff: empty_diff(),
+            review: Changes::default(),
             engine,
             sign_in: SignIn::Closed,
             api_key: KeyField::default(),
@@ -225,10 +229,16 @@ impl KrampstaApp {
     pub fn pump(&mut self) -> bool {
         let accounts = self.agent.drain_accounts();
         let lists = self.agent.drain_models();
+        let writes = self.agent.drain_writes();
         let mut changed = self.land_accounts(accounts);
         changed |= self.land_models(lists);
+        changed |= self.land_writes(writes);
         for e in self.agent.drain() {
-            if let Some(s) = self.session_mut(e.session) {
+            if let AgentEvent::ChangeProposed { change, .. } = e.event {
+                // A proposal outlives its run: the tools already build on it.
+                self.propose(change);
+                changed = true;
+            } else if let Some(s) = self.session_mut(e.session) {
                 changed |= s.apply(&e.event);
             }
         }
@@ -294,6 +304,13 @@ pub const MIN_MAIN: f32 = 440.0;
 pub const MIN_MAIN_HARD: f32 = 320.0;
 /// Frame insets and pane padding around the panes' own widths.
 const PANE_SLACK: f32 = 40.0;
+
+/// The changes panel before anything is proposed; long lines wrap in its narrow column.
+fn empty_diff() -> DiffState {
+    let mut diff = DiffState::new(Vec::new());
+    diff.set_wrap(true);
+    diff
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pane {

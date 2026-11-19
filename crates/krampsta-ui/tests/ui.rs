@@ -389,3 +389,37 @@ fn escape_closes_an_open_picker_before_leaving_settings() {
     assert_eq!(rt.state.engine.open, None);
     assert_eq!(rt.state.screen, Screen::Settings, "the first Escape only closes the list");
 }
+
+#[test]
+fn the_changes_panel_rejects_a_block_and_a_whole_file_from_their_buttons() {
+    let mut rt = runtime();
+    let before: String = (1..=20).map(|n| format!("{n}\n")).collect();
+    let after = before.replacen("\n2\n", "\ntwo\n", 1).replacen("\n19\n", "\nnineteen\n", 1);
+    let edit = krampsta_core::FileChange {
+        path: "a.txt".into(),
+        before: Some(before.as_str().into()),
+        after: after.as_str().into(),
+    };
+    let created = krampsta_core::FileChange { path: "b.txt".into(), before: None, after: "new\n".into() };
+    // As the agent's proposals land through `pump`: the view rebuilds.
+    rt.update(|s, _| {
+        s.propose(edit);
+        s.propose(created);
+    });
+    settle(&mut rt);
+    assert!(!has(&rt, keys::CHANGES_EMPTY));
+    assert!(has(&rt, &keys::block_reject(0, 1)), "a file with two blocks offers each its own actions");
+    assert!(!has(&rt, &keys::block_reject(1, 0)), "a file with one block is handled from its header");
+
+    click(&mut rt, &keys::block_reject(0, 1));
+    settle(&mut rt);
+    let left = &rt.state.review.proposals()[0];
+    assert_eq!(&*left.after, before.replacen("\n2\n", "\ntwo\n", 1), "the second block is gone");
+
+    click(&mut rt, &keys::change_reject(1));
+    settle(&mut rt);
+    click(&mut rt, &keys::change_reject(0));
+    settle(&mut rt);
+    assert!(rt.state.review.proposals().is_empty());
+    assert!(has(&rt, keys::CHANGES_EMPTY), "back to the empty state");
+}

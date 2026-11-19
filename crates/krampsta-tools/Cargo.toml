@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 krampsta-agent.workspace = true
+krampsta-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # ripgrep's own crates: gitignore-aware (parallel) walking, and SIMD line search with binary detection.

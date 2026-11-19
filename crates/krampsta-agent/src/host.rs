@@ -34,8 +34,18 @@ pub struct AgentHost {
     lookups_rx: Receiver<ModelList>,
     accounts_tx: Sender<AccountEvent>,
     accounts_rx: Receiver<AccountEvent>,
+    writes_tx: Sender<Written>,
+    writes_rx: Receiver<Written>,
     /// The sign-in in progress, if any (one at a time).
     sign_in: Option<CancellationToken>,
+}
+
+/// The answer to [`AgentHost::write_file`]: what was asked, and how it went.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Written {
+    pub path: String,
+    pub content: Arc<str>,
+    pub result: Result<(), String>,
 }
 
 /// The answer to [`AgentHost::fetch_models`].
@@ -74,7 +84,10 @@ impl AgentHost {
         let (events_tx, events_rx) = channel();
         let (lookups_tx, lookups_rx) = channel();
         let (accounts_tx, accounts_rx) = channel();
+        let (writes_tx, writes_rx) = channel();
         AgentHost {
+            writes_tx,
+            writes_rx,
             engine,
             tools: None,
             runtime: None,
@@ -108,6 +121,37 @@ impl AgentHost {
     /// Runs started from now on may call `tools` (none: the model gets no tools).
     pub fn set_toolbox(&mut self, tools: Option<Arc<dyn Toolbox>>) {
         self.tools = tools;
+    }
+
+    /// Writes an accepted change in the background, through the tools (which check the file
+    /// still holds `expected`); the outcome arrives through [`drain_writes`](Self::drain_writes).
+    pub fn write_file(&mut self, path: &str, expected: Option<Arc<str>>, content: Arc<str>) -> Result<(), AgentError> {
+        let tools = self.tools.clone().ok_or_else(|| AgentError::Runtime("there is no project to write to".into()))?;
+        let (tx, notify, path) = (self.writes_tx.clone(), self.notify.clone(), path.to_owned());
+        self.runtime()?.spawn(async move {
+            let job = {
+                let (path, content) = (path.clone(), content.clone());
+                tokio::task::spawn_blocking(move || tools.write(&path, expected.as_deref(), &content))
+            };
+            let result = job.await.unwrap_or_else(|e| Err(format!("the write stopped abnormally: {e}")));
+            if tx.send(Written { path, content, result }).is_ok() {
+                notify();
+            }
+        });
+        Ok(())
+    }
+
+    /// Takes every finished write, without blocking.
+    pub fn drain_writes(&mut self) -> Vec<Written> {
+        self.writes_rx.try_iter().collect()
+    }
+
+    /// What the agent's next edits and reads of `path` build on (see [`Toolbox::set_pending`]).
+    /// Cheap: no I/O.
+    pub fn set_pending(&self, path: &str, content: Option<Arc<str>>) {
+        if let Some(tools) = &self.tools {
+            tools.set_pending(path, content);
+        }
     }
 
     /// Resolves `lookup` (a catalog's model list) in the background; the answer arrives through

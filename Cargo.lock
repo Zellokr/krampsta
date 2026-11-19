@@ -1991,6 +1991,7 @@ dependencies = [
  "grep-searcher",
  "ignore",
  "krampsta-agent",
+ "krampsta-core",
  "serde",
  "serde_json",
  "tempfile",

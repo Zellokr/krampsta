@@ -5,6 +5,7 @@
 //! run's cancellation as it goes and caps its output, so neither a huge repository nor a huge
 //! file can stall a run or flood the model's context.
 
+mod edit;
 mod list;
 mod project;
 mod read;
@@ -13,22 +14,23 @@ mod search;
 use std::path::Path;
 use std::sync::Arc;
 
-use krampsta_agent::{CancellationToken, ToolSpec, Toolbox};
+use krampsta_agent::{CancellationToken, ToolOutput, ToolSpec, Toolbox};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
 pub use project::Project;
 
-/// The project folder and the tools that work in it.
+/// The project folder, the tools that work in it, and the changes they have proposed.
 pub struct Workspace {
     project: Project,
     specs: Arc<[ToolSpec]>,
+    pending: edit::Pending,
 }
 
 impl Workspace {
     /// Tools over the folder at `root` (which must exist).
     pub fn open(root: impl AsRef<Path>) -> std::io::Result<Self> {
-        Ok(Workspace { project: Project::open(root)?, specs: specs() })
+        Ok(Workspace { project: Project::open(root)?, specs: specs(), pending: edit::Pending::default() })
     }
 
     pub fn root(&self) -> &Path {
@@ -41,14 +43,23 @@ impl Toolbox for Workspace {
         self.specs.clone()
     }
 
-    fn run(&self, name: &str, arguments: &str, cancel: &CancellationToken) -> Result<String, String> {
-        let project = &self.project;
+    fn run(&self, name: &str, arguments: &str, cancel: &CancellationToken) -> Result<ToolOutput, String> {
+        let (project, pending) = (&self.project, &self.pending);
         match name {
-            "read_file" => read::run(project, parse(arguments)?, cancel),
-            "list_files" => list::run(project, parse(arguments)?, cancel),
-            "search" => search::run(project, parse(arguments)?, cancel),
+            "read_file" => read::run(project, pending, parse(arguments)?, cancel).map(ToolOutput::from),
+            "list_files" => list::run(project, parse(arguments)?, cancel).map(ToolOutput::from),
+            "search" => search::run(project, parse(arguments)?, cancel).map(ToolOutput::from),
+            "edit_file" => edit::run(project, pending, parse(arguments)?),
             other => Err(format!("there is no tool named `{other}`")),
         }
+    }
+
+    fn write(&self, path: &str, expected: Option<&str>, content: &str) -> Result<(), String> {
+        edit::write(&self.project, path, expected, content)
+    }
+
+    fn set_pending(&self, path: &str, content: Option<Arc<str>>) {
+        self.pending.set(path, content);
     }
 }
 
@@ -92,6 +103,23 @@ fn specs() -> Arc<[ToolSpec]> {
             }),
         ),
         spec(
+            "edit_file",
+            "Propose a change to a file: replace old_string, which must appear exactly once (or use \
+             replace_all), with new_string; with an empty old_string, create the file. Nothing is \
+             written until the user accepts it; later reads and edits of the file see the proposal. \
+             Read the file first and copy old_string from it exactly, indentation included.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path relative to the project root."},
+                    "old_string": {"type": "string", "description": "The exact text to replace; empty to create the file."},
+                    "new_string": {"type": "string", "description": "The text to put in its place."},
+                    "replace_all": {"type": "boolean", "description": "Replace every occurrence. Default: false."}
+                },
+                "required": ["path", "old_string", "new_string"]
+            }),
+        ),
+        spec(
             "search",
             "Search the project's files for lines matching a regular expression (Rust regex syntax), \
              or plain text with `literal`. Files ignored by .gitignore and binary files are skipped. \
@@ -123,9 +151,9 @@ mod tests {
         let cancel = CancellationToken::new();
         let specs = tools.specs();
         let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(names, ["list_files", "read_file", "search"]);
-        assert_eq!(tools.run("list_files", "", &cancel).unwrap(), "hello.txt\n");
-        assert_eq!(tools.run("read_file", r#"{"path":"hello.txt"}"#, &cancel).unwrap(), "     1\thi\n");
+        assert_eq!(names, ["list_files", "read_file", "edit_file", "search"]);
+        assert_eq!(tools.run("list_files", "", &cancel).unwrap().text, "hello.txt\n");
+        assert_eq!(tools.run("read_file", r#"{"path":"hello.txt"}"#, &cancel).unwrap().text, "     1\thi\n");
         assert!(tools.run("read_file", "{}", &cancel).unwrap_err().contains("missing field `path`"));
         assert!(tools.run("delete_everything", "{}", &cancel).unwrap_err().contains("no tool named"));
     }
@@ -137,6 +165,6 @@ mod tests {
         let tools = Workspace::open(dir.path()).unwrap();
         let cancel = CancellationToken::new();
         cancel.cancel();
-        assert_eq!(tools.run("list_files", "{}", &cancel), Err("stopped".into()));
+        assert_eq!(tools.run("list_files", "{}", &cancel), Err("stopped".to_owned()));
     }
 }

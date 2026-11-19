@@ -216,7 +216,17 @@ const SCENES: &[Scene] = &[
     // Nothing proposed yet: the changes panel's empty state beside a new session.
     ("changes-empty", |s| {
         s.new_session();
-        s.diff = rune_kit::diff::DiffState::new(Vec::new());
+    }),
+    // The agent proposed edits to two files and a new one: each file and each block can be
+    // accepted or rejected.
+    ("changes", stage_changes),
+    ("change-failed", |s| {
+        stage_changes(s);
+        s.review.error = Some(
+            "`src/net/backoff.rs` changed on disk after Krampsta proposed this edit, so it was not \
+             written; reject it and ask again"
+                .into(),
+        );
     }),
     ("sidebar-hidden", |s| s.sidebar.toggle()),
     // Signed in and on a real provider: the list shows its groups, the simulated agent hidden.
@@ -434,4 +444,12 @@ fn stage_saved_key(s: &mut KrampstaApp) {
 fn stage_local(s: &mut KrampstaApp, models: Models) {
     s.engine.selection = Selection { provider: "ollama".into(), model: None };
     s.engine.models.insert("ollama".into(), models);
+}
+
+/// A new session beside the sample proposals, as the agent's edits arrive.
+fn stage_changes(s: &mut KrampstaApp) {
+    s.new_session();
+    for change in crate::sample::changes() {
+        s.propose(change);
+    }
 }

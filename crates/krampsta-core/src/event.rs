@@ -1,6 +1,6 @@
 //! What an agent run reports while it works.
 
-use crate::{RunId, SessionId, ToolCallId};
+use crate::{FileChange, RunId, SessionId, ToolCallId};
 
 /// The state of a session's agent. A plain enum: each variant carries only what is valid in it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -104,6 +104,11 @@ pub enum AgentEvent {
         run: RunId,
         result: ToolResult,
     },
+    /// A tool proposed a change to a file (not written: the user reviews it).
+    ChangeProposed {
+        run: RunId,
+        change: FileChange,
+    },
     /// Tokens one request to the provider used. A run that makes several requests reports each.
     Usage {
         run: RunId,
@@ -130,6 +135,7 @@ impl AgentEvent {
             | AgentEvent::ToolCallStarted { run, .. }
             | AgentEvent::ToolCallFinished { run, .. }
             | AgentEvent::Usage { run, .. }
+            | AgentEvent::ChangeProposed { run, .. }
             | AgentEvent::Completed { run }
             | AgentEvent::Failed { run, .. }
             | AgentEvent::Cancelled { run } => *run,

@@ -21,14 +21,16 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
 - **Panel principal**: título de la sesión, historial (usuario a la derecha, Krampsta a la
   izquierda con Markdown y bloques de código coloreados), indicador de estado del agente
   (`Idle`, `Running`, `Completed`, `Failed`, `Cancelled`) y *composer* que crece con el texto.
-- **Panel derecho**: vista de diferencias (`rune-kit` `DiffView`) con datos de ejemplo;
+- **Panel derecho**: los cambios que propone el agente, como diff (`rune-kit` `DiffView`): cada
+  archivo se acepta o rechaza entero desde su cabecera, y cada bloque desde debajo;
   se oculta/muestra desde la barra (`Ctrl+J` / `⌘J`).
 - **MockAgent**: al enviar un mensaje publica `Started`, «piensa», llama a una herramienta
   simulada (`list_files`), transmite la respuesta palabra a palabra y termina con `Completed`.
   Un mensaje que empieza por `/fail` simula un fallo; **Stop** cancela la ejecución.
 - **Herramientas**: con un proveedor real, el agente lee el proyecto (la carpeta desde la que
   se abre Krampsta) con `list_files`, `search` y `read_file`, y cada llamada aparece como tarjeta
-  plegable en el chat. Nada sale de esa carpeta y aún no escribe nada.
+  plegable en el chat. Para cambiar código usa `edit_file`, que sólo **propone**: nada se
+  escribe hasta que lo aceptas en el panel de cambios. Nada sale de esa carpeta.
 - **Responsive**: al estrechar la ventana se pliegan los paneles laterales (primero el de
   cambios, después la sidebar) y vuelven a abrirse al ensancharla.
 - Atajos: `Ctrl+N`/`⌘N` nueva sesión, `Ctrl+Shift+B`/`⇧⌘B` sidebar, `Ctrl+J`/`⌘J` cambios,
@@ -51,7 +53,7 @@ krampsta/
 │   ├── krampsta-agent/        contrato AgentEngine, AgentHost (runtime async) y MockAgent
 │   ├── krampsta-providers/    motores reales: HTTP + SSE (reqwest) y OpenAI/compatibles
 │   │   └── tests/          servidor HTTP falso que reproduce streams grabados
-│   ├── krampsta-tools/        herramientas del agente: read_file, list_files, search
+│   ├── krampsta-tools/        herramientas del agente: read_file, list_files, search, edit_file
 │   ├── krampsta-ui/           estado de la UI, tema, vistas y componentes Rune/rune-kit
 │   │   └── tests/ui.rs     pruebas de interacción con el Runtime headless de Rune
 │   └── krampsta-app/          binario `krampsta`: elige el motor y arranca la app

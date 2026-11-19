@@ -75,6 +75,26 @@ pub fn api_key_remove(provider: &str) -> String {
     format!("krampsta-api-key-remove-{provider}")
 }
 
+/// The changes panel's actions: a whole file's (in its header), a block's (under it), and why a
+/// write failed.
+pub fn change_accept(file: usize) -> String {
+    format!("krampsta-change-accept-{file}")
+}
+
+pub fn change_reject(file: usize) -> String {
+    format!("krampsta-change-reject-{file}")
+}
+
+pub fn block_accept(file: usize, block: usize) -> String {
+    format!("krampsta-block-accept-{file}-{block}")
+}
+
+pub fn block_reject(file: usize, block: usize) -> String {
+    format!("krampsta-block-reject-{file}-{block}")
+}
+
+pub const CHANGES_ERROR: &str = "krampsta-changes-error";
+
 /// A session row's context menu; rune-kit keys its items `<key>-item<i>`.
 pub fn session_menu(id: krampsta_core::SessionId) -> String {
     format!("krampsta-session-menu-{id}")

@@ -9,7 +9,7 @@ use krampsta_core::{AgentEvent, Message, RunEvent, RunId, SessionId, ToolCall, T
 use tokio_util::sync::CancellationToken;
 
 use crate::host::Notifier;
-use crate::tools::{ToolSpec, Toolbox};
+use crate::tools::{ToolOutput, ToolSpec, Toolbox};
 
 /// A boxed, sendable future, so [`AgentEngine`] stays object safe (`Arc<dyn AgentEngine>`).
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -153,7 +153,12 @@ impl RunContext {
             }
         };
         let (output, is_error) = match outcome {
-            Ok(output) => (output, false),
+            Ok(ToolOutput { text, change }) => {
+                if let Some(change) = change {
+                    self.emit(AgentEvent::ChangeProposed { run: self.run, change });
+                }
+                (text, false)
+            }
             Err(reason) => (reason, true),
         };
         let result = ToolResult { call_id: call.id, output, is_error };

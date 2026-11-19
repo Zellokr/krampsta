@@ -14,7 +14,7 @@ use std::sync::mpsc::{Receiver, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use krampsta_agent::{AgentEngine, AgentHost, CancellationToken, RunRequest, ToolSpec, Toolbox};
+use krampsta_agent::{AgentEngine, AgentHost, CancellationToken, RunRequest, ToolOutput, ToolSpec, Toolbox};
 use krampsta_core::{AgentEvent, Message, MessageId, SessionId, Usage};
 use krampsta_providers::access::StaticAccess;
 use krampsta_providers::{OpenAiConfig, OpenAiEngine, ResponsesEngine};
@@ -69,9 +69,9 @@ impl Toolbox for Echo {
         ])
     }
 
-    fn run(&self, name: &str, arguments: &str, _: &CancellationToken) -> Result<String, String> {
+    fn run(&self, name: &str, arguments: &str, _: &CancellationToken) -> Result<ToolOutput, String> {
         match name {
-            "echo" => Ok(format!("echo {arguments}")),
+            "echo" => Ok(format!("echo {arguments}").into()),
             _ => Err("it broke".into()),
         }
     }

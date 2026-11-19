@@ -17,10 +17,12 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   (iniciar/cerrar sesión), `secrets` (llavero del sistema) y `Catalog`. No depende de Rune.
 - `crates/krampsta-tools` — las herramientas del agente sobre la carpeta del proyecto
   (`Workspace`, un `Toolbox`): `project` (ninguna ruta sale de la carpeta), `read_file`,
-  `list_files`, `search` (crates de ripgrep: `ignore`, `grep-searcher`). No depende de Rune.
+  `list_files`, `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
+  propone, y la escritura al aceptar). No depende de Rune.
 - `crates/krampsta-ui` — `KrampstaApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`
   (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
-  (piezas), `accounts.rs` (diálogo de inicio de sesión), `theme.rs` (único sitio de colores),
+  (piezas), `accounts.rs` (diálogo de inicio de sesión), `changes.rs` (revisar los cambios
+  propuestos: aceptar o rechazar archivos y bloques), `theme.rs` (único sitio de colores),
   `keys.rs` (claves estables), `sample.rs` (datos
   de ejemplo).
 - `crates/krampsta-app` — binario `krampsta`; sólo construye el catálogo y arranca.
@@ -68,6 +70,11 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   con `steps::run_calls`. El bucle (pedir → herramientas → resultados → pedir) vive en cada motor,
   porque el formato es de cada API, con el tope `steps::MAX_STEPS`. Los turnos anteriores se
   mandan sólo como texto; el tráfico de herramientas vive en memoria durante la ejecución.
+- Las herramientas nunca escriben: `edit_file` devuelve un `FileChange` (antes/después) que la
+  UI muestra para revisar, y guarda la propuesta como pendiente (las lecturas y ediciones
+  siguientes del agente la ven). Sólo `Toolbox::write`, al aceptar desde el panel, toca el
+  disco: comprueba que el archivo sigue como se propuso y escribe de forma atómica. Aceptar o
+  rechazar un bloque es `splice_lines` (lineal) sobre los dos textos.
 - Una herramienta nueva va en `krampsta-tools`: lee sólo lo necesario (streaming, sin cargar
   archivos enteros), pone tope a su salida, comprueba la cancelación en los bucles largos y
   resuelve rutas con `Project::resolve`. Se prueba con `tempfile`, nunca con el disco real.

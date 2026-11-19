@@ -102,6 +102,8 @@ impl Session {
                 self.assistant_message(run).tool_results.push(result.clone())
             }
             AgentEvent::Usage { usage, .. } => self.usage += *usage,
+            // Changes belong to the project, not the conversation: the app keeps them.
+            AgentEvent::ChangeProposed { .. } => return false,
             AgentEvent::Completed { .. } => self.finish(AgentStatus::Completed),
             AgentEvent::Failed { error, .. } => self.finish(AgentStatus::Failed { error: error.clone() }),
             AgentEvent::Cancelled { .. } => self.finish(AgentStatus::Cancelled),

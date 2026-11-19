@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader};
 use krampsta_agent::CancellationToken;
 use serde::Deserialize;
 
+use crate::edit::Pending;
 use crate::project::Project;
 
 /// Lines shown when the model asks for no limit.
@@ -31,14 +32,24 @@ pub struct Args {
     limit: Option<usize>,
 }
 
-pub fn run(project: &Project, args: Args, cancel: &CancellationToken) -> Result<String, String> {
+pub fn run(project: &Project, pending: &Pending, args: Args, cancel: &CancellationToken) -> Result<String, String> {
+    // A file with a change proposed reads as proposed: the agent sees its own edits.
+    if let Ok(real) = project.resolve_for_write(&args.path)
+        && let Some(content) = pending.get(&project.show(&real))
+    {
+        return lines(content.as_bytes(), &project.show(&real), &args, cancel);
+    }
     let path = project.resolve(&args.path)?;
     let shown = project.show(&path);
     if path.is_dir() {
         return Err(format!("`{shown}` is a folder; use list_files to see what it holds"));
     }
     let file = File::open(&path).map_err(|e| format!("could not open `{shown}`: {e}"))?;
-    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    lines(BufReader::with_capacity(64 * 1024, file), &shown, &args, cancel)
+}
+
+/// The numbered lines of the range `args` asks for, read from `reader` only as far as needed.
+fn lines(mut reader: impl BufRead, shown: &str, args: &Args, cancel: &CancellationToken) -> Result<String, String> {
     let head = reader.fill_buf().map_err(|e| format!("could not read `{shown}`: {e}"))?;
     if head.is_empty() {
         return Ok(format!("`{shown}` is empty."));
@@ -115,7 +126,20 @@ mod tests {
     }
 
     fn read(p: &Project, path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String> {
-        run(p, Args { path: path.into(), offset, limit }, &CancellationToken::new())
+        run(p, &Pending::default(), Args { path: path.into(), offset, limit }, &CancellationToken::new())
+    }
+
+    #[test]
+    fn a_proposed_change_reads_as_proposed_even_for_a_new_file() {
+        let (_d, p) = project(&[("a.txt", b"old\n")]);
+        let pending = Pending::default();
+        pending.set("a.txt", Some("new\n".into()));
+        pending.set("src/b.txt", Some("born\n".into()));
+        let read = |path: &str| {
+            run(&p, &pending, Args { path: path.into(), offset: None, limit: None }, &CancellationToken::new())
+        };
+        assert_eq!(read("./a.txt").unwrap(), "     1\tnew\n");
+        assert_eq!(read("src/b.txt").unwrap(), "     1\tborn\n");
     }
 
     #[test]

@@ -1,8 +1,7 @@
-//! Example content the first version ships with: seeded sessions and a sample diff for the
-//! changes panel. Replaced by real history and real file changes in later milestones.
+//! Example content: seeded sessions (until history is saved) and proposed changes for the
+//! headless scenes of the changes panel.
 
-use krampsta_core::{IdGen, MessageRole, Session, SessionId};
-use rune_kit::diff::{DiffState, FileDiff};
+use krampsta_core::{FileChange, IdGen, MessageRole, Session, SessionId};
 
 const WELCOME: &str = "Welcome to **Krampsta**, a native AI coding agent built with Rust and Rune.\n\n\
 This first version runs a *simulated* agent, so you can try the whole flow:\n\n\
@@ -76,16 +75,44 @@ impl Backoff {
 }
 ";
 
-const OLD_TOML: &str = "[retry]\nbase_ms = 100\nmax_ms = 1000\n";
-const NEW_TOML: &str = "[retry]\nbase_ms = 100\nmax_ms = 1000\njitter = 0.2\n";
+const OLD_TOML: &str = "[retry]
+base_ms = 100
+max_ms = 1000
 
-/// Sample changes for the diff panel.
-pub fn diff() -> DiffState {
-    let mut diff = DiffState::new(vec![
-        FileDiff::from_texts("src/net/backoff.rs", OLD_RS, NEW_RS),
-        FileDiff::from_texts("config/retry.toml", OLD_TOML, NEW_TOML),
-    ]);
-    // The panel is narrow: wrap long lines instead of scrolling sideways.
-    diff.set_wrap(true);
-    diff
+[http]
+timeout_ms = 5000
+keep_alive = true
+pool = 8
+user_agent = \"krampsta\"
+
+[log]
+level = \"info\"
+";
+const NEW_TOML: &str = "[retry]
+base_ms = 100
+max_ms = 1000
+jitter = 0.2
+
+[http]
+timeout_ms = 5000
+keep_alive = true
+pool = 8
+user_agent = \"krampsta\"
+
+[log]
+level = \"debug\"
+";
+
+const NEW_DOC: &str = "# Retries
+
+Waits grow from `base_ms` to `max_ms`, give or take `jitter`.
+";
+
+/// Changes as the agent proposes them: edits to two files and a new one.
+pub fn changes() -> Vec<FileChange> {
+    vec![
+        FileChange { path: "src/net/backoff.rs".into(), before: Some(OLD_RS.into()), after: NEW_RS.into() },
+        FileChange { path: "config/retry.toml".into(), before: Some(OLD_TOML.into()), after: NEW_TOML.into() },
+        FileChange { path: "docs/retry.md".into(), before: None, after: NEW_DOC.into() },
+    ]
 }
