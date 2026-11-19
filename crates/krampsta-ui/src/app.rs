@@ -2,13 +2,14 @@
 
 use krampsta_agent::{Account, DeviceCode, MockCatalog, Provider, ProviderKind, Selection};
 use krampsta_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult};
-use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, TextEdit, Tx, Waker, row, text};
+use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, PointerPress, TextEdit, Tx, Waker, row, text};
 use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit};
 
 use crate::accounts::SignIn;
-use crate::components::{sign_in, status};
+use crate::components::{menus, sign_in, status};
 use crate::keys;
+use crate::menus::MenuTarget;
 use crate::picker::{Models, Picker};
 use crate::state::{KrampstaApp, Screen};
 use crate::theme::{self, ThemeChoice};
@@ -91,6 +92,7 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>) -> El {
         Screen::Chat => workspace(s, cx, k, &mut layer),
     };
     sign_in::dialog(s, k, &mut layer);
+    menus::delete_dialog(s, k, &mut layer);
     // The root's rect is the window: refit the side panes whenever its width changes.
     let base = rune::el()
         .key("krampsta-root")
@@ -120,7 +122,7 @@ fn workspace(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec
         .leading(row().grow(1.0).min_w(0.0).child(heading))
         .trailing(row().gap(8.0).items_center().child(status::pill(&status, k)).child(toggle));
     SplitView::new(chat::view(s, k, layer))
-        .sidebar(&s.sidebar, |s: &mut KrampstaApp| &mut s.sidebar, sidebar::view(s, k))
+        .sidebar(&s.sidebar, |s: &mut KrampstaApp| &mut s.sidebar, sidebar::view(s, k, layer))
         .inspector(&s.changes, |s: &mut KrampstaApp| &mut s.changes, changes::view(s, k))
         .toolbar(toolbar)
         .titlebar_inset(cx.titlebar_inset())
@@ -177,6 +179,22 @@ const SCENES: &[Scene] = &[
         s.sign_in = SignIn::Failed { provider: "chatgpt".into(), error: error.into() };
     }),
     ("changes-hidden", |s| s.toggle_changes()),
+    // Right-clicked: the first session's row, the agent's reply, then deleting that session.
+    ("session-menu", |s| {
+        let id = s.sessions[0].id;
+        s.open_menu(MenuTarget::Session(id), PointerPress { x: 150.0, y: 175.0 });
+    }),
+    ("message-menu", |s| {
+        scene_completed(s);
+        let reply = s.current().and_then(|x| x.messages.last()).map(|m| m.id);
+        if let Some(id) = reply {
+            s.open_menu(MenuTarget::Message(id), PointerPress { x: 420.0, y: 245.0 });
+        }
+    }),
+    ("delete-session", |s| {
+        let id = s.sessions[0].id;
+        s.ask_delete(id);
+    }),
     // Nothing proposed yet: the changes panel's empty state beside a new session.
     ("changes-empty", |s| {
         s.new_session();

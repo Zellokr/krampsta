@@ -5,14 +5,14 @@ use rune::{El, Tx, col, icon, row, text};
 use rune_kit::shell::RowStatus;
 use rune_kit::{Kit, Sidebar, SidebarRow};
 
-use crate::components::icons;
+use crate::components::{icons, menus};
 use crate::keys;
 use crate::state::{KrampstaApp, Screen};
 use crate::theme;
 
 const NEW_SHORTCUT: &str = if cfg!(target_os = "macos") { "⌘N" } else { "Ctrl+N" };
 
-pub fn view(s: &KrampstaApp, k: &Kit) -> El {
+pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
     let new = SidebarRow::new("New session")
         .icon(&icons::PLUS)
         .detail(NEW_SHORTCUT)
@@ -38,7 +38,7 @@ pub fn view(s: &KrampstaApp, k: &Kit) -> El {
         .header(brand(k))
         .header(new)
         .footer(settings);
-    s.sessions.iter().fold(sidebar, |sb, x| sb.child(session_row(s, x, k))).build(k)
+    s.sessions.iter().fold(sidebar, |sb, x| sb.child(session_row(s, x, k, layer))).build(k)
 }
 
 fn brand(k: &Kit) -> El {
@@ -71,7 +71,7 @@ fn plain(line: &str) -> String {
     line.trim_start_matches(['#', '>', '-', ' ']).chars().filter(|c| !matches!(c, '*' | '`' | '_')).collect()
 }
 
-fn session_row(s: &KrampstaApp, x: &Session, k: &Kit) -> El {
+fn session_row(s: &KrampstaApp, x: &Session, k: &Kit, layer: &mut Vec<El>) -> El {
     let id = x.id;
     let mut row = SidebarRow::new(x.title.clone())
         .height(44.0)
@@ -83,7 +83,7 @@ fn session_row(s: &KrampstaApp, x: &Session, k: &Kit) -> El {
         AgentStatus::Failed { .. } => row = row.status(RowStatus::Attention),
         _ => {}
     }
-    row.build(k).key(keys::session(id))
+    menus::session(s, x, row.build(k).key(keys::session(id)), k, layer)
 }
 
 #[cfg(test)]

@@ -1,14 +1,12 @@
 //! The main pane: the transcript of the selected session and the composer under it.
 
-use std::collections::HashSet;
-
-use krampsta_core::{AgentStatus, MessageRole, Session, ToolCallId};
+use krampsta_core::{AgentStatus, MessageRole, Session};
 use rune::{El, ScrollSpec, col, row, text};
 use rune_kit::Kit;
 
 use crate::components::alert::{Alert, Tone};
 use crate::components::empty::Empty;
-use crate::components::{composer, icons, message, shimmer};
+use crate::components::{composer, icons, menus, message, shimmer};
 use crate::keys;
 use crate::state::KrampstaApp;
 use crate::theme;
@@ -18,7 +16,7 @@ const COLUMN: f32 = 820.0;
 pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
     let (content, running) = match s.current() {
         Some(session) if !session.messages.is_empty() => {
-            (transcript(session, &s.open_tools, k), session.status.is_running())
+            (transcript(s, session, k, layer), session.status.is_running())
         }
         Some(session) => (empty_state(k), session.status.is_running()),
         None => (empty_state(k), false),
@@ -35,21 +33,20 @@ pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
     col().w_full().h_full().min_h(0.0).child(scroll).child(composer)
 }
 
-fn transcript(session: &Session, open_tools: &HashSet<ToolCallId>, k: &Kit) -> El {
+fn transcript(s: &KrampstaApp, session: &Session, k: &Kit, layer: &mut Vec<El>) -> El {
     let running = session.status.is_running();
     let streaming_id = session
         .messages
         .last()
         .filter(|m| running && m.role == MessageRole::Assistant && m.run == session.active_run())
         .map(|m| m.id);
-    let mut list = col()
-        .key(keys::TRANSCRIPT)
-        .role("log")
-        .label("Conversation")
-        .w_full()
-        .max_w(COLUMN)
-        .gap(24.0)
-        .children(session.messages.iter().map(|m| message::view(m, Some(m.id) == streaming_id, open_tools, k)));
+    let mut list =
+        col().key(keys::TRANSCRIPT).role("log").label("Conversation").w_full().max_w(COLUMN).gap(24.0).children(
+            session.messages.iter().map(|m| {
+                let view = message::view(m, Some(m.id) == streaming_id, &s.open_tools, k);
+                menus::message(s, m, view, k, layer)
+            }),
+        );
     // Running, but the assistant hasn't started its message yet: show that it's working.
     if running && streaming_id.is_none() {
         list = list.child(waiting(k));

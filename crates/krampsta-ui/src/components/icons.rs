@@ -3,8 +3,8 @@
 use rune::Icon;
 
 pub use rune_theme_opencode::icons::{
-    ARROW_UP, CHECK, CIRCLE_CHECK, CIRCLE_X, GITHUB, INFO, PLUS, REVIEW, SETTINGS_GEAR as GEAR, STOP, TERMINAL as TOOL,
-    WARNING,
+    ARROW_UP, CHECK, CIRCLE_CHECK, CIRCLE_X, COPY, GITHUB, INFO, PLUS, REVIEW, SETTINGS_GEAR as GEAR, STOP,
+    TERMINAL as TOOL, TRASH, WARNING,
 };
 
 /// OpenAI's mark, for the ChatGPT account (24-point SVG, current colour).

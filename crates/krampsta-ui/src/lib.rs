@@ -4,6 +4,7 @@
 //! - [`app`]: the Rune wiring — [`spec`], the root view, `poll`, keys and headless scenes.
 //! - [`views`]: screens and panes (sidebar, chat, changes, settings).
 //! - [`picker`]: choosing the provider and model (state and handlers).
+//! - [`menus`]: context menus on sessions and messages, and deleting a session.
 //! - [`components`]: small reusable pieces (message bubbles, status pill, composer).
 //! - [`theme`]: Krampsta's palette as a rune-kit `Kit`.
 //!
@@ -14,6 +15,7 @@ pub mod accounts;
 pub mod app;
 pub mod components;
 pub mod keys;
+pub mod menus;
 pub mod picker;
 pub mod sample;
 pub mod state;

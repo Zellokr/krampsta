@@ -13,6 +13,7 @@ use rune_kit::PaneState;
 use rune_kit::diff::DiffState;
 
 use crate::accounts::SignIn;
+use crate::menus::OpenMenu;
 use crate::picker::EngineChoice;
 use crate::sample;
 use crate::theme::ThemeChoice;
@@ -56,6 +57,10 @@ pub struct KrampstaApp {
     pub sign_in: SignIn,
     /// Tool cards the user opened in the transcript.
     pub open_tools: HashSet<ToolCallId>,
+    /// The context menu showing, if any.
+    pub menu: Option<OpenMenu>,
+    /// The session the delete confirmation asks about.
+    pub confirm_delete: Option<SessionId>,
     pub(crate) catalog: Arc<dyn EngineCatalog>,
     pub(crate) agent: AgentHost,
     ids: IdGen,
@@ -90,6 +95,8 @@ impl KrampstaApp {
             engine,
             sign_in: SignIn::Closed,
             open_tools: HashSet::new(),
+            menu: None,
+            confirm_delete: None,
             catalog,
             agent,
             ids,
@@ -129,7 +136,6 @@ impl KrampstaApp {
         self.session(self.selected).or_else(|| self.sessions.first())
     }
 
-    /// Adds an empty session at the top and selects it.
     /// Opens a closed tool card, closes an open one.
     pub fn toggle_tool(&mut self, id: &ToolCallId) {
         if !self.open_tools.remove(id) {
@@ -137,6 +143,7 @@ impl KrampstaApp {
         }
     }
 
+    /// Adds an empty session at the top and selects it.
     pub fn new_session(&mut self) -> SessionId {
         let id = SessionId(self.ids.next());
         self.sessions.insert(0, Session::new(id));

@@ -176,6 +176,38 @@ fn a_tool_card_opens_and_closes_on_click() {
     assert!(!shows_output(&rt));
 }
 
+fn right_click(rt: &mut Runtime<KrampstaApp>, key: &str) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
+    rt.secondary_down(x, y);
+    rt.secondary_up(x, y);
+    settle(rt);
+}
+
+#[test]
+fn a_session_is_deleted_from_its_context_menu_after_confirming() {
+    let mut rt = runtime();
+    let (first, second) = (rt.state.sessions[0].id, rt.state.sessions[1].id);
+    let menu = keys::session_menu(first);
+    right_click(&mut rt, &keys::session(first));
+    assert!(has(&rt, &format!("{menu}-menu")), "right-click opens the row's menu");
+
+    // Items: Copy title, a separator, Delete….
+    click(&mut rt, &format!("{menu}-item2"));
+    assert!(!has(&rt, &format!("{menu}-menu")), "choosing closes the menu");
+    let dialog = format!("{}-dialog", keys::DELETE_SESSION);
+    assert!(has(&rt, &dialog), "deleting asks first");
+
+    click(&mut rt, keys::DELETE_SESSION_CANCEL);
+    assert!(rt.state.session(first).is_some(), "cancel keeps it");
+
+    right_click(&mut rt, &keys::session(first));
+    click(&mut rt, &format!("{menu}-item2"));
+    click(&mut rt, keys::DELETE_SESSION_CONFIRM);
+    assert!(rt.state.session(first).is_none());
+    assert!(!has(&rt, &keys::session(first)));
+    assert_eq!(rt.state.selected, second, "the next session is selected");
+}
+
 #[test]
 fn the_send_button_sends_too() {
     let mut rt = runtime();

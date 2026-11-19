@@ -57,3 +57,19 @@ pub const SIGN_IN_RETRY: &str = "krampsta-sign-in-retry";
 pub fn account(provider: &str) -> String {
     format!("krampsta-account-{provider}")
 }
+
+/// A session row's context menu; rune-kit keys its items `<key>-item<i>`.
+pub fn session_menu(id: krampsta_core::SessionId) -> String {
+    format!("krampsta-session-menu-{id}")
+}
+
+/// A message's context menu.
+pub fn message_menu(id: krampsta_core::MessageId) -> String {
+    format!("krampsta-message-menu-{id}")
+}
+
+/// The dialog that confirms deleting a session (rune-kit keys its panel `<key>-dialog`), and its
+/// buttons.
+pub const DELETE_SESSION: &str = "krampsta-delete-session";
+pub const DELETE_SESSION_CONFIRM: &str = "krampsta-delete-session-confirm";
+pub const DELETE_SESSION_CANCEL: &str = "krampsta-delete-session-cancel";
