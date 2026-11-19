@@ -227,6 +227,7 @@ const SCENES: &[Scene] = &[
         scene_command(s);
     }),
     ("approval", scene_approval),
+    ("streaming", scene_streaming),
     ("change-failed", |s| {
         stage_changes(s);
         s.review.error = Some(
@@ -499,4 +500,15 @@ fn scene_approval(s: &mut KrampstaApp) {
         tool: call.name,
         what: "cargo clean && cargo test --workspace".into(),
     });
+}
+
+/// A reply that has just arrived in one burst, not yet shown: the pacer lets it out over the
+/// next frames (`--frames`/`--strip` show how it comes out).
+fn scene_streaming(s: &mut KrampstaApp) {
+    let run = staged(s, "Explain how a run streams into the transcript");
+    let reply = "A run streams its reply as events. The engine emits text deltas through its context, \
+                 the host sends them down a channel and wakes the window, and `poll` folds them into the \
+                 session. The view then shows the reply at a steady pace instead of in the bursts the \
+                 provider sends, a whole word at a time, each fading in as it comes out.";
+    apply(s, &[AgentEvent::TextDelta { run, text: reply.into() }]);
 }

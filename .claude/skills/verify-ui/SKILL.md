@@ -109,3 +109,18 @@ que querías cambiar. Una captura modificada que no esperabas es una regresión:
   `krampsta-*`, `Ime::Commit` para teclear, `pump_until_finished` para el agente).
 - Al informar, di qué escenas miraste y qué corregiste; si no pudiste renderizar (sin GPU),
   dilo explícitamente.
+
+## Animaciones (streaming)
+
+Una captura es un instante: no enseña si algo sale fluido. Para el texto en streaming, saca una
+tira de fotogramas consecutivos de la escena `streaming` (una respuesta recién llegada que el
+pacer va soltando con el reloj virtual) y mírala:
+
+```bash
+./target/debug/krampsta.exe --scene streaming --size 1200x800 --scale 1 --frames 16 --fps 60 \
+  --start 0.05 --out out/frames --strip out/tira.png --crop 280,140,470,200 --every 1 --cols 2
+```
+
+Debe avanzar unas palabras en cada fotograma, sin fotogramas repetidos ni líneas que aparezcan
+de golpe. Para la ventana real (no headless), `--native --trace run.jsonl --frames 600 --script
+…` guarda la marca de tiempo de cada fotograma: los intervalos deben ser los del monitor.
