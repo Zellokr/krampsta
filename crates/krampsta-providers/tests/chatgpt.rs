@@ -102,7 +102,7 @@ fn route(line: &str, body: &str, polls: &AtomicUsize) -> (&'static str, &'static
         "GET /backend-api/codex/models" => (
             ok,
             json,
-            r#"{"models":[{"slug":"gpt-6-sol","visibility":"list","use_responses_lite":true,"default_reasoning_level":"high"},{"slug":"codex-auto-review","visibility":"hide"}]}"#
+            r#"{"models":[{"slug":"gpt-6-sol","visibility":"list","use_responses_lite":true,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low","description":"Fast"},{"effort":"high","description":"Deep"},{"effort":"max","description":"Deepest"}]},{"slug":"codex-auto-review","visibility":"hide"}]}"#
                 .into(),
         ),
         "POST /backend-api/codex/responses" => (
@@ -188,7 +188,11 @@ fn a_chatgpt_plan_signs_in_lists_models_replies_and_refreshes_after_a_restart() 
         assert!(exchange.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"), "{exchange}");
     }
 
+    assert!(c.efforts("chatgpt", "gpt-6-sol").is_empty(), "unknown until the model list arrives");
     assert_eq!(block_on(c.models("chatgpt")).unwrap(), ["gpt-6-sol"]);
+    let efforts: Vec<String> = c.efforts("chatgpt", "gpt-6-sol").iter().map(|l| l.effort.as_str().to_owned()).collect();
+    assert_eq!(efforts, ["low", "high", "max"], "the levels the catalog announces");
+    assert!(c.efforts("copilot", "gpt-6-sol").is_empty());
     assert_eq!(reply_text(&c, None), "Hello from ChatGPT");
     {
         let seen = seen.lock().unwrap();
@@ -222,7 +226,7 @@ fn a_chatgpt_plan_signs_in_lists_models_replies_and_refreshes_after_a_restart() 
     // rotated token replaces the saved one.
     let c = catalog(&base, store.clone());
     assert_eq!(account(&c), Some(Account::SignedIn { user: "me@example.com".into() }));
-    assert_eq!(reply_text(&c, Some(Effort::Low)), "Hello from ChatGPT");
+    assert_eq!(reply_text(&c, Some(Effort::new("low"))), "Hello from ChatGPT");
     let refresh = seen
         .lock()
         .unwrap()

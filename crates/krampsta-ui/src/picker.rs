@@ -6,7 +6,9 @@
 
 use std::collections::HashMap;
 
-use krampsta_agent::{AgentError, Effort, MOCK_MODEL, MOCK_PROVIDER, ModelList, Provider, ProviderKind, Selection};
+use krampsta_agent::{
+    AgentError, Effort, EffortLevel, MOCK_MODEL, MOCK_PROVIDER, ModelList, Provider, ProviderKind, Selection,
+};
 
 use crate::state::KrampstaApp;
 
@@ -49,6 +51,9 @@ pub struct EngineChoice {
     /// How hard new runs ask the model to think; `None` leaves the model's default. Only sent
     /// to providers that take it.
     pub effort: Option<Effort>,
+    /// The efforts the selected model takes, as its provider announced them; empty when it
+    /// said nothing (see [`EngineChoice::effort_levels`]).
+    pub efforts: Vec<EffortLevel>,
 }
 
 impl EngineChoice {
@@ -61,6 +66,7 @@ impl EngineChoice {
             open: None,
             problem: None,
             effort: None,
+            efforts: Vec::new(),
         }
     }
 
@@ -89,6 +95,11 @@ impl EngineChoice {
     /// Whether the selected provider lets runs choose a reasoning effort.
     pub fn takes_effort(&self) -> bool {
         self.provider().is_some_and(|p| p.reasoning_effort)
+    }
+
+    /// The efforts to offer: the model's own, or low/medium/high while it has said none.
+    pub fn effort_levels(&self) -> Vec<EffortLevel> {
+        if self.efforts.is_empty() { EffortLevel::defaults() } else { self.efforts.clone() }
     }
 
     pub fn provider_label(&self) -> &str {
@@ -218,6 +229,21 @@ impl KrampstaApp {
                 Err(e) => Some(reason(&e)),
             },
         };
+        self.refresh_efforts();
+    }
+
+    /// Rereads the efforts the selected model takes. A chosen effort it doesn't take falls back
+    /// to its default ("Auto").
+    fn refresh_efforts(&mut self) {
+        let Selection { provider, model } = &self.engine.selection;
+        self.engine.efforts = match model {
+            Some(model) if self.engine.takes_effort() => self.catalog.efforts(provider, model),
+            _ => Vec::new(),
+        };
+        let levels = self.engine.effort_levels();
+        if self.engine.effort.as_ref().is_some_and(|e| !levels.iter().any(|l| l.effort == *e)) {
+            self.engine.effort = None;
+        }
     }
 
     /// Stores model lists that arrived. A provider with no model yet takes its first one.
@@ -237,6 +263,9 @@ impl KrampstaApp {
             if provider == self.engine.selection.provider && self.engine.selection.model.is_none() && first.is_some() {
                 self.engine.selection.model = first;
                 self.rebuild_engine();
+            } else if provider == self.engine.selection.provider {
+                // The list brought the catalog the efforts come from.
+                self.refresh_efforts();
             }
         }
         changed
@@ -324,6 +353,15 @@ mod tests {
                 _ => Err(AgentError::Provider("could not reach the server".into())),
             };
             Box::pin(async move { answer })
+        }
+        /// "local" model "a" announces low and xhigh; "b" announces nothing.
+        fn efforts(&self, provider: &str, model: &str) -> Vec<EffortLevel> {
+            match (provider, model) {
+                ("local", "a") => {
+                    ["low", "xhigh"].map(|id| EffortLevel { effort: Effort::new(id), description: None }).into()
+                }
+                _ => Vec::new(),
+            }
         }
     }
 
@@ -475,5 +513,26 @@ mod tests {
         choice.providers.retain(|p| p.kind == ProviderKind::Simulated);
         let ids: Vec<&str> = choice.grouped().into_iter().map(|(_, p)| p.id.as_str()).collect();
         assert_eq!(ids, [MOCK_PROVIDER], "the only one that can run always shows");
+    }
+
+    #[test]
+    fn the_efforts_offered_are_the_models_own_and_unknown_ones_fall_back_to_auto() {
+        let ids = |app: &KrampstaApp| -> Vec<String> {
+            app.engine.effort_levels().iter().map(|l| l.effort.as_str().to_owned()).collect()
+        };
+        let mut app = app();
+        app.engine.providers[0].reasoning_effort = true;
+        app.choose_provider("local");
+        wait_for_models(&mut app, "local");
+        assert_eq!(app.engine.selection.model.as_deref(), Some("a"));
+        assert_eq!(ids(&app), ["low", "xhigh"], "model a's own levels");
+
+        app.choose_effort(Some(Effort::new("xhigh")));
+        app.choose_model("b");
+        assert_eq!(ids(&app), ["low", "medium", "high"], "b announces none: the defaults");
+        assert_eq!(app.engine.effort, None, "xhigh isn't offered for b, so back to Auto");
+
+        app.choose_provider(MOCK_PROVIDER);
+        assert!(app.engine.efforts.is_empty(), "the simulated agent takes no effort");
     }
 }

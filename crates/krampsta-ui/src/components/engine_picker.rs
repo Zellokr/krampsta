@@ -74,27 +74,33 @@ pub fn provider(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>, place: Place) -> 
 }
 
 /// What the effort picker shows for a choice ("Auto effort" leaves the model's default).
-pub fn effort_text(effort: Option<Effort>) -> String {
-    format!("{} effort", effort.map_or("Auto", Effort::label))
+pub fn effort_text(effort: Option<&Effort>) -> String {
+    format!("{} effort", effort.map_or_else(|| "Auto".to_owned(), Effort::label))
 }
 
-/// The reasoning effort picker, for providers that take one ([`EngineChoice::takes_effort`]).
+/// The reasoning effort picker, for providers that take one ([`EngineChoice::takes_effort`]):
+/// "Auto" and the levels the model announces, each with what it's for.
 ///
 /// [`EngineChoice::takes_effort`]: crate::picker::EngineChoice::takes_effort
 pub fn effort(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>, place: Place) -> El {
     let (picker, key) = place.effort();
-    let choices: Vec<Option<Effort>> = std::iter::once(None).chain(Effort::ALL.map(Some)).collect();
-    let labels: Vec<String> = choices.iter().map(|e| effort_text(*e)).collect();
+    let levels = s.engine.effort_levels();
+    let choices: Vec<Option<Effort>> =
+        std::iter::once(None).chain(levels.iter().map(|l| Some(l.effort.clone()))).collect();
+    let labels: Vec<String> = choices.iter().map(|e| effort_text(e.as_ref())).collect();
+    let details: Vec<Option<String>> =
+        std::iter::once(Some("Model default".to_owned())).chain(levels.into_iter().map(|l| l.description)).collect();
     place
         .style(Select::new(key, &labels))
+        .details(&details)
         .label("Reasoning effort")
-        .current(Some(&effort_text(s.engine.effort)))
+        .current(Some(&effort_text(s.engine.effort.as_ref())))
         .open(s.engine.open == Some(picker))
         .on_toggle(move |s: &mut KrampstaApp| s.toggle_picker(picker))
         .on_close(|s: &mut KrampstaApp| s.close_picker())
         .on_choose(move |s: &mut KrampstaApp, label: &str, _: &mut Tx| {
-            if let Some(effort) = choices.iter().find(|e| effort_text(**e) == label) {
-                s.choose_effort(*effort);
+            if let Some(effort) = choices.iter().find(|e| effort_text(e.as_ref()) == label) {
+                s.choose_effort(effort.clone());
             }
         })
         .build(k, layer)

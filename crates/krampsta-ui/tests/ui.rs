@@ -371,7 +371,7 @@ fn the_effort_picker_shows_only_for_providers_that_take_one() {
     // Options: Auto, Low, Medium, High.
     click(&mut rt, "option3");
     assert_eq!(rt.state.engine.open, None);
-    assert_eq!(rt.state.engine.effort, Some(Effort::High), "new runs ask for it");
+    assert_eq!(rt.state.engine.effort, Some(Effort::new("high")), "new runs ask for it");
 }
 
 #[test]

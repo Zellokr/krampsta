@@ -102,6 +102,13 @@ pub trait EngineCatalog: Send + Sync + 'static {
         let _ = provider;
         Box::pin(async { Ok(()) })
     }
+
+    /// The reasoning efforts `model` takes, from what the provider already knows (no network:
+    /// a model list fetched earlier). Empty when unknown, or for providers that take none.
+    fn efforts(&self, provider: &str, model: &str) -> Vec<crate::EffortLevel> {
+        let _ = (provider, model);
+        Vec::new()
+    }
 }
 
 /// The simulated agent's id and its one model.

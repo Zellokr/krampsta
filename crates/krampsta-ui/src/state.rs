@@ -180,7 +180,8 @@ impl KrampstaApp {
         let id = self.current().map(|s| s.id).ok_or(SessionError::EmptyMessage)?;
         let session = self.session_mut(id).ok_or(SessionError::EmptyMessage)?;
         session.submit(&text, run)?;
-        let request = RunRequest { session: id, run, history: session.messages.clone(), effort: self.engine.effort };
+        let request =
+            RunRequest { session: id, run, history: session.messages.clone(), effort: self.engine.effort.clone() };
         self.draft = TextEdit::new("");
         self.draft.focused = true;
         self.notice = None;

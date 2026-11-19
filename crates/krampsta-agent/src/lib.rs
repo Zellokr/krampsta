@@ -22,9 +22,9 @@ pub use catalog::{
 pub use engine::AgentEngine;
 pub use engine::AgentError;
 pub use engine::BoxFuture;
-pub use engine::Effort;
 pub use engine::RunContext;
 pub use engine::RunRequest;
+pub use engine::{Effort, EffortLevel};
 pub use host::AgentHost;
 pub use host::Notifier;
 pub use host::{AccountEvent, ModelList};

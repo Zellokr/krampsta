@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
-use krampsta_agent::{AgentError, BoxFuture, DeviceCode, LoginPrompt};
+use krampsta_agent::{AgentError, BoxFuture, DeviceCode, Effort, EffortLevel, LoginPrompt};
 use reqwest::StatusCode;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
@@ -232,8 +232,15 @@ pub struct ChatGptAccess {
     store: Arc<dyn SecretStore>,
     key: &'static str,
     current: Mutex<Current>,
-    /// How each model's requests are worded, from the last model list.
-    shapes: std::sync::Mutex<HashMap<String, ModelShape>>,
+    /// What the last model list said about each model.
+    catalog: std::sync::Mutex<HashMap<String, Catalogued>>,
+}
+
+/// What the catalog says about one model: how to word its requests, the efforts it takes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Catalogued {
+    shape: ModelShape,
+    efforts: Vec<EffortLevel>,
 }
 
 impl ChatGptAccess {
@@ -251,16 +258,21 @@ impl ChatGptAccess {
             store,
             key,
             current: Mutex::new(Current { session, expires_at }),
-            shapes: std::sync::Mutex::new(HashMap::new()),
+            catalog: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
-    fn known_shape(&self, model: &str) -> Option<ModelShape> {
-        self.shapes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(model).cloned()
+    fn catalogued(&self, model: &str) -> Option<Catalogued> {
+        self.catalog.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(model).cloned()
     }
 
-    fn remember_shapes(&self, shapes: HashMap<String, ModelShape>) {
-        *self.shapes.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = shapes;
+    fn remember(&self, catalog: HashMap<String, Catalogued>) {
+        *self.catalog.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = catalog;
+    }
+
+    /// The efforts `model` takes, from the last model list; empty when it wasn't in it.
+    pub fn efforts(&self, model: &str) -> Vec<EffortLevel> {
+        self.catalogued(model).map(|c| c.efforts).unwrap_or_default()
     }
 
     pub fn api(&self) -> &str {
@@ -329,13 +341,13 @@ pub async fn list_models(client: &reqwest::Client, access: &ChatGptAccess) -> Re
     let endpoint = access.endpoint().await?;
     let url = format!("{}?client_version={CLIENT_VERSION}", endpoint.url("models"));
     let v = http::get_json(client.get(url).headers(endpoint.headers), LOOKUP_TIMEOUT).await?;
-    access.remember_shapes(parse_shapes(&v));
+    access.remember(parse_catalog(&v));
     Ok(parse_models(&v))
 }
 
-/// How Codex words requests to each model in the catalog (hidden ones too): its fields'
-/// defaults when missing, as Codex reads them.
-fn parse_shapes(v: &Value) -> HashMap<String, ModelShape> {
+/// What the catalog says about each model (hidden ones too): how Codex words its requests,
+/// with its fields' defaults when missing, and the reasoning efforts it announces.
+fn parse_catalog(v: &Value) -> HashMap<String, Catalogued> {
     v["models"]
         .as_array()
         .into_iter()
@@ -346,7 +358,19 @@ fn parse_shapes(v: &Value) -> HashMap<String, ModelShape> {
                 effort: m["default_reasoning_level"].as_str().map(str::to_owned),
                 summary: m["supports_reasoning_summary_parameter"].as_bool().unwrap_or(true),
             };
-            Some((m["slug"].as_str()?.to_owned(), shape))
+            let efforts = m["supported_reasoning_levels"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|level| {
+                    let id = level["effort"].as_str().filter(|id| !id.is_empty())?;
+                    Some(EffortLevel {
+                        effort: Effort::new(id),
+                        description: level["description"].as_str().map(str::to_owned),
+                    })
+                })
+                .collect();
+            Some((m["slug"].as_str()?.to_owned(), Catalogued { shape, efforts }))
         })
         .collect()
 }
@@ -356,14 +380,14 @@ impl Shapes for ChatGptAccess {
     /// arrives), else as for an unknown model.
     fn shape(self: Arc<Self>, model: String) -> BoxFuture<'static, ModelShape> {
         Box::pin(async move {
-            if let Some(shape) = self.known_shape(&model) {
-                return shape;
+            if let Some(known) = self.catalogued(&model) {
+                return known.shape;
             }
             let client = self.client.clone();
             if list_models(&client, &self).await.is_ok()
-                && let Some(shape) = self.known_shape(&model)
+                && let Some(known) = self.catalogued(&model)
             {
-                return shape;
+                return known.shape;
             }
             ModelShape::default()
         })
@@ -437,13 +461,23 @@ mod tests {
     fn the_catalog_says_how_to_word_each_models_requests() {
         let v = json!({"models": [
             {"slug": "lite", "use_responses_lite": true, "default_reasoning_level": "high",
-             "supports_reasoning_summary_parameter": true},
+             "supports_reasoning_summary_parameter": true,
+             "supported_reasoning_levels": [
+                 {"effort": "low", "description": "Fast"},
+                 {"effort": "xhigh", "description": "Deepest"},
+                 {"effort": ""}
+             ]},
             {"slug": "quiet", "supports_reasoning_summary_parameter": false},
             {"slug": "bare"}
         ]});
-        let shapes = parse_shapes(&v);
-        assert_eq!(shapes["lite"], ModelShape { lite: true, effort: Some("high".into()), summary: true });
-        assert_eq!(shapes["quiet"], ModelShape { lite: false, effort: None, summary: false });
-        assert_eq!(shapes["bare"], ModelShape { lite: false, effort: None, summary: true }, "Codex's defaults");
+        let catalog = parse_catalog(&v);
+        assert_eq!(catalog["lite"].shape, ModelShape { lite: true, effort: Some("high".into()), summary: true });
+        assert_eq!(catalog["quiet"].shape, ModelShape { lite: false, effort: None, summary: false });
+        assert_eq!(catalog["bare"].shape, ModelShape { lite: false, effort: None, summary: true }, "Codex's defaults");
+
+        let efforts: Vec<(&str, Option<&str>)> =
+            catalog["lite"].efforts.iter().map(|l| (l.effort.as_str(), l.description.as_deref())).collect();
+        assert_eq!(efforts, [("low", Some("Fast")), ("xhigh", Some("Deepest"))], "in order, blanks dropped");
+        assert!(catalog["bare"].efforts.is_empty());
     }
 }

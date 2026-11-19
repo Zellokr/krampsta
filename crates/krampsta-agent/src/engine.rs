@@ -38,33 +38,45 @@ pub struct RunRequest {
     pub effort: Option<Effort>,
 }
 
-/// How much a reasoning model thinks before answering.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Effort {
-    Low,
-    Medium,
-    High,
-}
+/// How much a reasoning model thinks before answering, as the API spells it (`low`, `high`,
+/// `xhigh`…). Open-ended: each model announces the levels it takes ([`EffortLevel`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Effort(String);
 
 impl Effort {
-    pub const ALL: [Effort; 3] = [Effort::Low, Effort::Medium, Effort::High];
-
-    /// As the APIs spell it.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Effort::Low => "low",
-            Effort::Medium => "medium",
-            Effort::High => "high",
-        }
+    pub fn new(id: impl Into<String>) -> Self {
+        Effort(id.into())
     }
 
-    /// As pickers show it.
-    pub fn label(self) -> &'static str {
-        match self {
-            Effort::Low => "Low",
-            Effort::Medium => "Medium",
-            Effort::High => "High",
+    /// As the APIs spell it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// As pickers show it: the known levels by name, others capitalised.
+    pub fn label(&self) -> String {
+        match self.0.as_str() {
+            "none" => "Off".into(),
+            "xhigh" => "Extra high".into(),
+            other => {
+                let mut chars = other.chars();
+                chars.next().map_or_else(String::new, |c| c.to_uppercase().chain(chars).collect())
+            }
         }
+    }
+}
+
+/// A level a model takes, with what it's for ("Greater reasoning depth for complex problems").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffortLevel {
+    pub effort: Effort,
+    pub description: Option<String>,
+}
+
+impl EffortLevel {
+    /// The levels to offer when a provider takes an effort but hasn't said which.
+    pub fn defaults() -> Vec<EffortLevel> {
+        ["low", "medium", "high"].map(|id| EffortLevel { effort: Effort::new(id), description: None }).into()
     }
 }
 

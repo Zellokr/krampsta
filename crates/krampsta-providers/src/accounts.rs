@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, PoisonError, RwLock};
 
-use krampsta_agent::{Account, AgentEngine, AgentError, BoxFuture, LoginPrompt, Provider, ProviderKind};
+use krampsta_agent::{Account, AgentEngine, AgentError, BoxFuture, EffortLevel, LoginPrompt, Provider, ProviderKind};
 use serde::{Deserialize, Serialize};
 
 use crate::chatgpt::{self, ChatGptAccess, OpenAiAccount};
@@ -134,6 +134,14 @@ impl Accounts {
                 Ok(Arc::new(OpenAiEngine::with_access(access, model, client, COPILOT_LABEL)))
             }
             _ => Err(unknown(id)),
+        }
+    }
+
+    /// The efforts a ChatGPT model takes, from the catalog its last model list brought.
+    pub fn efforts(&self, id: &str, model: &str) -> Vec<EffortLevel> {
+        match (id, read(&self.chatgpt)) {
+            (CHATGPT, Some((_, access))) => access.efforts(model),
+            _ => Vec::new(),
         }
     }
 

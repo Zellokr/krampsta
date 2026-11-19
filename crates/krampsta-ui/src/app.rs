@@ -1,6 +1,6 @@
 //! Rune wiring: the app spec, the root view, `poll`, keyboard shortcuts and headless scenes.
 
-use krampsta_agent::{Account, DeviceCode, Effort, MockCatalog, Provider, ProviderKind, Selection};
+use krampsta_agent::{Account, DeviceCode, Effort, EffortLevel, MockCatalog, Provider, ProviderKind, Selection};
 use krampsta_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult};
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, PointerPress, TextEdit, Tx, Waker, row, text};
 use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
@@ -214,13 +214,15 @@ const SCENES: &[Scene] = &[
         s.engine.selection.model = Some("qwen3:4b".into());
         s.engine.open = Some(Picker::ComposerProvider);
     }),
-    // ChatGPT takes a reasoning effort: its picker joins the others, opened on "High".
+    // ChatGPT takes a reasoning effort: its picker joins the others with the model's levels,
+    // opened on "Extra high".
     ("effort-picker", |s| {
         s.new_session();
         stage_accounts(s, true);
         s.engine.selection = Selection { provider: "chatgpt".into(), model: Some("gpt-6.2-sol".into()) };
         s.engine.models.insert("chatgpt".into(), Models::Ready(vec!["gpt-6.2-sol".into()]));
-        s.engine.effort = Some(Effort::High);
+        s.engine.efforts = scene_efforts();
+        s.engine.effort = Some(Effort::new("xhigh"));
         s.engine.open = Some(Picker::ComposerEffort);
     }),
     ("model-picker", |s| {
@@ -327,6 +329,18 @@ fn scene_reasoning(s: &mut KrampstaApp) {
     if let Some(id) = s.current().and_then(|x| x.messages.last()).map(|m| m.id) {
         s.open_reasoning.insert(id);
     }
+}
+
+/// Efforts as ChatGPT's catalog announces them for a model, with what each is for.
+fn scene_efforts() -> Vec<EffortLevel> {
+    [
+        ("low", "Fast responses with lighter reasoning"),
+        ("medium", "Balances speed and reasoning depth"),
+        ("high", "Greater reasoning depth for complex problems"),
+        ("xhigh", "Extra deep reasoning for the hardest problems"),
+    ]
+    .map(|(id, about)| EffortLevel { effort: Effort::new(id), description: Some(about.to_owned()) })
+    .into()
 }
 
 fn scene_completed(s: &mut KrampstaApp) {

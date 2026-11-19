@@ -14,8 +14,8 @@
 use std::sync::Arc;
 
 use krampsta_agent::{
-    AgentEngine, AgentError, BoxFuture, EngineCatalog, LoginPrompt, MOCK_PROVIDER, MockCatalog, MockConfig, Provider,
-    ProviderKind, Selection,
+    AgentEngine, AgentError, BoxFuture, EffortLevel, EngineCatalog, LoginPrompt, MOCK_PROVIDER, MockCatalog,
+    MockConfig, Provider, ProviderKind, Selection,
 };
 
 use crate::ProviderError;
@@ -196,6 +196,10 @@ impl EngineCatalog for Catalog {
 
     fn logout(&self, provider: &str) -> BoxFuture<'static, Result<(), AgentError>> {
         self.accounts.logout(provider)
+    }
+
+    fn efforts(&self, provider: &str, model: &str) -> Vec<EffortLevel> {
+        self.accounts.efforts(provider, model)
     }
 
     fn models(&self, provider: &str) -> BoxFuture<'static, Result<Vec<String>, AgentError>> {

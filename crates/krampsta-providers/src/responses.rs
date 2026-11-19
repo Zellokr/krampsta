@@ -76,7 +76,7 @@ impl AgentEngine for ResponsesEngine {
                 None => ModelShape::default(),
             };
             // The user's choice wins over the model's default.
-            if let Some(effort) = request.effort {
+            if let Some(effort) = &request.effort {
                 shape.effort = Some(effort.as_str().to_owned());
             }
             trace_shape(&self.model, &shape);
