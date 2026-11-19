@@ -58,6 +58,10 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+# Dependencies (Rune, wgpu, text shaping, regex…) optimized even in dev builds: unoptimized, a
+# frame costs ~20x the CPU (2.1 ms vs 0.1 ms p50 streaming a reply) and the window stutters.
+# Krampsta's own crates stay at opt-level 0, so rebuilding them stays fast.
+opt-level = 3
 
 [profile.release]
 codegen-units = 16
