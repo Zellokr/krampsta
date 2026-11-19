@@ -33,6 +33,39 @@ pub struct RunRequest {
     pub run: RunId,
     /// The conversation so far, ending with the user's new message.
     pub history: Vec<Message>,
+    /// How hard a reasoning model should think; `None` leaves the model's default. Engines
+    /// whose provider can't take it ignore it.
+    pub effort: Option<Effort>,
+}
+
+/// How much a reasoning model thinks before answering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+}
+
+impl Effort {
+    pub const ALL: [Effort; 3] = [Effort::Low, Effort::Medium, Effort::High];
+
+    /// As the APIs spell it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Effort::Low => "low",
+            Effort::Medium => "medium",
+            Effort::High => "high",
+        }
+    }
+
+    /// As pickers show it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Effort::Low => "Low",
+            Effort::Medium => "Medium",
+            Effort::High => "High",
+        }
+    }
 }
 
 impl RunRequest {

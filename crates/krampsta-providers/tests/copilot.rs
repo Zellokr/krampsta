@@ -108,7 +108,13 @@ fn block_on<T>(fut: impl std::future::Future<Output = T>) -> T {
 
 fn reply(host: &mut AgentHost) -> Vec<AgentEvent> {
     let run = host.next_run_id();
-    host.start(RunRequest { session: SessionId(1), run, history: vec![Message::user(MessageId(1), "hello")] }).unwrap();
+    host.start(RunRequest {
+        session: SessionId(1),
+        run,
+        history: vec![Message::user(MessageId(1), "hello")],
+        effort: None,
+    })
+    .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut events = Vec::new();
     while !events.last().is_some_and(AgentEvent::is_terminal) {

@@ -46,6 +46,8 @@ pub const COMPOSER_PROVIDER: &str = "krampsta-composer-provider";
 pub const COMPOSER_MODEL: &str = "krampsta-composer-model";
 pub const SETTINGS_PROVIDER: &str = "krampsta-settings-provider";
 pub const SETTINGS_MODEL: &str = "krampsta-settings-model";
+pub const COMPOSER_EFFORT: &str = "krampsta-composer-effort";
+pub const SETTINGS_EFFORT: &str = "krampsta-settings-effort";
 
 /// The sign-in dialog and its parts.
 pub const SIGN_IN: &str = "krampsta-sign-in";

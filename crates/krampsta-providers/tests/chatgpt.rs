@@ -13,7 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
-use krampsta_agent::{Account, AgentHost, DeviceCode, EngineCatalog, RunRequest};
+use krampsta_agent::{Account, AgentHost, DeviceCode, Effort, EngineCatalog, RunRequest};
 use krampsta_core::{AgentEvent, Message, MessageId, SessionId};
 use krampsta_providers::chatgpt::OpenAiAccount;
 use krampsta_providers::secrets::{MemoryStore, SecretStore};
@@ -139,10 +139,11 @@ fn block_on<T>(fut: impl std::future::Future<Output = T>) -> T {
 }
 
 /// The reply's text, after checking its reasoning summary came through as reasoning.
-fn reply_text(c: &Catalog) -> String {
+fn reply_text(c: &Catalog, effort: Option<Effort>) -> String {
     let mut host = AgentHost::new(c.engine("chatgpt", "gpt-6-sol").unwrap());
     let run = host.next_run_id();
-    host.start(RunRequest { session: SessionId(1), run, history: vec![Message::user(MessageId(1), "hello")] }).unwrap();
+    host.start(RunRequest { session: SessionId(1), run, history: vec![Message::user(MessageId(1), "hello")], effort })
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut events = Vec::new();
     while !events.last().is_some_and(AgentEvent::is_terminal) {
@@ -188,7 +189,7 @@ fn a_chatgpt_plan_signs_in_lists_models_replies_and_refreshes_after_a_restart() 
     }
 
     assert_eq!(block_on(c.models("chatgpt")).unwrap(), ["gpt-6-sol"]);
-    assert_eq!(reply_text(&c), "Hello from ChatGPT");
+    assert_eq!(reply_text(&c, None), "Hello from ChatGPT");
     {
         let seen = seen.lock().unwrap();
         let (_, headers, body) = seen.iter().find(|(l, _, _)| l == "POST /backend-api/codex/responses").unwrap();
@@ -221,7 +222,7 @@ fn a_chatgpt_plan_signs_in_lists_models_replies_and_refreshes_after_a_restart() 
     // rotated token replaces the saved one.
     let c = catalog(&base, store.clone());
     assert_eq!(account(&c), Some(Account::SignedIn { user: "me@example.com".into() }));
-    assert_eq!(reply_text(&c), "Hello from ChatGPT");
+    assert_eq!(reply_text(&c, Some(Effort::Low)), "Hello from ChatGPT");
     let refresh = seen
         .lock()
         .unwrap()
@@ -230,6 +231,12 @@ fn a_chatgpt_plan_signs_in_lists_models_replies_and_refreshes_after_a_restart() 
         .cloned();
     assert!(refresh.expect("a refresh").2.contains("refresh_token=rt-1"));
     assert!(store.get("chatgpt").unwrap().unwrap().contains("rt-2"), "the rotated refresh token is saved");
+    {
+        let seen = seen.lock().unwrap();
+        let (_, _, body) = seen.iter().rev().find(|(l, _, _)| l == "POST /backend-api/codex/responses").unwrap();
+        let body: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body["reasoning"]["effort"], "low", "the run's effort wins over the catalog's");
+    }
 
     block_on(c.logout("chatgpt")).unwrap();
     assert_eq!(account(&c), Some(Account::SignedOut));

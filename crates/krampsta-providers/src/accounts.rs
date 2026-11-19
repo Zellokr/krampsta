@@ -113,6 +113,8 @@ impl Accounts {
                 Some(user) => Account::SignedIn { user },
                 None => Account::SignedOut,
             }),
+            // Its Responses engine takes a reasoning effort; Copilot's chat API may reject one.
+            reasoning_effort: id == CHATGPT,
         };
         vec![
             provider(CHATGPT, CHATGPT_LABEL, read(&self.chatgpt).map(|(u, _)| u)),

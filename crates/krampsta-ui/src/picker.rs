@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use krampsta_agent::{AgentError, MOCK_MODEL, MOCK_PROVIDER, ModelList, Provider, ProviderKind, Selection};
+use krampsta_agent::{AgentError, Effort, MOCK_MODEL, MOCK_PROVIDER, ModelList, Provider, ProviderKind, Selection};
 
 use crate::state::KrampstaApp;
 
@@ -23,8 +23,10 @@ pub enum Models {
 pub enum Picker {
     ComposerProvider,
     ComposerModel,
+    ComposerEffort,
     SettingsProvider,
     SettingsModel,
+    SettingsEffort,
 }
 
 impl Picker {
@@ -44,6 +46,9 @@ pub struct EngineChoice {
     pub open: Option<Picker>,
     /// Why the selection can't run (no model yet, missing key…). `None` when it can.
     pub problem: Option<String>,
+    /// How hard new runs ask the model to think; `None` leaves the model's default. Only sent
+    /// to providers that take it.
+    pub effort: Option<Effort>,
 }
 
 impl EngineChoice {
@@ -55,6 +60,7 @@ impl EngineChoice {
             remembered: HashMap::new(),
             open: None,
             problem: None,
+            effort: None,
         }
     }
 
@@ -78,6 +84,11 @@ impl EngineChoice {
         let mut list: Vec<_> = self.usable().filter(shown).map(|p| (group(&p.kind), p)).collect();
         list.sort_by_key(|((rank, _), _)| *rank);
         list.into_iter().map(|((_, header), p)| (header, p)).collect()
+    }
+
+    /// Whether the selected provider lets runs choose a reasoning effort.
+    pub fn takes_effort(&self) -> bool {
+        self.provider().is_some_and(|p| p.reasoning_effort)
     }
 
     pub fn provider_label(&self) -> &str {
@@ -162,6 +173,12 @@ impl KrampstaApp {
         }
         self.engine.selection.model = Some(model.to_owned());
         self.rebuild_engine();
+    }
+
+    /// Sets the effort for new runs; `None` leaves each model's default.
+    pub fn choose_effort(&mut self, effort: Option<Effort>) {
+        self.engine.open = None;
+        self.engine.effort = effort;
     }
 
     /// Loads the selected provider's models unless they are known or on their way.
@@ -278,6 +295,7 @@ mod tests {
             default_model: None,
             missing: missing.map(Into::into),
             kind: ProviderKind::Local,
+            reasoning_effort: false,
         }
     }
 

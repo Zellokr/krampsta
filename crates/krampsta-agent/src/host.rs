@@ -303,7 +303,12 @@ mod tests {
     }
 
     fn request(host: &AgentHost) -> RunRequest {
-        RunRequest { session: SessionId(1), run: host.next_run_id(), history: vec![Message::user(MessageId(1), "hi")] }
+        RunRequest {
+            session: SessionId(1),
+            run: host.next_run_id(),
+            history: vec![Message::user(MessageId(1), "hi")],
+            effort: None,
+        }
     }
 
     /// Drains until a terminal event arrives (or fails after 5 s).

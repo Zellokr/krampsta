@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use krampsta_agent::{MockCatalog, MockConfig};
+use krampsta_agent::{Effort, MockCatalog, MockConfig};
 use krampsta_core::AgentStatus;
 use krampsta_ui::picker::Picker;
 use krampsta_ui::{KrampstaApp, Screen, app, keys};
@@ -352,6 +352,26 @@ fn the_model_picker_opens_from_the_composer_and_choosing_closes_it() {
     click(&mut rt, "option0");
     assert_eq!(rt.state.engine.open, None, "choosing closes the list");
     assert_eq!(rt.state.engine.selection.model.as_deref(), Some("simulated"));
+}
+
+#[test]
+fn the_effort_picker_shows_only_for_providers_that_take_one() {
+    let mut rt = runtime();
+    let trigger = format!("{}-trigger", keys::COMPOSER_EFFORT);
+    assert!(!has(&rt, &trigger), "the simulated agent takes no effort");
+
+    for p in &mut rt.state.engine.providers {
+        p.reasoning_effort = true;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(has(&rt, &trigger), "a provider that takes one gets the picker");
+    click(&mut rt, &trigger);
+    assert_eq!(rt.state.engine.open, Some(Picker::ComposerEffort));
+    // Options: Auto, Low, Medium, High.
+    click(&mut rt, "option3");
+    assert_eq!(rt.state.engine.open, None);
+    assert_eq!(rt.state.engine.effort, Some(Effort::High), "new runs ask for it");
 }
 
 #[test]

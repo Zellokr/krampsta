@@ -1,6 +1,7 @@
-//! The provider and model pickers: two rune-kit `Select`s over [`EngineChoice`], shown under
+//! The provider, model and reasoning-effort pickers: rune-kit `Select`s over [`EngineChoice`], shown under
 //! the composer (inline, opening upwards) and in settings (field look).
 
+use krampsta_agent::Effort;
 use rune::{El, Tx};
 use rune_kit::{Kit, Placement, Select, SelectAppearance};
 
@@ -20,6 +21,13 @@ impl Place {
         match self {
             Place::Composer => (Picker::ComposerProvider, Picker::ComposerModel),
             Place::Settings => (Picker::SettingsProvider, Picker::SettingsModel),
+        }
+    }
+
+    fn effort(self) -> (Picker, &'static str) {
+        match self {
+            Place::Composer => (Picker::ComposerEffort, keys::COMPOSER_EFFORT),
+            Place::Settings => (Picker::SettingsEffort, keys::SETTINGS_EFFORT),
         }
     }
 
@@ -60,6 +68,33 @@ pub fn provider(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>, place: Place) -> 
             let id = s.engine.usable().find(|p| p.label == label).map(|p| p.id.clone());
             if let Some(id) = id {
                 s.choose_provider(&id);
+            }
+        })
+        .build(k, layer)
+}
+
+/// What the effort picker shows for a choice ("Auto effort" leaves the model's default).
+pub fn effort_text(effort: Option<Effort>) -> String {
+    format!("{} effort", effort.map_or("Auto", Effort::label))
+}
+
+/// The reasoning effort picker, for providers that take one ([`EngineChoice::takes_effort`]).
+///
+/// [`EngineChoice::takes_effort`]: crate::picker::EngineChoice::takes_effort
+pub fn effort(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>, place: Place) -> El {
+    let (picker, key) = place.effort();
+    let choices: Vec<Option<Effort>> = std::iter::once(None).chain(Effort::ALL.map(Some)).collect();
+    let labels: Vec<String> = choices.iter().map(|e| effort_text(*e)).collect();
+    place
+        .style(Select::new(key, &labels))
+        .label("Reasoning effort")
+        .current(Some(&effort_text(s.engine.effort)))
+        .open(s.engine.open == Some(picker))
+        .on_toggle(move |s: &mut KrampstaApp| s.toggle_picker(picker))
+        .on_close(|s: &mut KrampstaApp| s.close_picker())
+        .on_choose(move |s: &mut KrampstaApp, label: &str, _: &mut Tx| {
+            if let Some(effort) = choices.iter().find(|e| effort_text(**e) == label) {
+                s.choose_effort(*effort);
             }
         })
         .build(k, layer)

@@ -1,6 +1,6 @@
 //! Rune wiring: the app spec, the root view, `poll`, keyboard shortcuts and headless scenes.
 
-use krampsta_agent::{Account, DeviceCode, MockCatalog, Provider, ProviderKind, Selection};
+use krampsta_agent::{Account, DeviceCode, Effort, MockCatalog, Provider, ProviderKind, Selection};
 use krampsta_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult};
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, PointerPress, TextEdit, Tx, Waker, row, text};
 use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
@@ -214,6 +214,15 @@ const SCENES: &[Scene] = &[
         s.engine.selection.model = Some("qwen3:4b".into());
         s.engine.open = Some(Picker::ComposerProvider);
     }),
+    // ChatGPT takes a reasoning effort: its picker joins the others, opened on "High".
+    ("effort-picker", |s| {
+        s.new_session();
+        stage_accounts(s, true);
+        s.engine.selection = Selection { provider: "chatgpt".into(), model: Some("gpt-6.2-sol".into()) };
+        s.engine.models.insert("chatgpt".into(), Models::Ready(vec!["gpt-6.2-sol".into()]));
+        s.engine.effort = Some(Effort::High);
+        s.engine.open = Some(Picker::ComposerEffort);
+    }),
     ("model-picker", |s| {
         stage_providers(s);
         stage_local(s, Models::Ready(vec!["gemma3:12b".into(), "llama3.2:3b".into(), "qwen3:4b".into()]));
@@ -353,12 +362,14 @@ fn stage_accounts(s: &mut KrampstaApp, signed_in: bool) {
         default_model: None,
         missing: missing.map(str::to_owned),
         kind,
+        reasoning_effort: false,
     };
     let local = |id: &str, label: &str| provider(id, label, None, ProviderKind::Local);
     let account = |id: &str, label: &str, user: &str| {
         let state = if signed_in { Account::SignedIn { user: user.into() } } else { Account::SignedOut };
         let missing = (!signed_in).then_some("needs signing in (Settings › Accounts)");
-        provider(id, label, missing, ProviderKind::Account(state))
+        // As in the real catalog, ChatGPT runs take a reasoning effort.
+        Provider { reasoning_effort: id == "chatgpt", ..provider(id, label, missing, ProviderKind::Account(state)) }
     };
     s.engine.providers = vec![
         provider("openai", "OpenAI", Some("needs OPENAI_API_KEY"), ProviderKind::Cloud),

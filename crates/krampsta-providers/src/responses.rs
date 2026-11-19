@@ -67,7 +67,7 @@ impl AgentEngine for ResponsesEngine {
 
     fn run(self: Arc<Self>, request: RunRequest, ctx: RunContext) -> BoxFuture<'static, Result<(), AgentError>> {
         Box::pin(async move {
-            let shape = match self.shapes.clone() {
+            let mut shape = match self.shapes.clone() {
                 Some(shapes) => tokio::select! {
                     biased;
                     () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
@@ -75,6 +75,10 @@ impl AgentEngine for ResponsesEngine {
                 },
                 None => ModelShape::default(),
             };
+            // The user's choice wins over the model's default.
+            if let Some(effort) = request.effort {
+                shape.effort = Some(effort.as_str().to_owned());
+            }
             trace_shape(&self.model, &shape);
             let endpoint = tokio::select! {
                 biased;

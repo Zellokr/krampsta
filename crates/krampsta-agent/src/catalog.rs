@@ -20,6 +20,8 @@ pub struct Provider {
     pub missing: Option<String>,
     /// Where it runs and how it is reached; pickers group providers by it.
     pub kind: ProviderKind,
+    /// Whether runs can choose how hard its models think ([`crate::Effort`]).
+    pub reasoning_effort: bool,
 }
 
 impl Provider {
@@ -125,6 +127,7 @@ impl MockCatalog {
             default_model: Some(MOCK_MODEL.into()),
             missing: None,
             kind: ProviderKind::Simulated,
+            reasoning_effort: false,
         }
     }
 

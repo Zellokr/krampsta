@@ -51,6 +51,11 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec<
         .child(section(k, "Agent").mt(12.0))
         .child(setting(k, "Provider", &provider_hint, provider))
         .child(setting(k, "Model", model_hint, model));
+    if s.engine.takes_effort() {
+        let effort = engine_picker::effort(s, k, layer, Place::Settings);
+        let hint = "How long the model thinks first. Auto uses each model's own default.";
+        column = column.child(setting(k, "Reasoning effort", hint, effort));
+    }
     if s.account_providers().next().is_some() {
         let cards = row().w_full().gap(CARD_GAP).flex_wrap().children(s.account_providers().map(|p| account(k, p)));
         column = column.child(section(k, "Accounts").mt(12.0)).child(cards);

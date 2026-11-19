@@ -141,7 +141,8 @@ mod tests {
 
     fn run_to_end(host: &mut AgentHost, prompt: &str, cancel_after_start: bool) -> Vec<AgentEvent> {
         let run = host.next_run_id();
-        let req = RunRequest { session: SessionId(1), run, history: vec![Message::user(MessageId(1), prompt)] };
+        let req =
+            RunRequest { session: SessionId(1), run, history: vec![Message::user(MessageId(1), prompt)], effort: None };
         host.start(req).unwrap();
         if cancel_after_start {
             assert!(host.cancel(run));

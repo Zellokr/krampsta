@@ -113,7 +113,13 @@ fn host_for(server: &Server, key: Option<&str>) -> AgentHost {
 
 fn start(host: &mut AgentHost, prompt: &str) -> krampsta_core::RunId {
     let run = host.next_run_id();
-    host.start(RunRequest { session: SessionId(1), run, history: vec![Message::user(MessageId(1), prompt)] }).unwrap();
+    host.start(RunRequest {
+        session: SessionId(1),
+        run,
+        history: vec![Message::user(MessageId(1), prompt)],
+        effort: None,
+    })
+    .unwrap();
     run
 }
 

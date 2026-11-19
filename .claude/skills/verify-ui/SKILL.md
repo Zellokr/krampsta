@@ -33,7 +33,7 @@ Escribe en `assets/screenshots/`: `krampsta` (estado inicial), `empty`, `changes
 (tarjetas de herramienta: abierta, fallida y en curso), `thinking` y `reasoning` (razonamiento
 mientras piensa y abierto al terminar), `completed`,
 `failed`, `cancelled`, `settings`, `signed-in`, `sign-in` (diálogo con el código), `sign-in-failed` (el fallo, con «Try again»), `session-menu`, `message-menu` y `delete-session` (menús contextuales y la confirmación de borrado), `light`,
-`provider-picker`, `model-picker`, `model-error`
+`provider-picker`, `effort-picker` (esfuerzo de razonamiento, con ChatGPT), `model-picker`, `model-error`
 (selectores abiertos y servidor local caído), `narrow` (800×560) y `send-message` (script real:
 escribe en el composer y pulsa Enter), más `krampsta-tree.json` (árbol de elementos, no versionado).
 

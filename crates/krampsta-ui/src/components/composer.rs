@@ -55,11 +55,14 @@ pub fn view(s: &KrampstaApp, running: bool, k: &Kit, layer: &mut Vec<El>) -> El 
         (None, None) => text("Enter to send · Shift+Enter for a new line").font(k.ty.small).color(k.c.text_faint),
     };
     // The pickers keep their width; the hint gives way (and truncates) instead.
-    let pickers = row()
+    let mut pickers = row()
         .gap(2.0)
         .items_center()
         .child(engine_picker::provider(s, k, layer, Place::Composer))
         .child(engine_picker::model(s, k, layer, Place::Composer));
+    if s.engine.takes_effort() {
+        pickers = pickers.child(engine_picker::effort(s, k, layer, Place::Composer));
+    }
     let footer = row()
         .w_full()
         .gap(12.0)

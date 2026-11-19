@@ -177,6 +177,7 @@ mod tests {
                     } else {
                         Account::SignedOut
                     }),
+                    reasoning_effort: false,
                 },
                 MockCatalog::provider(),
             ]
