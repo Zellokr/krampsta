@@ -137,6 +137,9 @@ fn body(model: &str, history: &[Message], shape: &ModelShape) -> Value {
         "input": input,
         "stream": true,
         "store": false,
+        // As Codex sends them; a Lite model rejects parallel tool calls (and Krampsta has no tools yet).
+        "tool_choice": "auto",
+        "parallel_tool_calls": false,
         "reasoning": reasoning,
         // Not stored, the backend leaves reasoning items (and their summary) out of the stream
         // unless asked for their encrypted content, as Codex CLI asks. Krampsta ignores it.

@@ -80,8 +80,12 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   por `spawn_blocking`. Los tests usan `MemoryStore` y un servidor falso, nunca el llavero real.
 - Para ver qué manda de verdad un backend, `KRAMPSTA_TRACE_SSE=1` escribe en stderr el tipo de
   cada evento del motor Responses (y los nombres de campo de los que ignora), nunca su contenido.
-  Pide al usuario esa traza antes de cambiar la petición a ciegas: así se vio que ChatGPT acepta
-  `reasoning` pero no emite elementos de razonamiento para `gpt-6.2-sol`.
+  Pide al usuario esa traza antes de cambiar la petición a ciegas.
+- La petición a ChatGPT imita a Codex CLI (`github.com/openai/codex`, `core/src/client.rs`): la
+  forma de cada modelo sale del catálogo `codex/models` (`use_responses_lite`,
+  `default_reasoning_level`, `supports_reasoning_summary_parameter`). Un modelo Lite exige su
+  cabecera y `parallel_tool_calls: false` (si no, HTTP 400). Comprobado con trazas: `gpt-6.2-sol`
+  es Lite, con esfuerzo `low` por defecto, y no emite elementos de razonamiento.
 
 ## Código
 

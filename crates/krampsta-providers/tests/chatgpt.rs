@@ -204,6 +204,7 @@ fn a_chatgpt_plan_signs_in_lists_models_replies_and_refreshes_after_a_restart() 
             "the model's effort, a summary, reasoning across turns"
         );
         assert_eq!(body["input"][0]["role"], "developer", "instructions lead the input");
+        assert_eq!(body["parallel_tool_calls"], false, "Lite requires it (HTTP 400 otherwise)");
         assert_eq!(body.get("instructions"), None);
         assert_eq!(
             body["include"],
