@@ -353,12 +353,7 @@ fn parse_catalog(v: &Value) -> HashMap<String, Catalogued> {
         .into_iter()
         .flatten()
         .filter_map(|m| {
-            let shape = ModelShape {
-                lite: m["use_responses_lite"].as_bool().unwrap_or(false),
-                effort: m["default_reasoning_level"].as_str().map(str::to_owned),
-                summary: m["supports_reasoning_summary_parameter"].as_bool().unwrap_or(true),
-            };
-            let efforts = m["supported_reasoning_levels"]
+            let announced: Vec<EffortLevel> = m["supported_reasoning_levels"]
                 .as_array()
                 .into_iter()
                 .flatten()
@@ -370,9 +365,37 @@ fn parse_catalog(v: &Value) -> HashMap<String, Catalogued> {
                     })
                 })
                 .collect();
+            let ids: Vec<&str> = announced.iter().map(|l| l.effort.as_str()).collect();
+            let multi_agent = m["multi_agent_reasoning_effort"].as_str();
+            let shape = ModelShape {
+                lite: m["use_responses_lite"].as_bool().unwrap_or(false),
+                effort: m["default_reasoning_level"].as_str().map(|e| api_effort(e, &ids, multi_agent)),
+                summary: m["supports_reasoning_summary_parameter"].as_bool().unwrap_or(true),
+            };
+            // Codex's own modes aren't efforts to offer: Krampsta has no multi-agent mode.
+            let efforts = announced.into_iter().filter(|l| !CODEX_MODES.contains(&l.effort.as_str())).collect();
             Some((m["slug"].as_str()?.to_owned(), Catalogued { shape, efforts }))
         })
         .collect()
+}
+
+/// Levels the catalog lists that are Codex modes, not values the Responses API takes.
+const CODEX_MODES: [&str; 2] = ["ultra", "persistent"];
+
+/// `effort` as the Responses API takes it, translating Codex's modes as Codex does
+/// (`resolve_reasoning_effort`): `ultra` (its multi-agent mode) becomes the model's
+/// multi-agent effort, else `max`, else its highest other level; `persistent` is `disabled`.
+fn api_effort(effort: &str, supported: &[&str], multi_agent: Option<&str>) -> String {
+    match effort {
+        "ultra" => multi_agent
+            .filter(|e| *e != "ultra" && supported.contains(e))
+            .or_else(|| supported.iter().copied().find(|e| *e == "max"))
+            .or_else(|| supported.iter().rev().copied().find(|e| !CODEX_MODES.contains(e)))
+            .unwrap_or("medium")
+            .to_owned(),
+        "persistent" => "disabled".to_owned(),
+        other => other.to_owned(),
+    }
 }
 
 impl Shapes for ChatGptAccess {
@@ -479,5 +502,27 @@ mod tests {
             catalog["lite"].efforts.iter().map(|l| (l.effort.as_str(), l.description.as_deref())).collect();
         assert_eq!(efforts, [("low", Some("Fast")), ("xhigh", Some("Deepest"))], "in order, blanks dropped");
         assert!(catalog["bare"].efforts.is_empty());
+    }
+
+    #[test]
+    fn codex_modes_are_not_offered_and_never_sent_as_efforts() {
+        // As gpt-6.2-sol's catalog entry: the API answered 400 to `ultra`.
+        let v = json!({"models": [
+            {"slug": "sol", "default_reasoning_level": "ultra",
+             "supported_reasoning_levels": [
+                 {"effort": "low"}, {"effort": "high"}, {"effort": "max"}, {"effort": "ultra"}
+             ]},
+            {"slug": "agents", "default_reasoning_level": "ultra", "multi_agent_reasoning_effort": "high",
+             "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}, {"effort": "ultra"}]},
+            {"slug": "keep", "default_reasoning_level": "persistent",
+             "supported_reasoning_levels": [{"effort": "persistent"}, {"effort": "low"}]}
+        ]});
+        let catalog = parse_catalog(&v);
+        let offered: Vec<&str> = catalog["sol"].efforts.iter().map(|l| l.effort.as_str()).collect();
+        assert_eq!(offered, ["low", "high", "max"], "ultra is Codex's multi-agent mode");
+        assert_eq!(catalog["sol"].shape.effort.as_deref(), Some("max"), "ultra goes out as max");
+        assert_eq!(catalog["agents"].shape.effort.as_deref(), Some("high"), "or as the multi-agent effort");
+        assert_eq!(catalog["keep"].shape.effort.as_deref(), Some("disabled"), "persistent is `disabled`");
+        assert_eq!(api_effort("ultra", &["low", "ultra"], None), "low", "the highest other level");
     }
 }
