@@ -85,7 +85,8 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   forma de cada modelo sale del catálogo `codex/models` (`use_responses_lite`,
   `default_reasoning_level`, `supports_reasoning_summary_parameter`). Un modelo Lite exige su
   cabecera y `parallel_tool_calls: false` (si no, HTTP 400). Comprobado con trazas: `gpt-6.2-sol`
-  es Lite, con esfuerzo `low` por defecto, y no emite elementos de razonamiento.
+  es Lite, con esfuerzo `low` por defecto, y no emite elementos de razonamiento ni con `high`:
+  el backend no lo expone para ese modelo. No lo persigas cambiando la petición.
 
 ## Código
 
