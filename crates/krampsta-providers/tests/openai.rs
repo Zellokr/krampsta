@@ -155,14 +155,32 @@ fn reasoning(events: &[AgentEvent]) -> String {
         .collect()
 }
 
+/// A real stream from llama.cpp (build b12359) running a Qwen reasoning model, recorded on
+/// 2026-11-19 for "Say hello in one short sentence." The model's local path is trimmed to its
+/// file name; nothing else is changed.
+const LLAMA_CPP_REASONING: &str = include_str!("fixtures/llamacpp_reasoning.sse");
+
 #[test]
-fn reasoning_deltas_stream_apart_from_the_reply() {
-    // llama.cpp and vLLM put thinking in `reasoning_content`, Ollama in `reasoning`; written in
-    // their documented shape (no local reasoning server was running to record one).
+fn a_recorded_llama_cpp_stream_streams_its_reasoning_apart_from_the_reply() {
+    // Odd-sized pieces split the recorded events anywhere.
+    let server = serve(Reply::sse(LLAMA_CPP_REASONING, 13));
+    let mut host = host_for(&server, None);
+    start(&mut host, "Say hello in one short sentence.");
+    let events = events_until(&mut host, finished);
+    assert_eq!(
+        reasoning(&events),
+        "The user wants me to say hello in one short sentence. This is a very simple request. \
+         I should respond with just one brief greeting sentence."
+    );
+    assert_eq!(text(&events), "Hello there!");
+    assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })));
+}
+
+#[test]
+fn ollamas_reasoning_field_counts_as_reasoning_too() {
+    // Ollama names the field `reasoning` (not recorded: no Ollama reasoning model to hand).
     let stream = concat!(
-        "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"The user \"}}]}\n\n",
-        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"says hi.\"}}]}\n\n",
-        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\" Be brief.\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\"Be brief.\"}}]}\n\n",
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi!\"}}]}\n\n",
         "data: [DONE]\n\n",
     );
@@ -170,9 +188,8 @@ fn reasoning_deltas_stream_apart_from_the_reply() {
     let mut host = host_for(&server, None);
     start(&mut host, "hi");
     let events = events_until(&mut host, finished);
-    assert_eq!(reasoning(&events), "The user says hi. Be brief.");
+    assert_eq!(reasoning(&events), "Be brief.");
     assert_eq!(text(&events), "Hi!");
-    assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })));
 }
 
 fn failure(events: &[AgentEvent]) -> String {
