@@ -56,10 +56,11 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   Añade las nuevas a `keys.rs` y úsalas en tests y scripts.
 - Gotchas de layout (flexbox): un `.scroll(..)` dentro de `.grow()` necesita `.min_h(0.0)` en
   cada columna intermedia; `.grow` tiene base 0.
-- El texto en streaming no se pinta según llega: `pace.rs` lo suelta a ritmo constante desde
-  `poll` (con `tx.wake_after(Duration::ZERO)` mientras queda texto), por palabras enteras, con
-  `Markdown::reveal` para el fundido y el chat como growth stack (`El::growth`, `El::streaming`).
-  Una escena que prepara una respuesta a medias llama a `catch_up` para mostrarla.
+- El texto en streaming no se pinta según llega: `pace.rs` (`Pacer`) estima a qué ritmo llega y
+  lo suelta a ese ritmo desde `poll`, con una reserva de ~0,25 s que cubre los huecos entre
+  ráfagas (`tx.wake_after(Duration::ZERO)` mientras queda texto), por palabras enteras, con
+  `Markdown::reveal` para el fundido y el chat como growth stack con `edge::FAST_FEATHER`. Una
+  escena que prepara una respuesta a medias llama a `catch_up` para mostrarla.
 - Estado con modos = `enum` cuyas variantes llevan sólo sus datos (ver `AgentStatus`), no
   grupos de booleanos.
 - Parches: `[patch.crates-io]` del `Cargo.toml` raíz replica los de Rune, todos al mismo SHA que

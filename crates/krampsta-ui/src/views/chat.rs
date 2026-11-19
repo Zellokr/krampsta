@@ -44,7 +44,8 @@ fn transcript(s: &KrampstaApp, session: &Session, k: &Kit, layer: &mut Vec<El>) 
         })
         .map(|m| m.id);
     // A growth stack: a message that grows (streaming) eases to its new height instead of
-    // jumping a line at a time, and the view pinned to the bottom follows it smoothly.
+    // jumping a line at a time, and the view pinned to the bottom follows it. The fast feather
+    // edge (a thin fade, a quick catch-up) keeps new lines from waiting hidden under it.
     let mut list = col()
         .key(keys::TRANSCRIPT)
         .role("log")
@@ -52,7 +53,7 @@ fn transcript(s: &KrampstaApp, session: &Session, k: &Kit, layer: &mut Vec<El>) 
         .w_full()
         .max_w(COLUMN)
         .gap(24.0)
-        .growth(GrowthSpec::default())
+        .growth(GrowthSpec { spring: rune::GROWTH, edge: rune::edge::FAST_FEATHER })
         .children(session.messages.iter().map(|m| {
             let streaming = Some(m.id) == streaming_id;
             let view = message::view(s, m, streaming, k);

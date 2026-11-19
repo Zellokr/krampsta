@@ -1,9 +1,11 @@
-//! Paced streaming: a reply is shown at a steady rate from what has arrived, instead of in the
-//! bursts a provider sends it in (several words per event, at uneven times).
+//! Paced streaming: a reply comes out at the rate it arrives, smoothed, instead of in the bursts
+//! a provider sends it in (several words per event, at uneven times, with gaps between).
 //!
-//! The text that arrived is kept whole; the view shows a prefix that grows every frame, by the
-//! backlog over a short lag (so a burst spreads over a few frames and a trickle reads word by
-//! word), and never by less than a floor. It grows a whole word at a time, so Rune's word
+//! The text that arrived is kept whole. A [`Pacer`] estimates how fast it arrives (a moving
+//! average over [`RATE_WINDOW`]) and lets it out at that rate from a small reserve
+//! ([`RESERVE`]) that bridges the gaps between bursts: a growing reserve speeds it up, a
+//! shrinking one slows it, so it neither stops between bursts nor falls behind. The position
+//! moves continuously; the view shows up to the last whole word it has passed, so Rune's word
 //! reveal fades in words, not fragments. Frames are asked for only while text is waiting.
 
 use std::time::Duration;
@@ -13,24 +15,84 @@ use rune::Tx;
 
 use crate::state::KrampstaApp;
 
-/// How far behind the arriving text the shown text runs, at most, under a steady stream: the
-/// backlog drains with this time constant.
-const LAG: f64 = 0.15;
+/// How long the arrival rate is averaged over, in seconds.
+const RATE_WINDOW: f64 = 0.8;
+/// How much text is held back to bridge the gaps between bursts, in seconds of the rate.
+const RESERVE: f64 = 0.25;
+/// How quickly the reserve is brought back to size, in seconds.
+const CORRECT: f64 = 0.6;
 /// The slowest the text comes out while any is waiting, in bytes per second.
-const MIN_RATE: f64 = 180.0;
+const MIN_RATE: f64 = 60.0;
+/// The longest a backlog takes to come out once the reply has fully arrived, in seconds.
+const DRAIN: f64 = 0.35;
 /// A frame step longer than this (the window was hidden, a stall) counts as this long.
 const MAX_STEP: f64 = 0.1;
 /// A message already this long when pacing starts (the user switched to a session mid-reply)
 /// shows as it is instead of replaying.
 const CATCH_UP: usize = 600;
 
+/// The pacing arithmetic, apart from any text: where the shown text has got to, and how fast
+/// the text has been arriving.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pacer {
+    /// Bytes let out so far (fractional: a slow rate still moves every frame).
+    pos: f64,
+    /// Bytes that had arrived at the last step.
+    seen: usize,
+    /// The arrival rate, in bytes per second.
+    rate: f64,
+    clock: f64,
+}
+
+impl Pacer {
+    pub fn new(start: usize, clock: f64) -> Self {
+        #[expect(clippy::cast_precision_loss, reason = "a text length, far below 2^52")]
+        let pos = start as f64;
+        Pacer { pos, seen: start, rate: 0.0, clock }
+    }
+
+    /// Moves to `clock`, with `arrived` bytes of text so far, still `arriving` or not. Returns
+    /// how many bytes may show.
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "text lengths, far below 2^52, and a position never negative"
+    )]
+    pub fn step(&mut self, clock: f64, arrived: usize, arriving: bool) -> usize {
+        let dt = (clock - self.clock).clamp(0.0, MAX_STEP);
+        self.clock = clock;
+        let new = arrived.saturating_sub(self.seen) as f64;
+        self.seen = arrived;
+        // The first text sets the rate as if it came over one reserve; then a moving average.
+        if self.rate == 0.0 && new > 0.0 {
+            self.rate = new / RESERVE;
+        } else if dt > 0.0 {
+            self.rate += (new - self.rate * dt) / RATE_WINDOW;
+        }
+        let backlog = arrived as f64 - self.pos;
+        if backlog > 0.0 && dt > 0.0 {
+            let speed = if arriving {
+                // Keep about one reserve's worth waiting: what arrives comes out at its own pace.
+                let reserve = self.rate * RESERVE;
+                (self.rate + (backlog - reserve) / CORRECT).max(MIN_RATE)
+            } else {
+                // All of it is here: let the rest out quickly, but not in one jump.
+                (backlog / DRAIN).max(self.rate).max(MIN_RATE)
+            };
+            self.pos = (self.pos + speed * dt).min(arrived as f64);
+        }
+        self.pos as usize
+    }
+}
+
 /// The message being paced, and how much of it shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pace {
     session: SessionId,
     message: MessageId,
+    pacer: Pacer,
     shown: usize,
-    clock: f64,
 }
 
 impl KrampstaApp {
@@ -53,7 +115,12 @@ impl KrampstaApp {
         let Some(session) = self.current() else { return };
         let writing =
             session.messages.last().filter(|m| m.role == MessageRole::Assistant && session.status.is_running());
-        self.pace = writing.map(|m| Pace { session: session.id, message: m.id, shown: m.content.len(), clock: 0.0 });
+        self.pace = writing.map(|m| Pace {
+            session: session.id,
+            message: m.id,
+            pacer: Pacer::new(m.content.len(), 0.0),
+            shown: m.content.len(),
+        });
     }
 
     /// Steps the paced message by one frame at `clock`. True when more of it shows.
@@ -75,8 +142,9 @@ impl KrampstaApp {
             }
             // A reply to start pacing: from the top, unless it's already long (caught up mid-way).
             (_, Some(m)) => {
-                let shown = if m.content.len() > CATCH_UP { m.content.len() } else { 0 };
-                self.pace = Some(Pace { session: session.id, message: m.id, shown, clock });
+                let start = if m.content.len() > CATCH_UP { m.content.len() } else { 0 };
+                let pacer = Pacer::new(start, clock);
+                self.pace = Some(Pace { session: session.id, message: m.id, pacer, shown: start });
                 Some(m)
             }
             _ => None,
@@ -85,40 +153,33 @@ impl KrampstaApp {
             self.pace = None;
             return false;
         };
-        let (text, still_writing) = (&message.content, writing.is_some_and(|w| w.id == message.id));
-        let step = (clock - pace.clock).clamp(0.0, MAX_STEP);
-        pace.clock = clock;
-        let backlog = text.len().saturating_sub(pace.shown);
-        if backlog == 0 {
-            if !still_writing {
-                self.pace = None; // Arrived and shown: done.
-            }
-            return false;
+        let (text, arriving) = (&message.content, writing.is_some_and(|w| w.id == message.id));
+        let at = pace.pacer.step(clock, text.len(), arriving);
+        if at >= text.len() && !arriving {
+            self.pace = None; // Arrived and shown: done.
+            return true;
         }
-        #[expect(
-            clippy::cast_precision_loss,
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            reason = "a byte count per frame, far below 2^52"
-        )]
-        let advance = ((backlog as f64 / LAG).max(MIN_RATE) * step).ceil() as usize;
-        pace.shown = word_end(text, pace.shown + advance.max(1));
+        let shown = words_up_to(text, at, arriving).max(pace.shown);
         tx.wake_after(Duration::ZERO);
-        true
+        let grew = shown != pace.shown;
+        pace.shown = shown;
+        grew
     }
 }
 
-/// The end of the word `at` falls in (or `at` itself at a word's end), on a character boundary,
-/// never past the text.
-fn word_end(text: &str, at: usize) -> usize {
+/// How much of `text` shows with the pace at `at`: up to the end of the last whole word before
+/// it, on a character boundary. While the text still arrives, a word at its very end waits for
+/// what follows it (it may not be whole yet).
+fn words_up_to(text: &str, at: usize, arriving: bool) -> usize {
     if at >= text.len() {
-        return text.len();
+        return if arriving { text.trim_end_matches(|c: char| !c.is_whitespace()).len() } else { text.len() };
     }
     let mut end = at;
     while !text.is_char_boundary(end) {
-        end += 1;
+        end -= 1;
     }
-    text[end..].find(char::is_whitespace).map_or(text.len(), |n| end + n)
+    // Up to and including the space that ends the last whole word.
+    text[..end].rfind(char::is_whitespace).map_or(0, |n| n + text[n..].chars().next().map_or(1, char::len_utf8))
 }
 
 #[cfg(test)]
@@ -152,16 +213,42 @@ mod tests {
         (m.id, m.content.len())
     }
 
-    /// Steps `frames` frames from `clock`; the shown length after each.
-    fn frames(app: &mut KrampstaApp, clock: &mut f64, frames: usize) -> Vec<usize> {
-        (0..frames)
-            .map(|_| {
-                *clock += FRAME;
-                app.step_pace(*clock, &mut Tx::default());
-                let (id, len) = reply(app);
-                app.shown_len(id, len)
+    /// Steps one frame; the shown length after it.
+    fn frame(app: &mut KrampstaApp, clock: &mut f64) -> usize {
+        *clock += FRAME;
+        app.step_pace(*clock, &mut Tx::default());
+        let (id, len) = reply(app);
+        app.shown_len(id, len)
+    }
+
+    fn frames(app: &mut KrampstaApp, clock: &mut f64, n: usize) -> Vec<usize> {
+        (0..n).map(|_| frame(app, clock)).collect()
+    }
+
+    #[test]
+    fn a_bursty_stream_comes_out_steadily_without_stalling_between_bursts() {
+        // As a backend sends it: 30 bytes (six words) every 150 ms, for three seconds.
+        let mut app = app();
+        let mut clock = 0.0;
+        let mut shown = Vec::new();
+        for n in 0..180 {
+            if n % 9 == 0 {
+                arrive(&mut app, AgentEvent::TextDelta { run: RUN, text: "word ".repeat(6) });
+            }
+            shown.push(frame(&mut app, &mut clock));
+        }
+        let steady = &shown[30..]; // After the first half second.
+        let longest_stall = steady
+            .windows(2)
+            .fold((0usize, 0usize), |(run, worst), w| {
+                let run = if w[1] > w[0] { 0 } else { run + 1 };
+                (run, worst.max(run))
             })
-            .collect()
+            .1;
+        assert!(longest_stall <= 3, "a word at least every 4 frames, never a pause per burst: {longest_stall}");
+        let (_, arrived) = reply(&app);
+        let behind = arrived - shown[179];
+        assert!(behind <= 120, "it keeps up: {behind} bytes behind (about a burst and a reserve)");
     }
 
     #[test]
@@ -171,11 +258,11 @@ mod tests {
         arrive(&mut app, AgentEvent::TextDelta { run: RUN, text: burst.clone() });
         let mut clock = 0.0;
         let shown = frames(&mut app, &mut clock, 120);
-        assert!(shown[1] > 0 && shown[1] < burst.len(), "neither nothing nor all at once: {}", shown[1]);
+        assert!(shown[1] < burst.len(), "not all at once: {}", shown[1]);
         assert!(shown.windows(2).all(|w| w[0] <= w[1]), "it only grows");
-        assert!(shown.iter().all(|&n| n == burst.len() || burst[n..].starts_with(' ')), "whole words");
+        assert!(shown.iter().all(|&n| n == 0 || burst[..n].ends_with(' ')), "whole words");
         let done = shown.iter().position(|&n| n == burst.len()).expect("all of it shows");
-        assert!((5..=60).contains(&done), "spread over a few frames, well under a second: {done}");
+        assert!(done <= 90, "out in well under two seconds: frame {done}");
     }
 
     #[test]
@@ -189,8 +276,8 @@ mod tests {
         arrive(&mut app, AgentEvent::Completed { run: RUN });
         let shown = frames(&mut app, &mut clock, 1);
         assert!(shown[0] >= before && shown[0] < reply(&app).1, "no replay, no jump to the end");
-        frames(&mut app, &mut clock, 120);
-        assert_eq!(app.pace, None, "done once all of it showed");
+        frames(&mut app, &mut clock, 60);
+        assert_eq!(app.pace, None, "done once all of it showed, within a second of the end");
         let (id, len) = reply(&app);
         assert_eq!(app.shown_len(id, len), len);
     }
@@ -212,11 +299,11 @@ mod tests {
     }
 
     #[test]
-    fn steps_end_on_whole_words_and_characters() {
-        assert_eq!(word_end("hello world", 2), 5);
-        assert_eq!(word_end("hello world", 5), 5);
-        assert_eq!(word_end("hello world", 7), 11);
-        assert_eq!(word_end("ñandú y más", 1), "ñandú".len(), "inside a multi-byte character");
-        assert_eq!(word_end("short", 99), 5);
+    fn only_whole_words_show_and_a_trailing_word_waits_while_arriving() {
+        assert_eq!(words_up_to("hello world", 3, true), 0);
+        assert_eq!(words_up_to("hello world", 8, true), 6);
+        assert_eq!(words_up_to("hello world", 11, true), 6, "`world` may not be whole yet");
+        assert_eq!(words_up_to("hello world", 11, false), 11);
+        assert_eq!(words_up_to("ñandú y más", 8, true), "ñandú ".len(), "on a character boundary");
     }
 }
