@@ -67,6 +67,14 @@ impl AgentEngine for MockAgent {
                 return Err(AgentError::Provider("simulated failure (you asked for it with /fail)".into()));
             }
 
+            for chunk in chunks(REASONING) {
+                ctx.check_cancelled()?;
+                ctx.reasoning(chunk);
+                if !cfg.chunk.is_zero() {
+                    ctx.sleep(cfg.chunk).await?;
+                }
+            }
+
             let call = ToolCall {
                 id: ToolCallId(format!("{}-call-1", ctx.run())),
                 name: "list_files".into(),
@@ -91,6 +99,10 @@ impl AgentEngine for MockAgent {
         })
     }
 }
+
+/// What the simulated agent "thinks" before it acts, streamed as reasoning.
+const REASONING: &str = "The user wants an answer about the workspace. I should look at the files first, \
+                         then reply with a short example.";
 
 /// The canned reply: echoes the request so it's clear the round trip worked.
 fn reply_for(prompt: &str, turns: usize) -> String {
@@ -152,10 +164,15 @@ mod tests {
     }
 
     #[test]
-    fn mock_reply_calls_a_tool_streams_text_and_completes() {
+    fn mock_reply_thinks_calls_a_tool_streams_text_and_completes() {
         let mut host = AgentHost::new(Arc::new(MockAgent::new(MockConfig::instant())));
         let events = run_to_end(&mut host, "add a test", false);
         assert!(matches!(events.first(), Some(AgentEvent::Started { .. })));
+        let thought: String = events
+            .iter()
+            .filter_map(|e| if let AgentEvent::ReasoningDelta { text, .. } = e { Some(text.as_str()) } else { None })
+            .collect();
+        assert_eq!(thought, REASONING);
         assert!(events.iter().any(|e| matches!(e, AgentEvent::ToolCallStarted { .. })));
         assert!(events.iter().any(|e| matches!(e, AgentEvent::ToolCallFinished { .. })));
         let text: String = events

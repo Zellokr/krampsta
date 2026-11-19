@@ -142,6 +142,33 @@ fn text(events: &[AgentEvent]) -> String {
         .collect()
 }
 
+fn reasoning(events: &[AgentEvent]) -> String {
+    events
+        .iter()
+        .filter_map(|e| if let AgentEvent::ReasoningDelta { text, .. } = e { Some(text.as_str()) } else { None })
+        .collect()
+}
+
+#[test]
+fn reasoning_deltas_stream_apart_from_the_reply() {
+    // llama.cpp and vLLM put thinking in `reasoning_content`, Ollama in `reasoning`; written in
+    // their documented shape (no local reasoning server was running to record one).
+    let stream = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"The user \"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"says hi.\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning\":\" Be brief.\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi!\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let server = serve(Reply::sse(stream, 11));
+    let mut host = host_for(&server, None);
+    start(&mut host, "hi");
+    let events = events_until(&mut host, finished);
+    assert_eq!(reasoning(&events), "The user says hi. Be brief.");
+    assert_eq!(text(&events), "Hi!");
+    assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })));
+}
+
 fn failure(events: &[AgentEvent]) -> String {
     match events.last() {
         Some(AgentEvent::Failed { error, .. }) => error.clone(),

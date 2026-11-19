@@ -152,6 +152,11 @@ const SCENES: &[Scene] = &[
     }),
     ("running", scene_running),
     ("tools", scene_tools),
+    ("thinking", |s| {
+        let run = staged(s, "Why does the retry loop give up early?");
+        apply(s, &[AgentEvent::ReasoningDelta { run, text: "**Reading the retry loop**\n\nThe".into() }]);
+    }),
+    ("reasoning", scene_reasoning),
     ("completed", scene_completed),
     ("failed", scene_failed),
     ("cancelled", |s| {
@@ -292,6 +297,27 @@ fn scene_tools(s: &mut KrampstaApp) {
         ],
     );
     s.open_tools.insert(read.id);
+}
+
+/// A finished reply with its reasoning opened: a two-part summary, as OpenAI's models send it.
+fn scene_reasoning(s: &mut KrampstaApp) {
+    let run = staged(s, "Why does the retry loop give up early?");
+    let thought = "**Reading the retry loop**\n\nThe loop stops when `attempt` reaches `max_attempts`, \
+                   but `attempt` starts at 1, so it makes one try fewer than configured.\n\n\
+                   **Checking the tests**\n\nNo test covers the last attempt, which is why it slipped through.";
+    let reply = "It gives up one try early: `attempt` starts at **1**, so `attempt < max_attempts` stops \
+                 a step too soon. Start it at 0, or compare with `<=`.";
+    apply(
+        s,
+        &[
+            AgentEvent::ReasoningDelta { run, text: thought.into() },
+            AgentEvent::TextDelta { run, text: reply.into() },
+            AgentEvent::Completed { run },
+        ],
+    );
+    if let Some(id) = s.current().and_then(|x| x.messages.last()).map(|m| m.id) {
+        s.open_reasoning.insert(id);
+    }
 }
 
 fn scene_completed(s: &mut KrampstaApp) {

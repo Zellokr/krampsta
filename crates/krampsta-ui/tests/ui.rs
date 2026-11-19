@@ -176,6 +176,28 @@ fn a_tool_card_opens_and_closes_on_click() {
     assert!(!shows_output(&rt));
 }
 
+#[test]
+fn the_reasoning_opens_and_closes_on_click() {
+    let mut rt = runtime();
+    click(&mut rt, keys::COMPOSER);
+    type_text(&mut rt, "Think about it");
+    press(&mut rt, Key::Enter, Mods::default());
+    pump_until_finished(&mut rt);
+    let reply = rt.state.current().and_then(|x| x.messages.last()).cloned().expect("a reply");
+    assert!(!reply.reasoning.is_empty(), "the mock thinks first");
+    let header = keys::reasoning(reply.id);
+    let shows_thought = |rt: &Runtime<KrampstaApp>| {
+        rt.elements().iter().any(|e| e.text.as_deref().is_some_and(|t| t.contains("look at the files first")))
+    };
+    assert!(!shows_thought(&rt), "reasoning starts folded");
+
+    click(&mut rt, &header);
+    assert!(rt.state.open_reasoning.contains(&reply.id));
+    assert!(shows_thought(&rt), "an open block shows the reasoning");
+    click(&mut rt, &header);
+    assert!(!shows_thought(&rt));
+}
+
 fn right_click(rt: &mut Runtime<KrampstaApp>, key: &str) {
     let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element keyed {key}"));
     rt.secondary_down(x, y);

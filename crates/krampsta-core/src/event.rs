@@ -68,6 +68,13 @@ pub enum AgentEvent {
         run: RunId,
         text: String,
     },
+    /// More of the model's reasoning (streaming): what it thinks before answering, as the
+    /// provider reports it (a summary, for OpenAI's reasoning models). Appended to the run's
+    /// assistant message, apart from its reply.
+    ReasoningDelta {
+        run: RunId,
+        text: String,
+    },
     ToolCallStarted {
         run: RunId,
         call: ToolCall,
@@ -93,6 +100,7 @@ impl AgentEvent {
         match self {
             AgentEvent::Started { run }
             | AgentEvent::TextDelta { run, .. }
+            | AgentEvent::ReasoningDelta { run, .. }
             | AgentEvent::ToolCallStarted { run, .. }
             | AgentEvent::ToolCallFinished { run, .. }
             | AgentEvent::Completed { run }

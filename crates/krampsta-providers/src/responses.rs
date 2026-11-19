@@ -79,10 +79,12 @@ fn body(model: &str, history: &[Message]) -> Value {
         "input": input,
         "stream": true,
         "store": false,
+        // A summary of the model's thinking streams as reasoning events (as Codex CLI asks).
+        "reasoning": {"summary": "auto"},
     })
 }
 
-/// Text deltas go to the UI; `response.completed` ends the run; a failure fails it.
+/// Text and reasoning deltas go to the UI; `response.completed` ends the run; a failure fails it.
 fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
     let v: Value = serde_json::from_str(event.data.trim())
         .map_err(|e| AgentError::Provider(format!("the provider sent an event Krampsta could not read ({e})")))?;
@@ -91,6 +93,19 @@ fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
         "response.output_text.delta" => {
             if let Some(text) = v["delta"].as_str().filter(|t| !t.is_empty()) {
                 ctx.text(text);
+            }
+            Ok(Flow::Continue)
+        }
+        "response.reasoning_summary_text.delta" | "response.reasoning_text.delta" => {
+            if let Some(text) = v["delta"].as_str().filter(|t| !t.is_empty()) {
+                ctx.reasoning(text);
+            }
+            Ok(Flow::Continue)
+        }
+        // Each later part of a summary starts a paragraph of its own.
+        "response.reasoning_summary_part.added" => {
+            if v["summary_index"].as_u64().is_some_and(|i| i > 0) {
+                ctx.reasoning("\n\n");
             }
             Ok(Flow::Continue)
         }

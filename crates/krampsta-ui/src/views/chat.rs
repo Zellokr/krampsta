@@ -43,7 +43,7 @@ fn transcript(s: &KrampstaApp, session: &Session, k: &Kit, layer: &mut Vec<El>) 
     let mut list =
         col().key(keys::TRANSCRIPT).role("log").label("Conversation").w_full().max_w(COLUMN).gap(24.0).children(
             session.messages.iter().map(|m| {
-                let view = message::view(m, Some(m.id) == streaming_id, &s.open_tools, k);
+                let view = message::view(s, m, Some(m.id) == streaming_id, k);
                 menus::message(s, m, view, k, layer)
             }),
         );

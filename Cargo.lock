@@ -1884,6 +1884,7 @@ dependencies = [
  "rune",
  "rune-kit",
  "rune-theme-opencode",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
 ]

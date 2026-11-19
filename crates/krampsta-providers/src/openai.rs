@@ -140,7 +140,11 @@ fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
         return Err(AgentError::Provider(error.message.unwrap_or_else(|| "the provider reported an error".into())));
     }
     for choice in chunk.choices {
-        if let Some(text) = choice.delta.content.filter(|t| !t.is_empty()) {
+        let Delta { content, reasoning_content, reasoning } = choice.delta;
+        if let Some(thought) = reasoning_content.or(reasoning).filter(|t| !t.is_empty()) {
+            ctx.reasoning(thought);
+        }
+        if let Some(text) = content.filter(|t| !t.is_empty()) {
             ctx.text(text);
         }
     }
@@ -193,6 +197,10 @@ struct Choice {
 #[derive(Deserialize, Default)]
 struct Delta {
     content: Option<String>,
+    /// Reasoning models' thinking, where compatible servers put it: `reasoning_content`
+    /// (llama.cpp, vLLM, DeepSeek) or `reasoning` (Ollama, OpenRouter).
+    reasoning_content: Option<String>,
+    reasoning: Option<String>,
 }
 
 #[derive(Deserialize)]

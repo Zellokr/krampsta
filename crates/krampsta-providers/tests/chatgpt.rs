@@ -110,6 +110,11 @@ fn route(line: &str, body: &str, polls: &AtomicUsize) -> (&'static str, &'static
             "text/event-stream",
             concat!(
                 "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"r1\"}}\n\n",
+                "event: response.reasoning_summary_part.added\ndata: {\"type\":\"response.reasoning_summary_part.added\",\"item_id\":\"rs1\",\"output_index\":0,\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+                "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs1\",\"output_index\":0,\"summary_index\":0,\"delta\":\"Greeting \"}\n\n",
+                "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs1\",\"output_index\":0,\"summary_index\":0,\"delta\":\"the user.\"}\n\n",
+                "event: response.reasoning_summary_part.added\ndata: {\"type\":\"response.reasoning_summary_part.added\",\"item_id\":\"rs1\",\"output_index\":0,\"summary_index\":1,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
+                "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs1\",\"output_index\":0,\"summary_index\":1,\"delta\":\"Keep it short.\"}\n\n",
                 "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello from \"}\n\n",
                 "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ChatGPT\"}\n\n",
                 "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n",
@@ -133,6 +138,7 @@ fn block_on<T>(fut: impl std::future::Future<Output = T>) -> T {
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(fut)
 }
 
+/// The reply's text, after checking its reasoning summary came through as reasoning.
 fn reply_text(c: &Catalog) -> String {
     let mut host = AgentHost::new(c.engine("chatgpt", "gpt-6-sol").unwrap());
     let run = host.next_run_id();
@@ -145,6 +151,11 @@ fn reply_text(c: &Catalog) -> String {
         thread::sleep(Duration::from_millis(5));
     }
     assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })), "{events:?}");
+    let thought: String = events
+        .iter()
+        .filter_map(|e| if let AgentEvent::ReasoningDelta { text, .. } = e { Some(text.as_str()) } else { None })
+        .collect();
+    assert_eq!(thought, "Greeting the user.\n\nKeep it short.", "one paragraph per summary part");
     events
         .iter()
         .filter_map(|e| if let AgentEvent::TextDelta { text, .. } = e { Some(text.as_str()) } else { None })
@@ -185,6 +196,7 @@ fn a_chatgpt_plan_signs_in_lists_models_replies_and_refreshes_after_a_restart() 
         assert!(headers.contains("authorization: bearer e30."), "{headers}");
         let body: serde_json::Value = serde_json::from_str(body).unwrap();
         assert_eq!((body["model"].as_str(), body["store"].as_bool()), (Some("gpt-6-sol"), Some(false)));
+        assert_eq!(body["reasoning"]["summary"], "auto", "asks for a summary of the thinking");
         assert!(
             !seen.iter().any(|(l, _, b)| l == "POST /oauth/token" && b.contains("refresh_token")),
             "no refresh yet"

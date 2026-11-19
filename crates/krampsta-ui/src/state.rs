@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use krampsta_agent::{AgentError, AgentHost, EngineCatalog, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest};
-use krampsta_core::{AgentEvent, IdGen, RunId, Session, SessionError, SessionId, ToolCallId};
+use krampsta_core::{AgentEvent, IdGen, MessageId, RunId, Session, SessionError, SessionId, ToolCallId};
 use rune::TextEdit;
 use rune_kit::PaneState;
 use rune_kit::diff::DiffState;
@@ -57,6 +57,8 @@ pub struct KrampstaApp {
     pub sign_in: SignIn,
     /// Tool cards the user opened in the transcript.
     pub open_tools: HashSet<ToolCallId>,
+    /// Messages whose reasoning the user opened.
+    pub open_reasoning: HashSet<MessageId>,
     /// The context menu showing, if any.
     pub menu: Option<OpenMenu>,
     /// The session the delete confirmation asks about.
@@ -95,6 +97,7 @@ impl KrampstaApp {
             engine,
             sign_in: SignIn::Closed,
             open_tools: HashSet::new(),
+            open_reasoning: HashSet::new(),
             menu: None,
             confirm_delete: None,
             catalog,
@@ -140,6 +143,13 @@ impl KrampstaApp {
     pub fn toggle_tool(&mut self, id: &ToolCallId) {
         if !self.open_tools.remove(id) {
             self.open_tools.insert(id.clone());
+        }
+    }
+
+    /// Opens a message's folded reasoning, or folds it again.
+    pub fn toggle_reasoning(&mut self, id: MessageId) {
+        if !self.open_reasoning.remove(&id) {
+            self.open_reasoning.insert(id);
         }
     }
 

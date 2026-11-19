@@ -30,6 +30,9 @@ pub struct Message {
     pub id: MessageId,
     pub role: MessageRole,
     pub content: String,
+    /// What the model wrote while thinking, before (or between) its reply. Shown folded;
+    /// never sent back to the provider.
+    pub reasoning: String,
     /// The run that produced it (assistant and tool messages).
     pub run: Option<RunId>,
     /// Tool calls the assistant made while writing this message, in order.
@@ -40,7 +43,15 @@ pub struct Message {
 
 impl Message {
     pub fn new(id: MessageId, role: MessageRole, content: impl Into<String>) -> Self {
-        Message { id, role, content: content.into(), run: None, tool_calls: Vec::new(), tool_results: Vec::new() }
+        Message {
+            id,
+            role,
+            content: content.into(),
+            reasoning: String::new(),
+            run: None,
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+        }
     }
 
     pub fn user(id: MessageId, content: impl Into<String>) -> Self {

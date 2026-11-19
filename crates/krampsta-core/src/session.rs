@@ -93,6 +93,7 @@ impl Session {
                 self.assistant_message(run);
             }
             AgentEvent::TextDelta { text, .. } => self.assistant_message(run).content.push_str(text),
+            AgentEvent::ReasoningDelta { text, .. } => self.assistant_message(run).reasoning.push_str(text),
             AgentEvent::ToolCallStarted { call, .. } => self.assistant_message(run).tool_calls.push(call.clone()),
             AgentEvent::ToolCallFinished { result, .. } => {
                 self.assistant_message(run).tool_results.push(result.clone())
@@ -107,9 +108,13 @@ impl Session {
     fn finish(&mut self, status: AgentStatus) {
         self.status = status;
         self.active_run = None;
-        // A run that ended before writing anything leaves no empty bubble behind.
-        self.messages
-            .retain(|m| !(m.role == MessageRole::Assistant && m.content.is_empty() && m.tool_calls.is_empty()));
+        // A run that ended before writing (or thinking) anything leaves no empty bubble behind.
+        self.messages.retain(|m| {
+            !(m.role == MessageRole::Assistant
+                && m.content.is_empty()
+                && m.reasoning.is_empty()
+                && m.tool_calls.is_empty())
+        });
     }
 
     /// The assistant message `run` writes into, created on first use.
@@ -203,6 +208,29 @@ mod tests {
         assert_eq!(reply.result_for(&call).map(|r| r.output.as_str()), Some("src/"));
         assert_eq!(s.status, AgentStatus::Completed);
         assert_eq!(s.active_run(), None);
+    }
+
+    #[test]
+    fn reasoning_streams_apart_from_the_reply_and_keeps_a_textless_message() {
+        let mut s = session();
+        let run = RunId(3);
+        s.submit("why?", run).unwrap();
+        s.apply(&AgentEvent::Started { run });
+        s.apply(&AgentEvent::ReasoningDelta { run, text: "Weighing ".into() });
+        s.apply(&AgentEvent::ReasoningDelta { run, text: "options".into() });
+        s.apply(&AgentEvent::TextDelta { run, text: "Because.".into() });
+        let reply = s.messages.last().unwrap();
+        assert_eq!(reply.reasoning, "Weighing options");
+        assert_eq!(reply.content, "Because.");
+        s.apply(&AgentEvent::Completed { run });
+
+        // A run cancelled while still thinking keeps what it thought.
+        let run = RunId(4);
+        s.submit("and?", run).unwrap();
+        s.apply(&AgentEvent::Started { run });
+        s.apply(&AgentEvent::ReasoningDelta { run, text: "Hmm".into() });
+        s.apply(&AgentEvent::Cancelled { run });
+        assert_eq!(s.messages.last().unwrap().reasoning, "Hmm");
     }
 
     #[test]

@@ -101,6 +101,11 @@ impl RunContext {
         self.emit(AgentEvent::TextDelta { run: self.run, text: text.into() });
     }
 
+    /// More of the model's reasoning, shown folded apart from the reply.
+    pub fn reasoning(&self, text: impl Into<String>) {
+        self.emit(AgentEvent::ReasoningDelta { run: self.run, text: text.into() });
+    }
+
     pub fn tool_started(&self, call: ToolCall) {
         self.emit(AgentEvent::ToolCallStarted { run: self.run, call });
     }

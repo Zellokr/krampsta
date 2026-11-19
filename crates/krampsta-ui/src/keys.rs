@@ -73,3 +73,8 @@ pub fn message_menu(id: krampsta_core::MessageId) -> String {
 pub const DELETE_SESSION: &str = "krampsta-delete-session";
 pub const DELETE_SESSION_CONFIRM: &str = "krampsta-delete-session-confirm";
 pub const DELETE_SESSION_CANCEL: &str = "krampsta-delete-session-cancel";
+
+/// A message's reasoning header (the button that opens and closes it).
+pub fn reasoning(id: krampsta_core::MessageId) -> String {
+    format!("krampsta-reasoning-{id}")
+}
