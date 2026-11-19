@@ -9,6 +9,7 @@ use rune_kit::{Kit, Markdown};
 use crate::components::{icons, shimmer};
 use crate::keys;
 use crate::state::KrampstaApp;
+use crate::theme;
 
 /// `streaming`: the message's run is still writing it. `open`: the user opened the block.
 pub fn view(m: &Message, streaming: bool, open: bool, k: &Kit) -> El {
@@ -43,7 +44,12 @@ pub fn view(m: &Message, streaming: bool, open: bool, k: &Kit) -> El {
     let mut out = col().w_full().gap(4.0).child(row().child(header));
     if open {
         let style = MarkdownStyle::from_kit(k).text(k.c.text_muted).body_font(k.ty.ui);
-        let body = Markdown::new(m.reasoning.clone()).style(style).streaming(thinking).selectable(true).build(k);
+        let body = Markdown::new(m.reasoning.clone())
+            .style(style)
+            .streaming(thinking)
+            .reveal(theme::WORD_FADE)
+            .selectable(true)
+            .build(k);
         out = out.child(col().w_full().pl(12.0).border_sides([0.0, 0.0, 0.0, 2.0], k.c.border_weak).child(body));
     }
     out

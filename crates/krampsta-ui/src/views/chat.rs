@@ -1,7 +1,7 @@
 //! The main pane: the transcript of the selected session and the composer under it.
 
 use krampsta_core::{AgentStatus, MessageRole, Session};
-use rune::{El, ScrollSpec, col, row, text};
+use rune::{El, GrowthSpec, ScrollSpec, col, row, text};
 use rune_kit::Kit;
 
 use crate::components::alert::{Alert, Tone};
@@ -40,13 +40,22 @@ fn transcript(s: &KrampstaApp, session: &Session, k: &Kit, layer: &mut Vec<El>) 
         .last()
         .filter(|m| running && m.role == MessageRole::Assistant && m.run == session.active_run())
         .map(|m| m.id);
-    let mut list =
-        col().key(keys::TRANSCRIPT).role("log").label("Conversation").w_full().max_w(COLUMN).gap(24.0).children(
-            session.messages.iter().map(|m| {
-                let view = message::view(s, m, Some(m.id) == streaming_id, k);
-                menus::message(s, m, view, k, layer)
-            }),
-        );
+    // A growth stack: a message that grows (streaming) eases to its new height instead of
+    // jumping a line at a time, and the view pinned to the bottom follows it smoothly.
+    let mut list = col()
+        .key(keys::TRANSCRIPT)
+        .role("log")
+        .label("Conversation")
+        .w_full()
+        .max_w(COLUMN)
+        .gap(24.0)
+        .growth(GrowthSpec::default())
+        .children(session.messages.iter().map(|m| {
+            let streaming = Some(m.id) == streaming_id;
+            let view = message::view(s, m, streaming, k);
+            let row = menus::message(s, m, view, k, layer);
+            if streaming { row.streaming(true) } else { row.arrives_whole() }
+        }));
     // Running, but the assistant hasn't started its message yet: show that it's working.
     if running && streaming_id.is_none() {
         list = list.child(waiting(k));

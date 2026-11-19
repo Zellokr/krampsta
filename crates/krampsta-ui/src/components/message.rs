@@ -58,7 +58,10 @@ fn assistant(s: &KrampstaApp, m: &Message, streaming: bool, k: &Kit) -> El {
             out = out.child(working(k));
         }
     } else {
-        out = out.child(Markdown::new(m.content.clone()).streaming(streaming).selectable(true).build(k));
+        // Words that arrive while it streams fade in, instead of landing in bursts as the
+        // provider sends them; a finished message mounts whole.
+        let body = Markdown::new(m.content.clone()).streaming(streaming).reveal(theme::WORD_FADE).selectable(true);
+        out = out.child(body.build(k));
     }
     out
 }

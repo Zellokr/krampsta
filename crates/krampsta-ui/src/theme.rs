@@ -12,6 +12,9 @@ pub const FONTS: &[&[u8]] = rune_theme_opencode::FONTS;
 /// Sans and mono family names, for `AppSpec::families`.
 pub const FAMILIES: (&str, &str) = rune_theme_opencode::FAMILIES;
 
+/// How long a streamed word takes to fade in (seconds).
+pub const WORD_FADE: f32 = 0.3;
+
 /// Which appearance the user picked. Dark is the default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ThemeChoice {
