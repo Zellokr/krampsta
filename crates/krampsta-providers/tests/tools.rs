@@ -1,8 +1,9 @@
 //! The agent loop: a reply asks for tools, Krampsta runs them and sends their results back,
 //! until a reply asks for none. Against a fake server that answers each request in turn.
 //!
-//! The streams follow the shapes the APIs document (Chat Completions' `delta.tool_calls`, the
-//! Responses API's `response.output_item.done`); not recorded: no tool-calling model to hand.
+//! The Responses API is tested with a real ChatGPT turn (`fixtures/chatgpt_tool_*.sse`). The
+//! other streams follow the shapes the APIs document (Chat Completions' `delta.tool_calls`);
+//! a real llama.cpp tool-call stream is still to be recorded.
 
 // The fake server's helpers are test code too: a panic there is a failed test.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -57,7 +58,7 @@ fn serve(replies: Vec<String>) -> (String, Receiver<Value>) {
     (url, bodies)
 }
 
-/// `echo` answers with its arguments; `broken` always fails.
+/// `echo` (and `run_command`, as recorded streams call it) answers with its arguments; `broken` fails.
 struct Echo;
 
 impl Toolbox for Echo {
@@ -71,7 +72,7 @@ impl Toolbox for Echo {
 
     fn run(&self, name: &str, arguments: &str, _: &Call<'_>) -> Result<ToolOutput, String> {
         match name {
-            "echo" => Ok(format!("echo {arguments}").into()),
+            "echo" | "run_command" => Ok(format!("echo {arguments}").into()),
             _ => Err("it broke".into()),
         }
     }
@@ -216,4 +217,47 @@ fn the_responses_api_gets_its_output_items_back_without_ids_and_the_call_outputs
         json!({"type": "function_call", "status": "completed", "call_id": "call_1", "name": "echo", "arguments": "{\"q\":2}"})
     );
     assert_eq!(input[4], json!({"type": "function_call_output", "call_id": "call_1", "output": "echo {\"q\":2}"}));
+}
+
+/// A real turn from the ChatGPT backend (`gpt-6.2-sol`), recorded with `KRAMPSTA_RECORD_SSE` on
+/// 2026-11-19 for "ejecuta `echo héllo ñandú`": the first stream calls `run_command`, its
+/// arguments in 20 deltas; the second answers with the output. Only `safety_identifier` and
+/// `prompt_cache_key` are redacted.
+const CHATGPT_TOOL_CALL: &str = include_str!("fixtures/chatgpt_tool_call.sse");
+const CHATGPT_TOOL_REPLY: &str = include_str!("fixtures/chatgpt_tool_reply.sse");
+
+#[test]
+fn a_recorded_chatgpt_turn_calls_the_tool_and_answers_with_its_output() {
+    let (url, bodies) = serve(vec![CHATGPT_TOOL_CALL.into(), CHATGPT_TOOL_REPLY.into()]);
+    let access = Arc::new(StaticAccess::new(&url, None).unwrap());
+    let events = run(Arc::new(ResponsesEngine::new(access, "gpt-6.2-sol", reqwest::Client::new(), "ChatGPT")));
+
+    assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })), "{events:?}");
+    let call_id = "call_593fdadfb8b549da8dd1bcbed0770f0d";
+    let arguments = r#"{"command":"echo héllo ñandú"}"#;
+    assert_eq!(results(&events), [(call_id.into(), format!("echo {arguments}"), false)], "accents intact");
+    assert_eq!(
+        text(&events),
+        "El comando terminó con código `0` e imprimió cada palabra en una línea:\n\n```text\nhéllo\nñandú\n```"
+    );
+    let usage: Vec<Usage> = events
+        .iter()
+        .filter_map(|e| if let AgentEvent::Usage { usage, .. } = e { Some(*usage) } else { None })
+        .collect();
+    assert_eq!(usage, [Usage { input: 1122, output: 23 }, Usage { input: 1170, output: 32 }]);
+
+    let _first = bodies.recv_timeout(Duration::from_secs(5)).unwrap();
+    let second = bodies.recv_timeout(Duration::from_secs(5)).unwrap();
+    let input = second["input"].as_array().unwrap();
+    let call = &input[input.len() - 2];
+    assert_eq!(
+        (call["type"].as_str(), call.get("id")),
+        (Some("function_call"), None),
+        "the call goes back without its id"
+    );
+    assert_eq!(call["arguments"], arguments);
+    assert_eq!(
+        input[input.len() - 1],
+        json!({"type": "function_call_output", "call_id": call_id, "output": format!("echo {arguments}")})
+    );
 }
