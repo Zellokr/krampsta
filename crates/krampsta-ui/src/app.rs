@@ -49,8 +49,10 @@ fn setup(s: &mut KrampstaApp, waker: Waker) {
 }
 
 /// Runs before every frame and whenever the agent host wakes the window.
-pub fn poll(s: &mut KrampstaApp, _clock: f64, _tx: &mut Tx) -> bool {
-    s.pump()
+pub fn poll(s: &mut KrampstaApp, clock: f64, tx: &mut Tx) -> bool {
+    let landed = s.pump();
+    // Then one frame's worth of the streaming reply (asks for the next frame while any waits).
+    s.step_pace(clock, tx) | landed
 }
 
 pub fn on_key(s: &mut KrampstaApp, ev: &KeyEvent, _tx: &mut Tx) -> bool {
@@ -303,6 +305,8 @@ fn scene_running(s: &mut KrampstaApp) {
     let run = staged(s, "Find where the configuration is loaded");
     let (started, _) = tool(run);
     apply(s, &[started, AgentEvent::TextDelta { run, text: "Looking through the workspace for".into() }]);
+    // The text so far shows, as it would once paced out.
+    s.catch_up();
 }
 
 /// One tool card of each kind while the run goes on: done and opened, failed, still running.

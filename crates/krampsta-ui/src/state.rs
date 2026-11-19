@@ -18,6 +18,7 @@ use crate::accounts::{KeyField, SignIn};
 use crate::approvals::Asking;
 use crate::changes::Changes;
 use crate::menus::OpenMenu;
+use crate::pace::Pace;
 use crate::picker::EngineChoice;
 use crate::sample;
 use crate::theme::ThemeChoice;
@@ -59,6 +60,8 @@ pub struct KrampstaApp {
     pub review: Changes,
     /// Commands waiting for the user to allow them, the first one in the dialog.
     pub approvals: VecDeque<Asking>,
+    /// The reply being shown at a steady pace, if one is streaming.
+    pub pace: Option<Pace>,
     /// The provider and model pickers.
     pub engine: EngineChoice,
     /// The account sign-in dialog.
@@ -112,6 +115,7 @@ impl KrampstaApp {
             diff: empty_diff(),
             review: Changes::default(),
             approvals: VecDeque::new(),
+            pace: None,
             engine,
             sign_in: SignIn::Closed,
             api_key: KeyField::default(),

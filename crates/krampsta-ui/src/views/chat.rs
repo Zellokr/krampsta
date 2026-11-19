@@ -35,10 +35,13 @@ pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
 
 fn transcript(s: &KrampstaApp, session: &Session, k: &Kit, layer: &mut Vec<El>) -> El {
     let running = session.status.is_running();
+    // Streaming while its run writes it, and after, until the pace has shown all of it.
     let streaming_id = session
         .messages
         .last()
-        .filter(|m| running && m.role == MessageRole::Assistant && m.run == session.active_run())
+        .filter(|m| {
+            m.role == MessageRole::Assistant && ((running && m.run == session.active_run()) || s.is_pacing(m.id))
+        })
         .map(|m| m.id);
     // A growth stack: a message that grows (streaming) eases to its new height instead of
     // jumping a line at a time, and the view pinned to the bottom follows it smoothly.

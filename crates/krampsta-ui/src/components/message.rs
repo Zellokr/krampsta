@@ -52,15 +52,16 @@ fn assistant(s: &KrampstaApp, m: &Message, streaming: bool, k: &Kit) -> El {
             .map(|c| tool_card::view(c, m.result_for(c), m.live_output_for(c), s.open_tools.contains(&c.id), k));
         out = out.child(col().w_full().gap(8.0).children(cards));
     }
-    if m.content.is_empty() {
+    // While it streams, the text comes out at a steady pace (`pace.rs`), not as it arrives.
+    let shown = &m.content[..s.shown_len(m.id, m.content.len())];
+    if shown.is_empty() {
         // With reasoning streaming, its "Thinking" header shows the model is at work instead.
         if streaming && m.reasoning.is_empty() {
             out = out.child(working(k));
         }
     } else {
-        // Words that arrive while it streams fade in, instead of landing in bursts as the
-        // provider sends them; a finished message mounts whole.
-        let body = Markdown::new(m.content.clone()).streaming(streaming).reveal(theme::WORD_FADE).selectable(true);
+        // Each word fades in as it comes out; a finished message mounts whole.
+        let body = Markdown::new(shown.to_owned()).streaming(streaming).reveal(theme::WORD_FADE).selectable(true);
         out = out.child(body.build(k));
     }
     out
