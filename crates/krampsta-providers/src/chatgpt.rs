@@ -2,6 +2,7 @@
 //! Codex CLI signs in: OpenAI's device-code sign-in, the tokens it yields, their refresh, and
 //! the headers Codex's backend expects. Not a documented public API, so all of it lives here.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,6 +16,7 @@ use tokio::sync::Mutex;
 
 use crate::access::{Access, Endpoint, bearer};
 use crate::http;
+use crate::responses::{ModelShape, Shapes};
 use crate::secrets::SecretStore;
 
 /// The OAuth app OpenAI's Codex CLI signs in with.
@@ -22,6 +24,8 @@ pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 /// The Codex version sent with the model list (the server filters models by it).
 const CLIENT_VERSION: &str = "0.170.0";
 const ORIGINATOR: &str = "codex_cli_rs";
+/// Marks a request to a "Responses Lite" model (the catalog's `use_responses_lite`), as Codex does.
+pub const RESPONSES_LITE_HEADER: &str = "x-openai-internal-codex-responses-lite";
 /// Refresh the access token this long before it expires.
 const REFRESH_MARGIN: i64 = 120;
 /// How long the user has to approve the code.
@@ -228,6 +232,8 @@ pub struct ChatGptAccess {
     store: Arc<dyn SecretStore>,
     key: &'static str,
     current: Mutex<Current>,
+    /// How each model's requests are worded, from the last model list.
+    shapes: std::sync::Mutex<HashMap<String, ModelShape>>,
 }
 
 impl ChatGptAccess {
@@ -239,7 +245,22 @@ impl ChatGptAccess {
         session: Session,
     ) -> Self {
         let expires_at = session.access_token.as_deref().map_or(0, expiry);
-        ChatGptAccess { client, hosts, store, key, current: Mutex::new(Current { session, expires_at }) }
+        ChatGptAccess {
+            client,
+            hosts,
+            store,
+            key,
+            current: Mutex::new(Current { session, expires_at }),
+            shapes: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn known_shape(&self, model: &str) -> Option<ModelShape> {
+        self.shapes.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(model).cloned()
+    }
+
+    fn remember_shapes(&self, shapes: HashMap<String, ModelShape>) {
+        *self.shapes.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = shapes;
     }
 
     pub fn api(&self) -> &str {
@@ -303,11 +324,50 @@ fn headers(token: &str, account: &str) -> Result<HeaderMap, AgentError> {
 }
 
 /// The models this plan may use, as Codex lists them (`visibility: list`).
+/// Remembers how each model's requests are worded on the way.
 pub async fn list_models(client: &reqwest::Client, access: &ChatGptAccess) -> Result<Vec<String>, AgentError> {
     let endpoint = access.endpoint().await?;
     let url = format!("{}?client_version={CLIENT_VERSION}", endpoint.url("models"));
     let v = http::get_json(client.get(url).headers(endpoint.headers), LOOKUP_TIMEOUT).await?;
+    access.remember_shapes(parse_shapes(&v));
     Ok(parse_models(&v))
+}
+
+/// How Codex words requests to each model in the catalog (hidden ones too): its fields'
+/// defaults when missing, as Codex reads them.
+fn parse_shapes(v: &Value) -> HashMap<String, ModelShape> {
+    v["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let shape = ModelShape {
+                lite: m["use_responses_lite"].as_bool().unwrap_or(false),
+                effort: m["default_reasoning_level"].as_str().map(str::to_owned),
+                summary: m["supports_reasoning_summary_parameter"].as_bool().unwrap_or(true),
+            };
+            Some((m["slug"].as_str()?.to_owned(), shape))
+        })
+        .collect()
+}
+
+impl Shapes for ChatGptAccess {
+    /// From the last model list, else from a fresh one (a run can start before the list
+    /// arrives), else as for an unknown model.
+    fn shape(self: Arc<Self>, model: String) -> BoxFuture<'static, ModelShape> {
+        Box::pin(async move {
+            if let Some(shape) = self.known_shape(&model) {
+                return shape;
+            }
+            let client = self.client.clone();
+            if list_models(&client, &self).await.is_ok()
+                && let Some(shape) = self.known_shape(&model)
+            {
+                return shape;
+            }
+            ModelShape::default()
+        })
+    }
 }
 
 fn parse_models(v: &Value) -> Vec<String> {
@@ -371,5 +431,19 @@ mod tests {
             {"slug": "gpt-5.5"}
         ]});
         assert_eq!(parse_models(&v), ["gpt-6-sol", "gpt-5.5"]);
+    }
+
+    #[test]
+    fn the_catalog_says_how_to_word_each_models_requests() {
+        let v = json!({"models": [
+            {"slug": "lite", "use_responses_lite": true, "default_reasoning_level": "high",
+             "supports_reasoning_summary_parameter": true},
+            {"slug": "quiet", "supports_reasoning_summary_parameter": false},
+            {"slug": "bare"}
+        ]});
+        let shapes = parse_shapes(&v);
+        assert_eq!(shapes["lite"], ModelShape { lite: true, effort: Some("high".into()), summary: true });
+        assert_eq!(shapes["quiet"], ModelShape { lite: false, effort: None, summary: false });
+        assert_eq!(shapes["bare"], ModelShape { lite: false, effort: None, summary: true }, "Codex's defaults");
     }
 }

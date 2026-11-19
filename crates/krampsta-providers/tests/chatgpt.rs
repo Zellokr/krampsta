@@ -102,7 +102,7 @@ fn route(line: &str, body: &str, polls: &AtomicUsize) -> (&'static str, &'static
         "GET /backend-api/codex/models" => (
             ok,
             json,
-            r#"{"models":[{"slug":"gpt-6-sol","visibility":"list"},{"slug":"codex-auto-review","visibility":"hide"}]}"#
+            r#"{"models":[{"slug":"gpt-6-sol","visibility":"list","use_responses_lite":true,"default_reasoning_level":"high"},{"slug":"codex-auto-review","visibility":"hide"}]}"#
                 .into(),
         ),
         "POST /backend-api/codex/responses" => (
@@ -196,11 +196,15 @@ fn a_chatgpt_plan_signs_in_lists_models_replies_and_refreshes_after_a_restart() 
         assert!(headers.contains("authorization: bearer e30."), "{headers}");
         let body: serde_json::Value = serde_json::from_str(body).unwrap();
         assert_eq!((body["model"].as_str(), body["store"].as_bool()), (Some("gpt-6-sol"), Some(false)));
+        // Worded as the catalog describes gpt-6-sol: a Responses Lite model, high effort.
+        assert!(headers.contains("x-openai-internal-codex-responses-lite: true"), "{headers}");
         assert_eq!(
             body["reasoning"],
-            serde_json::json!({"effort": "medium", "summary": "auto"}),
-            "asks to think, and for a summary"
+            serde_json::json!({"effort": "high", "summary": "auto", "context": "all_turns"}),
+            "the model's effort, a summary, reasoning across turns"
         );
+        assert_eq!(body["input"][0]["role"], "developer", "instructions lead the input");
+        assert_eq!(body.get("instructions"), None);
         assert_eq!(
             body["include"],
             serde_json::json!(["reasoning.encrypted_content"]),

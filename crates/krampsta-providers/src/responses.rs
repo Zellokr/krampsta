@@ -11,12 +11,37 @@ use crate::access::Access;
 use crate::http::{self, Flow};
 use crate::sse::SseEvent;
 
-/// Krampsta's standing instructions to the model (the API requires some).
+/// Krampsta's standing instructions to the model.
 pub const INSTRUCTIONS: &str = "You are Krampsta, a coding assistant in a desktop app. Answer the user's \
 questions about their code clearly and concisely, using Markdown and fenced code blocks.";
 
+/// How a request to a model is worded, as its backend's catalog says (see [`Shapes`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelShape {
+    /// The backend's "Responses Lite" mode: a header marks the request, and reasoning spans
+    /// every turn.
+    pub lite: bool,
+    /// The reasoning effort to ask for (`low`, `medium`…); `None` leaves the model's own.
+    pub effort: Option<String>,
+    /// Whether the model takes `reasoning.summary` (and so can stream what it thought).
+    pub summary: bool,
+}
+
+impl Default for ModelShape {
+    /// For a model nobody described: a medium effort and a summary, as Codex CLI asks.
+    fn default() -> Self {
+        ModelShape { lite: false, effort: Some("medium".into()), summary: true }
+    }
+}
+
+/// Describes models, looking them up when they aren't known yet.
+pub trait Shapes: Send + Sync {
+    fn shape(self: Arc<Self>, model: String) -> BoxFuture<'static, ModelShape>;
+}
+
 pub struct ResponsesEngine {
     access: Arc<dyn Access>,
+    shapes: Option<Arc<dyn Shapes>>,
     model: String,
     client: reqwest::Client,
     name: String,
@@ -24,7 +49,14 @@ pub struct ResponsesEngine {
 
 impl ResponsesEngine {
     pub fn new(access: Arc<dyn Access>, model: &str, client: reqwest::Client, label: &str) -> Self {
-        ResponsesEngine { access, model: model.to_owned(), client, name: format!("{label} · {model}") }
+        ResponsesEngine { access, shapes: None, model: model.to_owned(), client, name: format!("{label} · {model}") }
+    }
+
+    /// Words each request as `shapes` describes the model (asked at the start of every run, so a
+    /// catalog that arrives later still counts).
+    pub fn with_shapes(mut self, shapes: Arc<dyn Shapes>) -> Self {
+        self.shapes = Some(shapes);
+        self
     }
 }
 
@@ -35,53 +67,77 @@ impl AgentEngine for ResponsesEngine {
 
     fn run(self: Arc<Self>, request: RunRequest, ctx: RunContext) -> BoxFuture<'static, Result<(), AgentError>> {
         Box::pin(async move {
+            let shape = match self.shapes.clone() {
+                Some(shapes) => tokio::select! {
+                    biased;
+                    () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
+                    shape = shapes.shape(self.model.clone()) => shape,
+                },
+                None => ModelShape::default(),
+            };
+            trace_shape(&self.model, &shape);
             let endpoint = tokio::select! {
                 biased;
                 () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
                 endpoint = self.access.endpoint() => endpoint?,
             };
-            let body = serde_json::to_vec(&body(&self.model, &request.history))
+            let body = serde_json::to_vec(&body(&self.model, &request.history, &shape))
                 .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
-            let req = self
+            let mut req = self
                 .client
                 .post(endpoint.url("responses"))
                 .headers(endpoint.headers)
-                .header("content-type", "application/json")
-                .body(body);
+                .header("content-type", "application/json");
+            if shape.lite {
+                req = req.header(crate::chatgpt::RESPONSES_LITE_HEADER, "true");
+            }
+            let req = req.body(body);
             http::stream_sse(req, &ctx, |event| on_event(&event, &ctx)).await
         })
     }
 }
 
-/// The request: Krampsta's instructions (plus any system messages), the conversation as input
-/// items, streamed and not stored on OpenAI's side.
-fn body(model: &str, history: &[Message]) -> Value {
+/// The request, worded as Codex CLI words it: Krampsta's instructions (plus any system messages)
+/// as a leading developer message, then the conversation, streamed and not stored on OpenAI's
+/// side, with the reasoning settings `shape` allows.
+fn body(model: &str, history: &[Message], shape: &ModelShape) -> Value {
     let mut instructions = INSTRUCTIONS.to_owned();
-    let mut input = Vec::new();
+    let mut conversation = Vec::new();
     for m in history {
         match m.role {
             MessageRole::System => {
                 instructions.push_str("\n\n");
                 instructions.push_str(&m.content);
             }
-            MessageRole::User => {
-                input.push(json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": m.content}]}));
-            }
-            MessageRole::Assistant if !m.content.is_empty() => input.push(
+            MessageRole::User => conversation.push(
+                json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": m.content}]}),
+            ),
+            MessageRole::Assistant if !m.content.is_empty() => conversation.push(
                 json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": m.content}]}),
             ),
             MessageRole::Assistant | MessageRole::Tool => {}
         }
     }
+    let mut input = vec![
+        json!({"type": "message", "role": "developer", "content": [{"type": "input_text", "text": instructions}]}),
+    ];
+    input.extend(conversation);
+    let mut reasoning = serde_json::Map::new();
+    if let Some(effort) = &shape.effort {
+        reasoning.insert("effort".into(), json!(effort));
+    }
+    if shape.summary {
+        reasoning.insert("summary".into(), json!("auto"));
+    }
+    if shape.lite {
+        reasoning.insert("context".into(), json!("all_turns"));
+    }
     json!({
         "model": model,
-        "instructions": instructions,
         "input": input,
         "stream": true,
         "store": false,
-        // Think at Codex CLI's default effort, and stream a summary of it as reasoning events
-        // (without an effort the backend may not reason at all).
-        "reasoning": {"effort": "medium", "summary": "auto"},
+        "reasoning": reasoning,
         // Not stored, the backend leaves reasoning items (and their summary) out of the stream
         // unless asked for their encrypted content, as Codex CLI asks. Krampsta ignores it.
         "include": ["reasoning.encrypted_content"],
@@ -131,6 +187,18 @@ fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
     }
 }
 
+fn tracing() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("KRAMPSTA_TRACE_SSE").is_some_and(|x| x == "1"))
+}
+
+/// With tracing on, how a request to `model` is worded (from the backend's catalog).
+fn trace_shape(model: &str, shape: &ModelShape) {
+    if tracing() {
+        eprintln!("krampsta sse: request to {model}: {shape:?}");
+    }
+}
+
 /// The event kinds this engine acts on; others pass by.
 const HANDLED: [&str; 8] = [
     "response.output_text.delta",
@@ -147,8 +215,7 @@ const HANDLED: [&str; 8] = [
 /// ignores, its field names) to see what a backend sends. Never the values: they hold the
 /// conversation.
 fn trace(kind: &str, v: &Value) {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if !*ON.get_or_init(|| std::env::var_os("KRAMPSTA_TRACE_SSE").is_some_and(|x| x == "1")) {
+    if !tracing() {
         return;
     }
     if HANDLED.contains(&kind) {
@@ -184,13 +251,27 @@ mod tests {
             Message::user(MessageId(4), "again"),
             empty,
         ];
-        let b = body("gpt-6-sol", &history);
+        let b = body("gpt-6-sol", &history, &ModelShape::default());
         assert_eq!(b["model"], "gpt-6-sol");
         assert_eq!(b["store"], false);
         assert_eq!(b["stream"], true);
-        assert!(b["instructions"].as_str().unwrap().ends_with("Reply in Spanish."));
+        assert_eq!(b.get("instructions"), None, "instructions lead the input, as Codex sends them");
         let roles: Vec<&str> = b["input"].as_array().unwrap().iter().map(|i| i["role"].as_str().unwrap()).collect();
-        assert_eq!(roles, ["user", "assistant", "user"]);
-        assert_eq!(b["input"][1]["content"][0]["type"], "output_text");
+        assert_eq!(roles, ["developer", "user", "assistant", "user"]);
+        assert!(b["input"][0]["content"][0]["text"].as_str().unwrap().ends_with("Reply in Spanish."));
+        assert_eq!(b["input"][2]["content"][0]["type"], "output_text");
+        assert_eq!(b["reasoning"], json!({"effort": "medium", "summary": "auto"}));
+    }
+
+    #[test]
+    fn the_model_shape_decides_the_reasoning_settings() {
+        let history = [Message::user(MessageId(1), "hi")];
+        let lite = ModelShape { lite: true, effort: Some("high".into()), summary: true };
+        assert_eq!(
+            body("m", &history, &lite)["reasoning"],
+            json!({"effort": "high", "summary": "auto", "context": "all_turns"})
+        );
+        let plain = ModelShape { lite: false, effort: None, summary: false };
+        assert_eq!(body("m", &history, &plain)["reasoning"], json!({}), "the model's own effort, no summary");
     }
 }

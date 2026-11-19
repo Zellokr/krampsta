@@ -125,7 +125,7 @@ impl Accounts {
         match id {
             CHATGPT => {
                 let (_, access) = read(&self.chatgpt).ok_or_else(|| needs_sign_in(id))?;
-                Ok(Arc::new(ResponsesEngine::new(access, model, client, CHATGPT_LABEL)))
+                Ok(Arc::new(ResponsesEngine::new(access.clone(), model, client, CHATGPT_LABEL).with_shapes(access)))
             }
             COPILOT => {
                 let (_, access) = read(&self.copilot).ok_or_else(|| needs_sign_in(id))?;
