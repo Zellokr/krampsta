@@ -25,3 +25,7 @@ tooling = ["rune/tooling"]
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+krampsta-core.workspace = true
+tempfile = "3"

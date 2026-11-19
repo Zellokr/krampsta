@@ -1974,10 +1974,12 @@ name = "krampsta-app"
 version = "0.1.0"
 dependencies = [
  "krampsta-agent",
+ "krampsta-core",
  "krampsta-providers",
  "krampsta-tools",
  "krampsta-ui",
  "rune",
+ "tempfile",
 ]
 
 [[package]]
