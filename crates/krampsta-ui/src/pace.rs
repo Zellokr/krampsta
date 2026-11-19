@@ -160,10 +160,21 @@ impl KrampstaApp {
             return true;
         }
         let shown = words_up_to(text, at, arriving).max(pace.shown);
+        trace(clock, text.len(), at, shown, pace.pacer.rate, arriving);
         tx.wake_after(Duration::ZERO);
         let grew = shown != pace.shown;
         pace.shown = shown;
         grew
+    }
+}
+
+/// With `KRAMPSTA_TRACE_PACE=1`, one stderr line per paced frame: the clock, bytes arrived, the
+/// pace's position, bytes shown, the estimated rate. Never the text.
+fn trace(clock: f64, arrived: usize, at: usize, shown: usize, rate: f64, arriving: bool) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("KRAMPSTA_TRACE_PACE").is_some_and(|v| v == "1")) {
+        let state = if arriving { "arriving" } else { "draining" };
+        eprintln!("pace t={clock:.3} arrived={arrived} at={at} shown={shown} rate={rate:.0}B/s {state}");
     }
 }
 

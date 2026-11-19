@@ -56,7 +56,7 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   Añade las nuevas a `keys.rs` y úsalas en tests y scripts.
 - Gotchas de layout (flexbox): un `.scroll(..)` dentro de `.grow()` necesita `.min_h(0.0)` en
   cada columna intermedia; `.grow` tiene base 0.
-- El texto en streaming no se pinta según llega: `pace.rs` (`Pacer`) estima a qué ritmo llega y
+- El texto en streaming no se pinta según llega (traza: `KRAMPSTA_TRACE_PACE=1`, sin contenido): `pace.rs` (`Pacer`) estima a qué ritmo llega y
   lo suelta a ese ritmo desde `poll`, con una reserva de ~0,25 s que cubre los huecos entre
   ráfagas (`tx.wake_after(Duration::ZERO)` mientras queda texto), por palabras enteras, con
   `Markdown::reveal` para el fundido y el chat como growth stack con `edge::FAST_FEATHER`. Una
