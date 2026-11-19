@@ -78,6 +78,10 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   En el llavero sólo secretos pequeños y duraderos (Windows limita cada entrada a 2560 bytes);
   los tokens de corta duración se renuevan en memoria. Las llamadas al llavero desde async van
   por `spawn_blocking`. Los tests usan `MemoryStore` y un servidor falso, nunca el llavero real.
+- Para ver qué manda de verdad un backend, `KRAMPSTA_TRACE_SSE=1` escribe en stderr el tipo de
+  cada evento del motor Responses (y los nombres de campo de los que ignora), nunca su contenido.
+  Pide al usuario esa traza antes de cambiar la petición a ciegas: así se vio que ChatGPT acepta
+  `reasoning` pero no emite elementos de razonamiento para `gpt-6.2-sol`.
 
 ## Código
 

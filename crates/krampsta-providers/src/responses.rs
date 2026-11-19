@@ -79,8 +79,12 @@ fn body(model: &str, history: &[Message]) -> Value {
         "input": input,
         "stream": true,
         "store": false,
-        // A summary of the model's thinking streams as reasoning events (as Codex CLI asks).
-        "reasoning": {"summary": "auto"},
+        // Think at Codex CLI's default effort, and stream a summary of it as reasoning events
+        // (without an effort the backend may not reason at all).
+        "reasoning": {"effort": "medium", "summary": "auto"},
+        // Not stored, the backend leaves reasoning items (and their summary) out of the stream
+        // unless asked for their encrypted content, as Codex CLI asks. Krampsta ignores it.
+        "include": ["reasoning.encrypted_content"],
     })
 }
 
@@ -89,6 +93,7 @@ fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
     let v: Value = serde_json::from_str(event.data.trim())
         .map_err(|e| AgentError::Provider(format!("the provider sent an event Krampsta could not read ({e})")))?;
     let kind = v["type"].as_str().unwrap_or(event.event.as_str());
+    trace(kind, &v);
     match kind {
         "response.output_text.delta" => {
             if let Some(text) = v["delta"].as_str().filter(|t| !t.is_empty()) {
@@ -123,6 +128,40 @@ fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
             Err(AgentError::Provider(why.to_owned()))
         }
         _ => Ok(Flow::Continue),
+    }
+}
+
+/// The event kinds this engine acts on; others pass by.
+const HANDLED: [&str; 8] = [
+    "response.output_text.delta",
+    "response.reasoning_summary_text.delta",
+    "response.reasoning_text.delta",
+    "response.reasoning_summary_part.added",
+    "response.completed",
+    "response.failed",
+    "response.incomplete",
+    "error",
+];
+
+/// With `KRAMPSTA_TRACE_SSE=1`, writes each event's kind to stderr (and, for kinds this engine
+/// ignores, its field names) to see what a backend sends. Never the values: they hold the
+/// conversation.
+fn trace(kind: &str, v: &Value) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("KRAMPSTA_TRACE_SSE").is_some_and(|x| x == "1")) {
+        return;
+    }
+    if HANDLED.contains(&kind) {
+        eprintln!("krampsta sse: {kind}");
+    } else if kind == "response.created" {
+        // The reasoning settings the backend applied (effort, summary): settings, not content.
+        eprintln!("krampsta sse: {kind} (reasoning: {})", v["response"]["reasoning"]);
+    } else if kind == "response.output_item.added" {
+        // What kind of output starts ("reasoning", "message"…), without what it says.
+        eprintln!("krampsta sse: {kind} (item type: {})", v["item"]["type"]);
+    } else {
+        let fields: Vec<&str> = v.as_object().map(|o| o.keys().map(String::as_str).collect()).unwrap_or_default();
+        eprintln!("krampsta sse: {kind} (ignored; fields: {})", fields.join(", "));
     }
 }
 

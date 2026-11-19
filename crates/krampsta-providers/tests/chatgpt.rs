@@ -196,7 +196,16 @@ fn a_chatgpt_plan_signs_in_lists_models_replies_and_refreshes_after_a_restart() 
         assert!(headers.contains("authorization: bearer e30."), "{headers}");
         let body: serde_json::Value = serde_json::from_str(body).unwrap();
         assert_eq!((body["model"].as_str(), body["store"].as_bool()), (Some("gpt-6-sol"), Some(false)));
-        assert_eq!(body["reasoning"]["summary"], "auto", "asks for a summary of the thinking");
+        assert_eq!(
+            body["reasoning"],
+            serde_json::json!({"effort": "medium", "summary": "auto"}),
+            "asks to think, and for a summary"
+        );
+        assert_eq!(
+            body["include"],
+            serde_json::json!(["reasoning.encrypted_content"]),
+            "unstored reasoning comes back"
+        );
         assert!(
             !seen.iter().any(|(l, _, b)| l == "POST /oauth/token" && b.contains("refresh_token")),
             "no refresh yet"
