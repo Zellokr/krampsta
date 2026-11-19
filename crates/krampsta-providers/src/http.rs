@@ -65,7 +65,21 @@ pub fn client() -> Result<reqwest::Client, HttpError> {
 pub async fn stream_sse(
     request: reqwest::RequestBuilder,
     ctx: &RunContext,
+    on_event: impl FnMut(SseEvent) -> Result<Flow, AgentError>,
+) -> Result<(), AgentError> {
+    let mut tape = record::folder().map(|dir| (dir, Vec::new()));
+    let result = stream_into(request, ctx, on_event, tape.as_mut().map(|(_, bytes)| bytes)).await;
+    if let Some((dir, bytes)) = tape {
+        record::save(dir, bytes).await;
+    }
+    result
+}
+
+async fn stream_into(
+    request: reqwest::RequestBuilder,
+    ctx: &RunContext,
     mut on_event: impl FnMut(SseEvent) -> Result<Flow, AgentError>,
+    mut tape: Option<&mut Vec<u8>>,
 ) -> Result<(), AgentError> {
     let response =
         cancellable(ctx, request.header("accept", "text/event-stream").send()).await?.map_err(|e| request_error(&e))?;
@@ -79,6 +93,9 @@ pub async fn stream_sse(
     let mut body = response.bytes_stream();
     while let Some(chunk) = cancellable(ctx, body.next()).await? {
         let chunk = chunk.map_err(|e| request_error(&e))?;
+        if let Some(tape) = tape.as_deref_mut() {
+            tape.extend_from_slice(&chunk);
+        }
         for event in parser.push(&chunk) {
             ctx.check_cancelled()?;
             if on_event(event)? == Flow::Done {
@@ -87,6 +104,54 @@ pub async fn stream_sse(
         }
     }
     Ok(())
+}
+
+/// `KRAMPSTA_RECORD_SSE=<folder>`: a development mode that saves every streamed reply byte for
+/// byte, one `.sse` file per request, to turn into test fixtures. The files hold the whole
+/// conversation (and encrypted reasoning): it is never on unless asked for, and a recording is
+/// reviewed before it is committed.
+mod record {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    pub fn folder() -> Option<PathBuf> {
+        std::env::var_os("KRAMPSTA_RECORD_SSE").filter(|v| !v.is_empty()).map(PathBuf::from)
+    }
+
+    /// Writes one recording off the async workers. A failure is reported, not fatal: the run
+    /// already has its answer.
+    pub async fn save(dir: PathBuf, bytes: Vec<u8>) {
+        static COUNT: AtomicU64 = AtomicU64::new(0);
+        if bytes.is_empty() {
+            return;
+        }
+        let millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+        let path = dir.join(format!("{millis}-{}.sse", COUNT.fetch_add(1, Ordering::Relaxed)));
+        let job = tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, bytes)).map(|()| path)
+        });
+        match job.await {
+            Ok(Ok(path)) => eprintln!("krampsta: recorded a stream to {}", path.display()),
+            Ok(Err(e)) => eprintln!("krampsta: could not record the stream: {e}"),
+            Err(e) => eprintln!("krampsta: recording the stream stopped abnormally: {e}"),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn a_recording_is_saved_byte_for_byte_and_an_empty_one_is_skipped() {
+            let dir = std::env::temp_dir().join(format!("krampsta-record-{}", std::process::id()));
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            let bytes = b"data: {\"x\":\"\xc3\xa9\"}\r\n\r\ndata: [DONE]\n\n".to_vec();
+            rt.block_on(super::save(dir.clone(), bytes.clone()));
+            rt.block_on(super::save(dir.clone(), Vec::new()));
+            let files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).collect();
+            assert_eq!(files.len(), 1, "{files:?}");
+            assert_eq!(std::fs::read(&files[0]).unwrap(), bytes);
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
 }
 
 /// Runs `fut` unless the run is cancelled first.

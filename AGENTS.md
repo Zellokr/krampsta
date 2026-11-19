@@ -103,6 +103,10 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
 - Para ver qué manda de verdad un backend, `KRAMPSTA_TRACE_SSE=1` escribe en stderr el tipo de
   cada evento del motor Responses (y los nombres de campo de los que ignora), nunca su contenido.
   Pide al usuario esa traza antes de cambiar la petición a ciegas.
+- Para grabar fixtures, `KRAMPSTA_RECORD_SSE=<carpeta>` guarda cada stream tal cual (un `.sse`
+  por petición, todos los motores). Lleva la conversación entera: el usuario lo activa, y la
+  grabación se revisa (y se recorta lo personal o cifrado que no haga falta) antes de versionarla
+  en `crates/krampsta-providers/tests/fixtures/`.
 - La petición a ChatGPT imita a Codex CLI (`github.com/openai/codex`, `core/src/client.rs`): la
   forma de cada modelo sale del catálogo `codex/models` (`use_responses_lite`,
   `default_reasoning_level`, `supports_reasoning_summary_parameter`). Un modelo Lite exige su
