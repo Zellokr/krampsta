@@ -95,6 +95,7 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>) -> El {
     };
     sign_in::dialog(s, k, &mut layer);
     menus::delete_dialog(s, k, &mut layer);
+    crate::approvals::dialog(s, k, &mut layer);
     // The root's rect is the window: refit the side panes whenever its width changes.
     let base = rune::el()
         .key("krampsta-root")
@@ -220,6 +221,10 @@ const SCENES: &[Scene] = &[
     // The agent proposed edits to two files and a new one: each file and each block can be
     // accepted or rejected.
     ("changes", stage_changes),
+    ("command", |s| {
+        scene_command(s);
+    }),
+    ("approval", scene_approval),
     ("change-failed", |s| {
         stage_changes(s);
         s.review.error = Some(
@@ -452,4 +457,42 @@ fn stage_changes(s: &mut KrampstaApp) {
     for change in crate::sample::changes() {
         s.propose(change);
     }
+}
+
+/// A command running, its last lines showing as they come.
+fn scene_command(s: &mut KrampstaApp) -> ToolCall {
+    let run = staged(s, "Run the tests");
+    let call = ToolCall {
+        id: ToolCallId("scene-command".into()),
+        name: "run_command".into(),
+        arguments: r#"{"command": "cargo test --workspace"}"#.into(),
+    };
+    let output = "   Compiling krampsta-core v0.1.0\n   Compiling krampsta-agent v0.1.0\n   Compiling krampsta-tools v0.1.0\n\
+                  \x20   Finished `test` profile in 14.2s\n     Running unittests src/lib.rs\n\nrunning 25 tests\n\
+                  test policy::tests::rules_allow_plain_commands_and_ask_about_the_rest ... ok\n";
+    apply(
+        s,
+        &[
+            AgentEvent::ToolCallStarted { run, call: call.clone() },
+            AgentEvent::ToolOutputDelta { run, call: call.id.clone(), text: output.into() },
+        ],
+    );
+    call
+}
+
+/// A command waiting for the user: the dialog over the call's card.
+fn scene_approval(s: &mut KrampstaApp) {
+    let run = staged(s, "Clean the build and run the tests");
+    let call = ToolCall {
+        id: ToolCallId("scene-approval".into()),
+        name: "run_command".into(),
+        arguments: r#"{"command": "cargo clean && cargo test --workspace"}"#.into(),
+    };
+    apply(s, &[AgentEvent::ToolCallStarted { run, call: call.clone() }]);
+    s.ask(crate::approvals::Asking {
+        run,
+        call: call.id,
+        tool: call.name,
+        what: "cargo clean && cargo test --workspace".into(),
+    });
 }

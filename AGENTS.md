@@ -18,10 +18,12 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
 - `crates/krampsta-tools` — las herramientas del agente sobre la carpeta del proyecto
   (`Workspace`, un `Toolbox`): `project` (ninguna ruta sale de la carpeta), `read_file`,
   `list_files`, `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
-  propone, y la escritura al aceptar). No depende de Rune.
+  propone, y la escritura al aceptar), `command` (`run_command`), `policy` (reglas de permisos).
+  No depende de Rune.
 - `crates/krampsta-ui` — `KrampstaApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`
   (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
-  (piezas), `accounts.rs` (diálogo de inicio de sesión), `changes.rs` (revisar los cambios
+  (piezas), `accounts.rs` (diálogo de inicio de sesión), `approvals.rs` (permitir comandos),
+  `changes.rs` (revisar los cambios
   propuestos: aceptar o rechazar archivos y bloques), `theme.rs` (único sitio de colores),
   `keys.rs` (claves estables), `sample.rs` (datos
   de ejemplo).
@@ -75,6 +77,15 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   siguientes del agente la ven). Sólo `Toolbox::write`, al aceptar desde el panel, toca el
   disco: comprueba que el archivo sigue como se propuso y escribe de forma atómica. Aceptar o
   rechazar un bloque es `splice_lines` (lineal) sobre los dos textos.
+- Permisos: antes de ejecutar, `Toolbox::check` dice `Allow`, `Ask` o `Deny`. Con `Ask`, el
+  contexto emite `ApprovalRequested` y espera (cancelable) a que la UI llame a
+  `AgentHost::answer`; «siempre» guarda la regla con `Toolbox::remember`. Las reglas viven en
+  `permissions.json` (carpeta de configuración del usuario); `deny` gana y mira cada parte de un
+  comando encadenado; una regla `*` de `allow` sólo cubre comandos simples. Cada comando deja una
+  línea en `commands.log` (qué, dónde, quién lo permitió, cómo acabó).
+- `run_command` corre como árbol de procesos que se mata entero (Job Object / grupo de procesos,
+  con `process-wrap`) al vencer el tiempo, al cancelar o al salir su shell. La salida va a la UI
+  por lotes (`Call::output`, cada 50 ms o 16 KB) y al modelo como cabeza + cola acotadas.
 - Una herramienta nueva va en `krampsta-tools`: lee sólo lo necesario (streaming, sin cargar
   archivos enteros), pone tope a su salida, comprueba la cancelación en los bucles largos y
   resuelve rutas con `Project::resolve`. Se prueba con `tempfile`, nunca con el disco real.

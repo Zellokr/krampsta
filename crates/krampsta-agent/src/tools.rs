@@ -31,15 +31,69 @@ impl From<String> for ToolOutput {
     }
 }
 
-/// Runs tools. Calls block (file I/O): the host runs them on a blocking thread, never on the
-/// async workers or the UI thread, and cancels them through `cancel`, which long calls check.
+/// Whether a call may run, as the permission rules say.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Access {
+    /// It runs, permitted as `Approval` says.
+    Allow(Approval),
+    /// The user decides; `what` is what they are shown (the command line).
+    Ask { what: String },
+    /// A rule forbids it; the reason goes to the model.
+    Deny(String),
+}
+
+/// How a call came to be permitted, for the record of what ran.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Approval {
+    /// The tool needs no permission (it only reads, or only proposes).
+    NotNeeded,
+    /// An `allow` rule matched (the rule as written).
+    Rule(String),
+    /// The user allowed this call.
+    Once,
+    /// The user allowed it from now on.
+    Always,
+}
+
+/// The user's answer to a call that asks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decision {
+    Deny,
+    Once,
+    Always,
+}
+
+/// What a running call gets besides its arguments.
+pub struct Call<'a> {
+    /// Cancelled when the user stops the run; long calls check it and stop.
+    pub cancel: &'a CancellationToken,
+    pub approval: &'a Approval,
+    /// Shows output as it is produced (a command's), before the call returns. Each piece is
+    /// appended to what came before.
+    pub output: &'a (dyn Fn(&str) + Send + Sync),
+}
+
+/// Runs tools. Calls block (file I/O, processes): the host runs them on a blocking thread, never
+/// on the async workers or the UI thread.
 pub trait Toolbox: Send + Sync + 'static {
     /// Every tool it offers, built once.
     fn specs(&self) -> Arc<[ToolSpec]>;
 
     /// Runs `name` with its JSON `arguments`. `Err` is a readable reason, which the model also
     /// gets (marked as an error) so it can try otherwise.
-    fn run(&self, name: &str, arguments: &str, cancel: &CancellationToken) -> Result<ToolOutput, String>;
+    fn run(&self, name: &str, arguments: &str, call: &Call<'_>) -> Result<ToolOutput, String>;
+
+    /// Whether `name` may run with `arguments`, before it does. Cheap: no I/O.
+    fn check(&self, name: &str, arguments: &str) -> Access {
+        let _ = (name, arguments);
+        Access::Allow(Approval::NotNeeded)
+    }
+
+    /// The user allowed this call from now on: keep a rule for it. May block (it saves a file).
+    fn remember(&self, name: &str, arguments: &str) -> Result<(), String> {
+        let _ = (name, arguments);
+        Ok(())
+    }
 
     /// Writes `content` to `path` (relative to the project) if the file still holds `expected`
     /// (`None`: it must not exist), so an accepted change never clobbers an edit made since.

@@ -30,7 +30,11 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
 - **Herramientas**: con un proveedor real, el agente lee el proyecto (la carpeta desde la que
   se abre Krampsta) con `list_files`, `search` y `read_file`, y cada llamada aparece como tarjeta
   plegable en el chat. Para cambiar código usa `edit_file`, que sólo **propone**: nada se
-  escribe hasta que lo aceptas en el panel de cambios. Nada sale de esa carpeta.
+  escribe hasta que lo aceptas en el panel de cambios. Con `run_command` ejecuta comandos en esa
+  carpeta (PowerShell en Windows, `sh` en el resto): la salida se ve en directo en la tarjeta, y
+  cada comando pide permiso (una vez, siempre o denegar) salvo que lo cubra una regla de
+  `permissions.json`, en la carpeta de configuración (`%APPDATA%\krampsta` en Windows). Lo que se
+  ejecuta queda en `commands.log`. Nada sale de esa carpeta.
 - **Responsive**: al estrechar la ventana se pliegan los paneles laterales (primero el de
   cambios, después la sidebar) y vuelven a abrirse al ensancharla.
 - Atajos: `Ctrl+N`/`⌘N` nueva sesión, `Ctrl+Shift+B`/`⇧⌘B` sidebar, `Ctrl+J`/`⌘J` cambios,
@@ -53,7 +57,8 @@ krampsta/
 │   ├── krampsta-agent/        contrato AgentEngine, AgentHost (runtime async) y MockAgent
 │   ├── krampsta-providers/    motores reales: HTTP + SSE (reqwest) y OpenAI/compatibles
 │   │   └── tests/          servidor HTTP falso que reproduce streams grabados
-│   ├── krampsta-tools/        herramientas del agente: read_file, list_files, search, edit_file
+│   ├── krampsta-tools/        herramientas del agente: read_file, list_files, search, edit_file,
+│   │                       run_command, y las reglas de permisos
 │   ├── krampsta-ui/           estado de la UI, tema, vistas y componentes Rune/rune-kit
 │   │   └── tests/ui.rs     pruebas de interacción con el Runtime headless de Rune
 │   └── krampsta-app/          binario `krampsta`: elige el motor y arranca la app

@@ -1,15 +1,17 @@
 //! The engine contract.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use krampsta_core::{AgentEvent, Message, RunEvent, RunId, SessionId, ToolCall, ToolResult, Usage};
+use krampsta_core::{AgentEvent, Message, RunEvent, RunId, SessionId, ToolCall, ToolCallId, ToolResult, Usage};
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
 use crate::host::Notifier;
-use crate::tools::{ToolOutput, ToolSpec, Toolbox};
+use crate::tools::{Access, Approval, Call, Decision, ToolOutput, ToolSpec, Toolbox};
 
 /// A boxed, sendable future, so [`AgentEngine`] stays object safe (`Arc<dyn AgentEngine>`).
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -105,6 +107,15 @@ pub struct RunContext {
     cancel: CancellationToken,
     tools: Option<Arc<dyn Toolbox>>,
     specs: Arc<[ToolSpec]>,
+    approvals: Approvals,
+}
+
+/// Calls waiting for the user, by run and call, each with the channel its answer goes down.
+pub(crate) type Approvals = Arc<Mutex<HashMap<(RunId, ToolCallId), oneshot::Sender<Decision>>>>;
+
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    // Every change is one insert or remove: a panic can't leave the map half-changed.
+    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl RunContext {
@@ -115,15 +126,24 @@ impl RunContext {
         notify: Notifier,
         cancel: CancellationToken,
         tools: Option<Arc<dyn Toolbox>>,
+        approvals: Approvals,
     ) -> Self {
         let specs = tools.as_ref().map_or_else(|| Arc::from([]), |t| t.specs());
-        RunContext { session, run, events, notify, cancel, tools, specs }
+        RunContext { session, run, events, notify, cancel, tools, specs, approvals }
     }
 
     /// A context with no audience and no tools, for engine tests that drive `run` by hand.
     pub fn detached(tools: Option<Arc<dyn Toolbox>>) -> (Self, std::sync::mpsc::Receiver<RunEvent>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        let ctx = Self::new(SessionId(0), RunId(0), tx, Arc::new(|| {}), CancellationToken::new(), tools);
+        let ctx = Self::new(
+            SessionId(0),
+            RunId(0),
+            tx,
+            Arc::new(|| {}),
+            CancellationToken::new(),
+            tools,
+            Approvals::default(),
+        );
         (ctx, rx)
     }
 
@@ -139,18 +159,28 @@ impl RunContext {
         self.tool_started(call.clone());
         let outcome = match self.tools.clone() {
             None => Err(format!("there is no tool named `{}`", call.name)),
-            Some(tools) => {
-                let (name, arguments, cancel) = (call.name.clone(), call.arguments.clone(), self.cancel.clone());
-                let job = tokio::task::spawn_blocking(move || tools.run(&name, &arguments, &cancel));
-                tokio::select! {
-                    biased;
-                    () = self.cancel.cancelled() => {
-                        self.tool_finished(ToolResult { call_id: call.id, output: "Stopped.".into(), is_error: true });
-                        return Err(AgentError::Cancelled);
+            Some(tools) => match self.permit(&tools, &call).await {
+                Err(AgentError::Cancelled) => return Err(self.stopped(call)),
+                Err(e) => Err(e.to_string()),
+                Ok(Err(refused)) => Err(refused),
+                Ok(Ok(approval)) => {
+                    let ctx = self.clone();
+                    let (name, arguments, id) = (call.name.clone(), call.arguments.clone(), call.id.clone());
+                    let job = tokio::task::spawn_blocking(move || {
+                        let output = |text: &str| {
+                            let text = text.to_owned();
+                            ctx.emit(AgentEvent::ToolOutputDelta { run: ctx.run, call: id.clone(), text });
+                        };
+                        let call = Call { cancel: &ctx.cancel, approval: &approval, output: &output };
+                        tools.run(&name, &arguments, &call)
+                    });
+                    tokio::select! {
+                        biased;
+                        () = self.cancel.cancelled() => return Err(self.stopped(call)),
+                        joined = job => joined.unwrap_or_else(|e| Err(format!("the tool stopped abnormally: {e}"))),
                     }
-                    joined = job => joined.unwrap_or_else(|e| Err(format!("the tool stopped abnormally: {e}"))),
                 }
-            }
+            },
         };
         let (output, is_error) = match outcome {
             Ok(ToolOutput { text, change }) => {
@@ -164,6 +194,54 @@ impl RunContext {
         let result = ToolResult { call_id: call.id, output, is_error };
         self.tool_finished(result.clone());
         Ok(result)
+    }
+
+    /// Whether `call` may run: by a rule, or by the user, who is asked and waited for. The inner
+    /// `Err` is why not (for the model); the outer one only means the run was cancelled.
+    async fn permit(&self, tools: &Arc<dyn Toolbox>, call: &ToolCall) -> Result<Result<Approval, String>, AgentError> {
+        let what = match tools.check(&call.name, &call.arguments) {
+            Access::Allow(approval) => return Ok(Ok(approval)),
+            Access::Deny(reason) => return Ok(Err(format!("Not allowed: {reason}"))),
+            Access::Ask { what } => what,
+        };
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let key = (self.run, call.id.clone());
+        lock(&self.approvals).insert(key.clone(), tx);
+        self.emit(AgentEvent::ApprovalRequested {
+            run: self.run,
+            call: call.id.clone(),
+            tool: call.name.clone(),
+            what,
+        });
+        let answer = tokio::select! {
+            biased;
+            () = self.cancel.cancelled() => None,
+            answer = rx => answer.ok(),
+        };
+        lock(&self.approvals).remove(&key);
+        Ok(match answer {
+            None => return Err(AgentError::Cancelled),
+            Some(Decision::Deny) => {
+                Err("The user did not allow this. Ask them how to go on, or do it another way.".into())
+            }
+            Some(Decision::Once) => Ok(Approval::Once),
+            Some(Decision::Always) => {
+                let (tools, name, arguments) = (tools.clone(), call.name.clone(), call.arguments.clone());
+                // Allowed either way; only the rule for next time may fail to save.
+                match tokio::task::spawn_blocking(move || tools.remember(&name, &arguments)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => self.text(format!("\n\n(Krampsta could not save the rule: {e})\n\n")),
+                    Err(e) => self.text(format!("\n\n(Krampsta could not save the rule: {e})\n\n")),
+                }
+                Ok(Approval::Always)
+            }
+        })
+    }
+
+    /// Ends a call's card when the run is cancelled under it.
+    fn stopped(&self, call: ToolCall) -> AgentError {
+        self.tool_finished(ToolResult { call_id: call.id, output: "Stopped.".into(), is_error: true });
+        AgentError::Cancelled
     }
 
     pub fn run(&self) -> RunId {

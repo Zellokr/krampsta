@@ -46,7 +46,10 @@ fn assistant(s: &KrampstaApp, m: &Message, streaming: bool, k: &Kit) -> El {
         out = out.child(reasoning::view(m, streaming, s.open_reasoning.contains(&m.id), k));
     }
     if !m.tool_calls.is_empty() {
-        let cards = m.tool_calls.iter().map(|c| tool_card::view(c, m.result_for(c), s.open_tools.contains(&c.id), k));
+        let cards = m
+            .tool_calls
+            .iter()
+            .map(|c| tool_card::view(c, m.result_for(c), m.live_output_for(c), s.open_tools.contains(&c.id), k));
         out = out.child(col().w_full().gap(8.0).children(cards));
     }
     if m.content.is_empty() {

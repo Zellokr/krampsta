@@ -42,6 +42,18 @@ pub fn tool(id: &krampsta_core::ToolCallId) -> String {
     format!("krampsta-tool-{id}")
 }
 
+/// A running call's live output (a command's last lines).
+pub fn tool_live(id: &krampsta_core::ToolCallId) -> String {
+    format!("krampsta-tool-live-{id}")
+}
+
+/// The dialog that asks to allow a command (rune-kit keys its panel `<key>-dialog`), and its
+/// buttons.
+pub const APPROVAL: &str = "krampsta-approval";
+pub const APPROVAL_DENY: &str = "krampsta-approval-deny";
+pub const APPROVAL_ONCE: &str = "krampsta-approval-once";
+pub const APPROVAL_ALWAYS: &str = "krampsta-approval-always";
+
 /// Provider and model pickers. rune-kit keys a select's trigger `<key>-trigger` and its
 /// options `option<i>` inside `<key>-content`.
 pub const COMPOSER_PROVIDER: &str = "krampsta-composer-provider";

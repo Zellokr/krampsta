@@ -3,7 +3,7 @@
 //! Everything a view reads lives in [`KrampstaApp`]. Handlers call its methods; agent events
 //! reach it through [`KrampstaApp::pump`], which `poll` runs when the agent host wakes the window.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use krampsta_agent::{
@@ -15,6 +15,7 @@ use rune_kit::PaneState;
 use rune_kit::diff::DiffState;
 
 use crate::accounts::{KeyField, SignIn};
+use crate::approvals::Asking;
 use crate::changes::Changes;
 use crate::menus::OpenMenu;
 use crate::picker::EngineChoice;
@@ -56,6 +57,8 @@ pub struct KrampstaApp {
     pub diff: DiffState,
     /// The changes the agent proposed, under review in the changes panel.
     pub review: Changes,
+    /// Commands waiting for the user to allow them, the first one in the dialog.
+    pub approvals: VecDeque<Asking>,
     /// The provider and model pickers.
     pub engine: EngineChoice,
     /// The account sign-in dialog.
@@ -108,6 +111,7 @@ impl KrampstaApp {
             changes: PaneState::new(440.0).range(320.0, 760.0),
             diff: empty_diff(),
             review: Changes::default(),
+            approvals: VecDeque::new(),
             engine,
             sign_in: SignIn::Closed,
             api_key: KeyField::default(),
@@ -234,12 +238,24 @@ impl KrampstaApp {
         changed |= self.land_models(lists);
         changed |= self.land_writes(writes);
         for e in self.agent.drain() {
-            if let AgentEvent::ChangeProposed { change, .. } = e.event {
+            match e.event {
                 // A proposal outlives its run: the tools already build on it.
-                self.propose(change);
-                changed = true;
-            } else if let Some(s) = self.session_mut(e.session) {
-                changed |= s.apply(&e.event);
+                AgentEvent::ChangeProposed { change, .. } => {
+                    self.propose(change);
+                    changed = true;
+                }
+                AgentEvent::ApprovalRequested { run, call, tool, what } => {
+                    self.ask(Asking { run, call, tool, what });
+                    changed = true;
+                }
+                event => {
+                    if event.is_terminal() {
+                        self.forget_approvals(event.run());
+                    }
+                    if let Some(s) = self.session_mut(e.session) {
+                        changed |= s.apply(&event);
+                    }
+                }
             }
         }
         changed

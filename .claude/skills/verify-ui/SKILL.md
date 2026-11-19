@@ -29,7 +29,7 @@ Si `fmt --check` falla, ejecuta `cargo fmt --all` y repite.
 bash scripts/snapshots.sh
 ```
 
-Escribe en `assets/screenshots/`: `krampsta` (estado inicial), `empty`, `changes-empty` (panel de cambios vacío), `changes` y `change-failed` (cambios propuestos con Accept/Reject por archivo y por bloque, y una escritura fallida), `running`, `tools`
+Escribe en `assets/screenshots/`: `krampsta` (estado inicial), `empty`, `changes-empty` (panel de cambios vacío), `changes` y `change-failed` (cambios propuestos con Accept/Reject por archivo y por bloque, y una escritura fallida), `command` (comando en marcha con su salida en directo), `approval` (diálogo para permitir un comando), `running`, `tools`
 (tarjetas de herramienta: abierta, fallida y en curso), `thinking` y `reasoning` (razonamiento
 mientras piensa y abierto al terminar), `completed`,
 `failed`, `cancelled`, `settings`, `api-key` y `api-key-saved` (clave de OpenAI escrita y guardada), `signed-in`, `sign-in` (diálogo con el código), `sign-in-failed` (el fallo, con «Try again»), `session-menu`, `message-menu` y `delete-session` (menús contextuales y la confirmación de borrado), `light`,

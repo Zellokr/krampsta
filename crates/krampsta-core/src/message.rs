@@ -1,6 +1,6 @@
 //! Messages in a conversation.
 
-use crate::{MessageId, RunId, ToolCall, ToolResult};
+use crate::{MessageId, RunId, ToolCall, ToolCallId, ToolResult};
 
 /// Who wrote a message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -39,7 +39,13 @@ pub struct Message {
     pub tool_calls: Vec<ToolCall>,
     /// Results for those calls, matched by [`ToolResult::call_id`].
     pub tool_results: Vec<ToolResult>,
+    /// Output of calls still running (a command's), shown until their result replaces it. Only
+    /// its last [`LIVE_OUTPUT_MAX`] bytes are kept.
+    pub live_output: Vec<(ToolCallId, String)>,
 }
+
+/// The most live output kept per call: its tail is what shows a command's progress.
+pub const LIVE_OUTPUT_MAX: usize = 32 * 1024;
 
 impl Message {
     pub fn new(id: MessageId, role: MessageRole, content: impl Into<String>) -> Self {
@@ -51,6 +57,34 @@ impl Message {
             run: None,
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
+            live_output: Vec::new(),
+        }
+    }
+
+    /// The output a running call has shown so far.
+    pub fn live_output_for(&self, call: &ToolCall) -> Option<&str> {
+        self.live_output.iter().find(|(id, _)| *id == call.id).map(|(_, text)| text.as_str())
+    }
+
+    /// Appends to a running call's output, dropping its oldest bytes past the cap.
+    pub(crate) fn push_live_output(&mut self, call: &ToolCallId, text: &str) {
+        let at = match self.live_output.iter().position(|(id, _)| id == call) {
+            Some(at) => at,
+            None => {
+                self.live_output.push((call.clone(), String::new()));
+                self.live_output.len() - 1
+            }
+        };
+        let out = &mut self.live_output[at].1;
+        out.push_str(text);
+        if out.len() > LIVE_OUTPUT_MAX {
+            // Cut at a line (or at least a character) boundary near the cap.
+            let mut cut = out.len() - LIVE_OUTPUT_MAX;
+            while !out.is_char_boundary(cut) {
+                cut += 1;
+            }
+            let cut = out[cut..].find('\n').map_or(cut, |n| cut + n + 1);
+            out.drain(..cut);
         }
     }
 

@@ -32,4 +32,4 @@ pub use host::{AccountEvent, ModelList, Written};
 pub use mock::MockAgent;
 pub use mock::MockConfig;
 pub use tokio_util::sync::CancellationToken;
-pub use tools::{ToolOutput, ToolSpec, Toolbox};
+pub use tools::{Access, Approval, Call, Decision, ToolOutput, ToolSpec, Toolbox};

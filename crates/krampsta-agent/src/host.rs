@@ -4,12 +4,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use krampsta_core::{AgentEvent, IdGen, RunEvent, RunId};
+use krampsta_core::{AgentEvent, IdGen, RunEvent, RunId, ToolCallId};
 use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{DeviceCode, LoginPrompt};
-use crate::engine::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
-use crate::tools::Toolbox;
+use crate::engine::{AgentEngine, AgentError, Approvals, BoxFuture, RunContext, RunRequest, lock};
+use crate::tools::{Decision, Toolbox};
 
 /// Called from a worker thread after each event is queued, to wake the UI so it drains them.
 /// Rune's `Waker` (`Arc<dyn Fn() + Send + Sync>`) is one.
@@ -36,6 +36,8 @@ pub struct AgentHost {
     accounts_rx: Receiver<AccountEvent>,
     writes_tx: Sender<Written>,
     writes_rx: Receiver<Written>,
+    /// Calls waiting for the user to allow them, shared with every run's context.
+    approvals: Approvals,
     /// The sign-in in progress, if any (one at a time).
     sign_in: Option<CancellationToken>,
 }
@@ -88,6 +90,7 @@ impl AgentHost {
         AgentHost {
             writes_tx,
             writes_rx,
+            approvals: Approvals::default(),
             engine,
             tools: None,
             runtime: None,
@@ -293,6 +296,7 @@ impl AgentHost {
             self.notify.clone(),
             cancel.clone(),
             self.tools.clone(),
+            self.approvals.clone(),
         );
         let engine = self.engine.clone();
         let runtime = self.runtime()?;
@@ -314,6 +318,15 @@ impl AgentHost {
         });
         self.runs.insert(run, cancel);
         Ok(run)
+    }
+
+    /// Answers a call waiting for approval ([`AgentEvent::ApprovalRequested`]). False when it no
+    /// longer waits (its run ended, or it was answered).
+    pub fn answer(&self, run: RunId, call: &ToolCallId, decision: Decision) -> bool {
+        match lock(&self.approvals).remove(&(run, call.clone())) {
+            Some(waiting) => waiting.send(decision).is_ok(),
+            None => false,
+        }
     }
 
     /// Asks a run to stop. Returns false if it isn't running. The run still ends with a
@@ -476,5 +489,119 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), events.len());
+    }
+
+    /// Calls `run_command` once and writes back what it returned.
+    struct CallsATool;
+
+    impl AgentEngine for CallsATool {
+        fn name(&self) -> &str {
+            "calls-a-tool"
+        }
+        fn run(self: Arc<Self>, _: RunRequest, ctx: RunContext) -> BoxFuture<'static, Result<(), AgentError>> {
+            Box::pin(async move {
+                let call = krampsta_core::ToolCall {
+                    id: ToolCallId("c1".into()),
+                    name: "run_command".into(),
+                    arguments: "ls".into(),
+                };
+                let result = ctx.run_tool(call).await?;
+                ctx.text(format!("{}:{}", result.is_error, result.output));
+                Ok(())
+            })
+        }
+    }
+
+    /// Asks about every call; shows output as it runs; answers with how it was approved.
+    #[derive(Default)]
+    struct Asks {
+        remembered: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl Toolbox for Asks {
+        fn specs(&self) -> Arc<[crate::ToolSpec]> {
+            Arc::from([])
+        }
+        fn check(&self, _: &str, arguments: &str) -> crate::Access {
+            crate::Access::Ask { what: arguments.to_owned() }
+        }
+        fn remember(&self, _: &str, arguments: &str) -> Result<(), String> {
+            self.remembered.lock().unwrap().push(arguments.to_owned());
+            Ok(())
+        }
+        fn run(&self, _: &str, _: &str, call: &crate::Call<'_>) -> Result<crate::ToolOutput, String> {
+            (call.output)("partial ");
+            Ok(format!("ran {:?}", call.approval).into())
+        }
+    }
+
+    fn ask(tools: &Arc<Asks>) -> (AgentHost, RunId) {
+        let mut host = AgentHost::new(Arc::new(CallsATool));
+        host.set_toolbox(Some(tools.clone()));
+        let run = host.next_run_id();
+        host.start(RunRequest { session: SessionId(1), run, history: vec![], effort: None }).unwrap();
+        (host, run)
+    }
+
+    fn until(host: &mut AgentHost, events: &mut Vec<AgentEvent>, done: impl Fn(&[AgentEvent]) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !done(events) {
+            assert!(Instant::now() < deadline, "timed out: {events:?}");
+            events.extend(host.drain().into_iter().map(|e| e.event));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn asked(events: &[AgentEvent]) -> bool {
+        events.iter().any(|e| matches!(e, AgentEvent::ApprovalRequested { what, .. } if what == "ls"))
+    }
+
+    fn reply(events: &[AgentEvent]) -> String {
+        events
+            .iter()
+            .filter_map(|e| if let AgentEvent::TextDelta { text, .. } = e { Some(text.as_str()) } else { None })
+            .collect()
+    }
+
+    #[test]
+    fn a_call_that_asks_waits_for_the_answer_and_runs_as_allowed() {
+        for (decision, expected) in [(Decision::Once, "false:ran Once"), (Decision::Always, "false:ran Always")] {
+            let tools = Arc::new(Asks::default());
+            let (mut host, run) = ask(&tools);
+            let mut events = Vec::new();
+            until(&mut host, &mut events, asked);
+            assert!(
+                !events.iter().any(|e| matches!(e, AgentEvent::TextDelta { .. })),
+                "nothing runs before the answer"
+            );
+            assert!(host.answer(run, &ToolCallId("c1".into()), decision));
+            assert!(!host.answer(run, &ToolCallId("c1".into()), decision), "answered once");
+            until(&mut host, &mut events, |e| e.last().is_some_and(AgentEvent::is_terminal));
+            assert_eq!(reply(&events), expected);
+            let streamed =
+                events.iter().any(|e| matches!(e, AgentEvent::ToolOutputDelta { text, .. } if text == "partial "));
+            assert!(streamed, "output shows while the call runs");
+            let remembered = tools.remembered.lock().unwrap().clone();
+            assert_eq!(remembered, if decision == Decision::Always { vec!["ls".to_owned()] } else { vec![] });
+        }
+    }
+
+    #[test]
+    fn a_denied_call_tells_the_model_and_a_cancelled_wait_stops_the_run() {
+        let tools = Arc::new(Asks::default());
+        let (mut host, run) = ask(&tools);
+        let mut events = Vec::new();
+        until(&mut host, &mut events, asked);
+        host.answer(run, &ToolCallId("c1".into()), Decision::Deny);
+        until(&mut host, &mut events, |e| e.last().is_some_and(AgentEvent::is_terminal));
+        assert!(reply(&events).starts_with("true:The user did not allow this"), "{}", reply(&events));
+
+        let (mut host, run) = ask(&tools);
+        let mut events = Vec::new();
+        until(&mut host, &mut events, asked);
+        host.cancel(run);
+        until(&mut host, &mut events, |e| e.last().is_some_and(AgentEvent::is_terminal));
+        assert!(matches!(events.last(), Some(AgentEvent::Cancelled { .. })));
+        assert!(!host.answer(run, &ToolCallId("c1".into()), Decision::Once), "nothing waits any more");
     }
 }

@@ -43,7 +43,7 @@ impl Outcome {
     }
 }
 
-pub fn view(call: &ToolCall, result: Option<&ToolResult>, open: bool, k: &Kit) -> El {
+pub fn view(call: &ToolCall, result: Option<&ToolResult>, live: Option<&str>, open: bool, k: &Kit) -> El {
     let outcome = Outcome::of(result);
     let border = if outcome == Outcome::Failed { k.c.danger.icon } else { k.c.border_weak };
     let mut card =
@@ -52,10 +52,26 @@ pub fn view(call: &ToolCall, result: Option<&ToolResult>, open: bool, k: &Kit) -
         let first = r.output.lines().next().unwrap_or_default().to_owned();
         card = card.child(text(first).font(k.ty.small).color(k.c.danger.icon).truncate().px(12.0).pb(10.0));
     }
+    // A running command shows where it is: its last lines, open or not.
+    if let Some(live) = live.filter(|l| result.is_none() && !l.trim().is_empty()) {
+        let tail = text(last_lines(live, LIVE_LINES).to_owned()).font(k.ty.mono).color(k.c.text_muted).wrap_anywhere();
+        let pane = col().w_full().px(10.0).py(8.0).radius(k.radius.sm).fill(k.c.layer_02).child(tail);
+        card = card.child(col().key(keys::tool_live(&call.id)).w_full().px(12.0).pb(12.0).child(pane));
+    }
     if open {
         card = card.child(body(call, result, k));
     }
     card
+}
+
+/// Lines of live output a running call shows.
+const LIVE_LINES: usize = 8;
+
+/// The last `n` lines of `text`, found from its end: the cost is the tail, not the whole text.
+fn last_lines(text: &str, n: usize) -> &str {
+    let text = text.trim_end_matches(['\n', '\r']);
+    let start = text.rmatch_indices('\n').nth(n.saturating_sub(1)).map_or(0, |(i, _)| i + 1);
+    &text[start..]
 }
 
 fn header(call: &ToolCall, outcome: Outcome, open: bool, k: &Kit) -> El {
@@ -154,6 +170,13 @@ fn summary(arguments: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_output_shows_its_last_lines() {
+        assert_eq!(last_lines("a\nb\nc\nd\n", 2), "c\nd");
+        assert_eq!(last_lines("only", 8), "only");
+        assert_eq!(last_lines("a\r\nb\r\n", 1), "b");
+    }
 
     #[test]
     fn the_summary_picks_the_telling_argument() {

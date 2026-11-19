@@ -104,6 +104,19 @@ pub enum AgentEvent {
         run: RunId,
         result: ToolResult,
     },
+    /// More output from a running call (a command's), before its result.
+    ToolOutputDelta {
+        run: RunId,
+        call: ToolCallId,
+        text: String,
+    },
+    /// A call waits for the user to allow it: `what` is what they decide on (a command line).
+    ApprovalRequested {
+        run: RunId,
+        call: ToolCallId,
+        tool: String,
+        what: String,
+    },
     /// A tool proposed a change to a file (not written: the user reviews it).
     ChangeProposed {
         run: RunId,
@@ -136,6 +149,8 @@ impl AgentEvent {
             | AgentEvent::ToolCallFinished { run, .. }
             | AgentEvent::Usage { run, .. }
             | AgentEvent::ChangeProposed { run, .. }
+            | AgentEvent::ToolOutputDelta { run, .. }
+            | AgentEvent::ApprovalRequested { run, .. }
             | AgentEvent::Completed { run }
             | AgentEvent::Failed { run, .. }
             | AgentEvent::Cancelled { run } => *run,

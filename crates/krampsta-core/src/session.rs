@@ -99,8 +99,14 @@ impl Session {
             AgentEvent::ReasoningDelta { text, .. } => self.assistant_message(run).reasoning.push_str(text),
             AgentEvent::ToolCallStarted { call, .. } => self.assistant_message(run).tool_calls.push(call.clone()),
             AgentEvent::ToolCallFinished { result, .. } => {
-                self.assistant_message(run).tool_results.push(result.clone())
+                let message = self.assistant_message(run);
+                // The result replaces what the call showed while running.
+                message.live_output.retain(|(id, _)| *id != result.call_id);
+                message.tool_results.push(result.clone());
             }
+            AgentEvent::ToolOutputDelta { call, text, .. } => self.assistant_message(run).push_live_output(call, text),
+            // The app asks the user; the conversation shows the call as running meanwhile.
+            AgentEvent::ApprovalRequested { .. } => return false,
             AgentEvent::Usage { usage, .. } => self.usage += *usage,
             // Changes belong to the project, not the conversation: the app keeps them.
             AgentEvent::ChangeProposed { .. } => return false,
@@ -263,6 +269,32 @@ mod tests {
         s.submit("two", RunId(2)).unwrap();
         s.apply(&AgentEvent::Usage { run: RunId(2), usage: Usage { input: 170, output: 30 } });
         assert_eq!(s.usage, Usage { input: 400, output: 55 });
+    }
+
+    #[test]
+    fn live_output_grows_keeps_its_tail_and_gives_way_to_the_result() {
+        let mut s = session();
+        let run = RunId(1);
+        s.submit("build", run).unwrap();
+        let call = ToolCall { id: ToolCallId("c".into()), name: "run_command".into(), arguments: "{}".into() };
+        s.apply(&AgentEvent::ToolCallStarted { run, call: call.clone() });
+        s.apply(&AgentEvent::ToolOutputDelta { run, call: call.id.clone(), text: "Compiling a\n".into() });
+        s.apply(&AgentEvent::ToolOutputDelta { run, call: call.id.clone(), text: "Compiling b\n".into() });
+        assert_eq!(s.messages[1].live_output_for(&call), Some("Compiling a\nCompiling b\n"));
+
+        let long = "line\n".repeat(crate::message::LIVE_OUTPUT_MAX / 4);
+        s.apply(&AgentEvent::ToolOutputDelta { run, call: call.id.clone(), text: long });
+        let kept = s.messages[1].live_output_for(&call).unwrap();
+        assert!(
+            kept.len() <= crate::message::LIVE_OUTPUT_MAX && kept.starts_with("line\n"),
+            "the tail, from a line start"
+        );
+
+        s.apply(&AgentEvent::ToolCallFinished {
+            run,
+            result: ToolResult { call_id: call.id.clone(), output: "done".into(), is_error: false },
+        });
+        assert_eq!(s.messages[1].live_output_for(&call), None);
     }
 
     #[test]

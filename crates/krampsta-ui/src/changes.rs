@@ -192,7 +192,7 @@ mod tests {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    use krampsta_agent::{CancellationToken, MockCatalog, ToolOutput, ToolSpec, Toolbox};
+    use krampsta_agent::{MockCatalog, ToolOutput, ToolSpec, Toolbox};
 
     use super::*;
 
@@ -207,7 +207,7 @@ mod tests {
         fn specs(&self) -> Arc<[ToolSpec]> {
             Arc::from([])
         }
-        fn run(&self, _: &str, _: &str, _: &CancellationToken) -> Result<ToolOutput, String> {
+        fn run(&self, _: &str, _: &str, _: &krampsta_agent::Call<'_>) -> Result<ToolOutput, String> {
             Err("no tools".into())
         }
         fn write(&self, path: &str, expected: Option<&str>, content: &str) -> Result<(), String> {
