@@ -53,6 +53,27 @@ pub struct ToolResult {
     pub is_error: bool,
 }
 
+/// Tokens a provider counted: what it read (the prompt, history included) and what it wrote
+/// (reply and reasoning).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Usage {
+    pub input: u64,
+    pub output: u64,
+}
+
+impl Usage {
+    pub fn is_empty(self) -> bool {
+        self.input == 0 && self.output == 0
+    }
+}
+
+impl std::ops::AddAssign for Usage {
+    fn add_assign(&mut self, other: Usage) {
+        self.input = self.input.saturating_add(other.input);
+        self.output = self.output.saturating_add(other.output);
+    }
+}
+
 /// One step of a run, in the order the engine produced it.
 ///
 /// A run always starts with [`AgentEvent::Started`] and ends with exactly one of
@@ -83,6 +104,11 @@ pub enum AgentEvent {
         run: RunId,
         result: ToolResult,
     },
+    /// Tokens one request to the provider used. A run that makes several requests reports each.
+    Usage {
+        run: RunId,
+        usage: Usage,
+    },
     Completed {
         run: RunId,
     },
@@ -103,6 +129,7 @@ impl AgentEvent {
             | AgentEvent::ReasoningDelta { run, .. }
             | AgentEvent::ToolCallStarted { run, .. }
             | AgentEvent::ToolCallFinished { run, .. }
+            | AgentEvent::Usage { run, .. }
             | AgentEvent::Completed { run }
             | AgentEvent::Failed { run, .. }
             | AgentEvent::Cancelled { run } => *run,

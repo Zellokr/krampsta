@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use krampsta_core::{ToolCall, ToolCallId, ToolResult};
+use krampsta_core::{ToolCall, ToolCallId, ToolResult, Usage};
 
 use crate::engine::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
 
@@ -88,13 +88,17 @@ impl AgentEngine for MockAgent {
                 is_error: false,
             });
 
-            for chunk in chunks(&reply_for(&prompt, request.history.len())) {
+            let reply = reply_for(&prompt, request.history.len());
+            for chunk in chunks(&reply) {
                 ctx.check_cancelled()?;
                 ctx.text(chunk);
                 if !cfg.chunk.is_zero() {
                     ctx.sleep(cfg.chunk).await?;
                 }
             }
+            // Counted as a provider would, roughly: four characters a token.
+            let read: usize = request.history.iter().map(|m| m.content.len()).sum();
+            ctx.usage(Usage { input: tokens(read), output: tokens(REASONING.len() + reply.len()) });
             Ok(())
         })
     }
@@ -114,6 +118,11 @@ fn reply_for(prompt: &str, turns: usize) -> String {
          ```rust\nfn main() {{\n    println!(\"Hello from Krampsta\");\n}}\n```\n\n\
          Send a message starting with `/fail` to see how a failed run looks."
     )
+}
+
+/// A rough token count for `bytes` of text.
+fn tokens(bytes: usize) -> u64 {
+    u64::try_from(bytes.div_ceil(4)).unwrap_or(u64::MAX)
 }
 
 /// Splits text into word-sized pieces (keeping whitespace), as a provider's stream would.
@@ -181,6 +190,9 @@ mod tests {
             .filter_map(|e| if let AgentEvent::TextDelta { text, .. } = e { Some(text.as_str()) } else { None })
             .collect();
         assert!(text.contains("add a test"), "the reply quotes the prompt: {text}");
+        assert!(
+            events.iter().any(|e| matches!(e, AgentEvent::Usage { usage, .. } if usage.input == 3 && usage.output > 0))
+        );
         assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })));
     }
 

@@ -14,6 +14,7 @@ pub use event::AgentStatus;
 pub use event::RunEvent;
 pub use event::ToolCall;
 pub use event::ToolResult;
+pub use event::Usage;
 pub use ids::IdGen;
 pub use ids::MessageId;
 pub use ids::RunId;

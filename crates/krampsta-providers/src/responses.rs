@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
-use krampsta_core::{Message, MessageRole};
+use krampsta_core::{Message, MessageRole, Usage};
 use serde_json::{Value, json};
 
 use crate::access::Access;
@@ -177,9 +177,13 @@ fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
             }
             Ok(Flow::Continue)
         }
-        "response.completed" => Ok(Flow::Done),
+        "response.completed" => {
+            ctx.usage(usage(&v["response"]));
+            Ok(Flow::Done)
+        }
         "response.failed" | "response.incomplete" => {
             let response = &v["response"];
+            ctx.usage(usage(response));
             let why = response["error"]["message"]
                 .as_str()
                 .or_else(|| response["incomplete_details"]["reason"].as_str())
@@ -192,6 +196,12 @@ fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
         }
         _ => Ok(Flow::Continue),
     }
+}
+
+/// The tokens a finished response counted (`usage.input_tokens`, `usage.output_tokens`).
+fn usage(response: &Value) -> Usage {
+    let count = |field: &str| response["usage"][field].as_u64().unwrap_or(0);
+    Usage { input: count("input_tokens"), output: count("output_tokens") }
 }
 
 fn tracing() -> bool {

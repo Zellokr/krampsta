@@ -14,6 +14,8 @@ pub const COMPOSER_HINT: &str = "krampsta-composer-hint";
 pub const SEND: &str = "krampsta-send";
 pub const STOP: &str = "krampsta-stop";
 pub const STATUS: &str = "krampsta-agent-status";
+/// The session's token count in the toolbar.
+pub const USAGE: &str = "krampsta-usage";
 pub const RUN_ERROR: &str = "krampsta-run-error";
 /// The shimmering "working" lines: before the reply starts, and while it has no text yet.
 pub const STARTING: &str = "krampsta-starting";

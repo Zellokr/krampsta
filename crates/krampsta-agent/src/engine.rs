@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
-use krampsta_core::{AgentEvent, Message, RunEvent, RunId, SessionId, ToolCall, ToolResult};
+use krampsta_core::{AgentEvent, Message, RunEvent, RunId, SessionId, ToolCall, ToolResult, Usage};
 use tokio_util::sync::CancellationToken;
 
 use crate::host::Notifier;
@@ -149,6 +149,13 @@ impl RunContext {
     /// More of the model's reasoning, shown folded apart from the reply.
     pub fn reasoning(&self, text: impl Into<String>) {
         self.emit(AgentEvent::ReasoningDelta { run: self.run, text: text.into() });
+    }
+
+    /// The tokens a request used, once the provider reports them. Empty counts are dropped.
+    pub fn usage(&self, usage: Usage) {
+        if !usage.is_empty() {
+            self.emit(AgentEvent::Usage { run: self.run, usage });
+        }
     }
 
     pub fn tool_started(&self, call: ToolCall) {

@@ -1,7 +1,7 @@
 //! Rune wiring: the app spec, the root view, `poll`, keyboard shortcuts and headless scenes.
 
 use krampsta_agent::{Account, DeviceCode, Effort, EffortLevel, MockCatalog, Provider, ProviderKind, Selection};
-use krampsta_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult};
+use krampsta_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult, Usage};
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, PointerPress, TextEdit, Tx, Waker, row, text};
 use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit};
@@ -107,6 +107,7 @@ fn workspace(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec
     let session = s.current();
     let title = session.map_or(TITLE, |x| x.title.as_str());
     let status = session.map(|x| x.status.clone()).unwrap_or_default();
+    let usage = session.and_then(|x| status::usage(x.usage, k));
     let open = s.changes.is_open();
     let toggle = IconButton::new(&shell::INSPECTOR)
         .variant(IconButtonVariant::GhostMuted)
@@ -120,7 +121,7 @@ fn workspace(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec
     let heading = text(title.to_owned()).font(k.ty.ui_medium).color(k.c.text_base).truncate().shrink().min_w(0.0);
     let toolbar = Toolbar::new()
         .leading(row().grow(1.0).min_w(0.0).child(heading))
-        .trailing(row().gap(8.0).items_center().child(status::pill(&status, k)).child(toggle));
+        .trailing(row().gap(8.0).items_center().children(usage).child(status::pill(&status, k)).child(toggle));
     SplitView::new(chat::view(s, k, layer))
         .sidebar(&s.sidebar, |s: &mut KrampstaApp| &mut s.sidebar, sidebar::view(s, k, layer))
         .inspector(&s.changes, |s: &mut KrampstaApp| &mut s.changes, changes::view(s, k))
@@ -350,7 +351,12 @@ fn scene_completed(s: &mut KrampstaApp) {
                  and hands it to the UI:\n\n```rust\nlet engine = Arc::new(MockAgent::new(MockConfig::default()));\n\
                  rune::App::new(krampsta_ui::spec()).init(|| KrampstaApp::new(engine)).run();\n```\n\n\
                  Swap the engine there to use a real provider.";
-    apply(s, &[started, finished, AgentEvent::TextDelta { run, text: reply.into() }, AgentEvent::Completed { run }]);
+    // Counted as a provider reports it, so the toolbar shows the session's tokens.
+    let usage = AgentEvent::Usage { run, usage: Usage { input: 12_480, output: 342 } };
+    apply(
+        s,
+        &[started, finished, AgentEvent::TextDelta { run, text: reply.into() }, usage, AgentEvent::Completed { run }],
+    );
 }
 
 fn scene_failed(s: &mut KrampstaApp) {

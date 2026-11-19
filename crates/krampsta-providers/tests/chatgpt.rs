@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use krampsta_agent::{Account, AgentHost, DeviceCode, Effort, EngineCatalog, RunRequest};
-use krampsta_core::{AgentEvent, Message, MessageId, SessionId};
+use krampsta_core::{AgentEvent, Message, MessageId, SessionId, Usage};
 use krampsta_providers::chatgpt::OpenAiAccount;
 use krampsta_providers::secrets::{MemoryStore, SecretStore};
 use krampsta_providers::{Catalog, Hosts};
@@ -117,7 +117,7 @@ fn route(line: &str, body: &str, polls: &AtomicUsize) -> (&'static str, &'static
                 "event: response.reasoning_summary_text.delta\ndata: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs1\",\"output_index\":0,\"summary_index\":1,\"delta\":\"Keep it short.\"}\n\n",
                 "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Hello from \"}\n\n",
                 "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ChatGPT\"}\n\n",
-                "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\"}}\n\n",
+                "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"usage\":{\"input_tokens\":42,\"input_tokens_details\":{\"cached_tokens\":0},\"output_tokens\":18,\"output_tokens_details\":{\"reasoning_tokens\":10},\"total_tokens\":60}}}\n\n",
             )
             .into(),
         ),
@@ -157,6 +157,11 @@ fn reply_text(c: &Catalog, effort: Option<Effort>) -> String {
         .filter_map(|e| if let AgentEvent::ReasoningDelta { text, .. } = e { Some(text.as_str()) } else { None })
         .collect();
     assert_eq!(thought, "Greeting the user.\n\nKeep it short.", "one paragraph per summary part");
+    let usage: Vec<Usage> = events
+        .iter()
+        .filter_map(|e| if let AgentEvent::Usage { usage, .. } = e { Some(*usage) } else { None })
+        .collect();
+    assert_eq!(usage, [Usage { input: 42, output: 18 }], "counted from `response.completed`");
     events
         .iter()
         .filter_map(|e| if let AgentEvent::TextDelta { text, .. } = e { Some(text.as_str()) } else { None })

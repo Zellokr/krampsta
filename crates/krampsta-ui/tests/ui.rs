@@ -144,11 +144,14 @@ fn typing_and_pressing_enter_runs_the_agent_and_shows_the_reply() {
     assert!(has(&rt, &keys::message(user.id)), "the user's message is in the transcript");
     assert_eq!(status_label(&rt), "Agent running");
     assert!(has(&rt, keys::STOP), "send turns into stop while running");
+    assert!(!has(&rt, keys::USAGE), "no token count before the provider reports one");
 
     pump_until_finished(&mut rt);
     let session = rt.state.current().cloned().expect("a session");
     assert_eq!(session.status, AgentStatus::Completed);
     assert_eq!(status_label(&rt), "Agent completed");
+    let usage = element(&rt, keys::USAGE).and_then(|e| e.label).expect("the token count shows once reported");
+    assert_eq!(usage, format!("Tokens used: {} input, {} output", session.usage.input, session.usage.output));
     let reply = session.messages.last().expect("a reply");
     assert!(has(&rt, &keys::message(reply.id)), "the reply is in the transcript");
     assert!(has(&rt, keys::SEND), "stop turns back into send");

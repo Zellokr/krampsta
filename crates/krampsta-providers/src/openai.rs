@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest};
-use krampsta_core::{Message, MessageRole};
+use krampsta_core::{Message, MessageRole, Usage};
 use serde::{Deserialize, Serialize};
 
 use crate::access::{Access, StaticAccess};
@@ -114,7 +114,12 @@ impl AgentEngine for OpenAiEngine {
                 () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
                 endpoint = self.access.endpoint() => endpoint?,
             };
-            let body = ChatRequest { model: &self.model, stream: true, messages: wire_messages(&request.history) };
+            let body = ChatRequest {
+                model: &self.model,
+                stream: true,
+                stream_options: StreamOptions { include_usage: true },
+                messages: wire_messages(&request.history),
+            };
             let body = serde_json::to_vec(&body)
                 .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
             let req = self
@@ -123,13 +128,33 @@ impl AgentEngine for OpenAiEngine {
                 .headers(endpoint.headers)
                 .header("content-type", "application/json")
                 .body(body);
-            http::stream_sse(req, &ctx, |event| on_event(&event, &ctx)).await
+            let mut counted = Counted::default();
+            let result = http::stream_sse(req, &ctx, |event| on_event(&event, &ctx, &mut counted)).await;
+            // Tokens a run read are spent even when it fails or is stopped after the count arrived.
+            ctx.usage(counted.usage());
+            result
         })
     }
 }
 
-/// Handles one stream event: text goes to the UI, `[DONE]` ends the run, an error fails it.
-fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
+/// The token counts a stream carried. Servers count in one of two ways: a `usage` object in a
+/// last chunk of its own (OpenAI, asked with `stream_options`; vLLM, Ollama, newer llama.cpp),
+/// or llama.cpp's `timings` on the chunk that finishes. `usage` wins when both come.
+#[derive(Default)]
+struct Counted {
+    usage: Option<Usage>,
+    timings: Option<Usage>,
+}
+
+impl Counted {
+    fn usage(&self) -> Usage {
+        self.usage.or(self.timings).unwrap_or_default()
+    }
+}
+
+/// Handles one stream event: text goes to the UI, counts are kept, `[DONE]` ends the run, an
+/// error fails it.
+fn on_event(event: &SseEvent, ctx: &RunContext, counted: &mut Counted) -> Result<Flow, AgentError> {
     let data = event.data.trim();
     if data == "[DONE]" {
         return Ok(Flow::Done);
@@ -138,6 +163,13 @@ fn on_event(event: &SseEvent, ctx: &RunContext) -> Result<Flow, AgentError> {
         .map_err(|e| AgentError::Provider(format!("the provider sent an event Krampsta could not read ({e})")))?;
     if let Some(error) = chunk.error {
         return Err(AgentError::Provider(error.message.unwrap_or_else(|| "the provider reported an error".into())));
+    }
+    if let Some(u) = chunk.usage {
+        counted.usage = Some(Usage { input: u.prompt_tokens, output: u.completion_tokens });
+    }
+    if let Some(t) = chunk.timings {
+        // `prompt_n` counts only the prompt tokens it had to evaluate; `cache_n` the ones it reused.
+        counted.timings = Some(Usage { input: t.prompt_n.saturating_add(t.cache_n), output: t.predicted_n });
     }
     for choice in chunk.choices {
         let Delta { content, reasoning_content, reasoning } = choice.delta;
@@ -172,7 +204,14 @@ fn wire_messages(history: &[Message]) -> Vec<WireMessage<'_>> {
 struct ChatRequest<'a> {
     model: &'a str,
     stream: bool,
+    stream_options: StreamOptions,
     messages: Vec<WireMessage<'a>>,
+}
+
+/// Asks for the token counts at the end of the stream (OpenAI sends none unless asked).
+#[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Serialize, Debug, PartialEq, Eq)]
@@ -186,6 +225,27 @@ struct Chunk {
     #[serde(default)]
     choices: Vec<Choice>,
     error: Option<StreamError>,
+    usage: Option<WireUsage>,
+    timings: Option<Timings>,
+}
+
+#[derive(Deserialize)]
+struct WireUsage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+}
+
+/// llama.cpp's per-reply statistics.
+#[derive(Deserialize)]
+struct Timings {
+    #[serde(default)]
+    prompt_n: u64,
+    #[serde(default)]
+    cache_n: u64,
+    #[serde(default)]
+    predicted_n: u64,
 }
 
 #[derive(Deserialize)]

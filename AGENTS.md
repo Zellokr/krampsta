@@ -56,7 +56,8 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
 ## Motor de agente
 
 - Un motor nuevo implementa `AgentEngine::run(self: Arc<Self>, RunRequest, RunContext)`:
-  emite `ctx.text(..)`, `ctx.tool_started(..)`, `ctx.tool_finished(..)`; espera con
+  emite `ctx.text(..)`, `ctx.tool_started(..)`, `ctx.tool_finished(..)` y, una vez por petición
+  al proveedor, `ctx.usage(..)` con los tokens que contó (también si falla tras contarlos); espera con
   `ctx.sleep(..)` o futuros cancelables; comprueba `ctx.check_cancelled()` entre pasos.
 - **No** emitas `Started` ni eventos terminales: los pone el host. Devuelve `Ok(())`,
   `Err(AgentError::..)` o `Err(AgentError::Cancelled)`.

@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use krampsta_agent::{AgentHost, RunRequest};
-use krampsta_core::{AgentEvent, Message, MessageId, SessionId};
+use krampsta_core::{AgentEvent, Message, MessageId, SessionId, Usage};
 use krampsta_providers::{OpenAiConfig, OpenAiEngine, list_models};
 
 /// A real reply from the Chat Completions API (trimmed ids), as the wire carries it.
@@ -173,7 +173,40 @@ fn a_recorded_llama_cpp_stream_streams_its_reasoning_apart_from_the_reply() {
          I should respond with just one brief greeting sentence."
     );
     assert_eq!(text(&events), "Hello there!");
+    // From its `timings`: 17 prompt tokens evaluated + 42 reused from the cache, 36 predicted.
+    assert_eq!(usage(&events), [Usage { input: 59, output: 36 }]);
     assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })));
+}
+
+fn usage(events: &[AgentEvent]) -> Vec<Usage> {
+    events.iter().filter_map(|e| if let AgentEvent::Usage { usage, .. } = e { Some(*usage) } else { None }).collect()
+}
+
+#[test]
+fn a_usage_chunk_counts_the_tokens_once_even_beside_llama_cpp_timings() {
+    // OpenAI's shape with `include_usage`: a last chunk with no choices and the counts (not
+    // recorded: no API key to hand). llama.cpp sends both it and `timings`; `usage` wins.
+    let stream = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"timings\":{\"prompt_n\":5,\"cache_n\":0,\"predicted_n\":2}}\n\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":2,\"total_tokens\":14}}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let server = serve(Reply::sse(stream, 17));
+    let mut host = host_for(&server, None);
+    start(&mut host, "hi");
+    let events = events_until(&mut host, finished);
+    assert_eq!(text(&events), "Hi");
+    assert_eq!(usage(&events), [Usage { input: 12, output: 2 }]);
+    // A stream with no counts reports none.
+    assert!(usage(&events_for(RECORDED)).is_empty());
+}
+
+fn events_for(stream: &str) -> Vec<AgentEvent> {
+    let server = serve(Reply::sse(stream, 64));
+    let mut host = host_for(&server, None);
+    start(&mut host, "hi");
+    events_until(&mut host, finished)
 }
 
 #[test]
@@ -217,6 +250,7 @@ fn a_recorded_stream_becomes_streamed_text_and_completes() {
     let body: serde_json::Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(body["model"], "test-model");
     assert_eq!(body["stream"], true);
+    assert_eq!(body["stream_options"], serde_json::json!({ "include_usage": true }));
     assert_eq!(body["messages"], serde_json::json!([{ "role": "user", "content": "say hello" }]));
 }
 

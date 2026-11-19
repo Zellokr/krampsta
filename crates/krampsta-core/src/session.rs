@@ -1,6 +1,6 @@
 //! A conversation with the agent and the state machine that folds run events into it.
 
-use crate::{AgentEvent, AgentStatus, Message, MessageId, MessageRole, RunId, SessionId};
+use crate::{AgentEvent, AgentStatus, Message, MessageId, MessageRole, RunId, SessionId, Usage};
 
 /// The title a session has until its first message names it.
 pub const UNTITLED: &str = "New session";
@@ -21,6 +21,8 @@ pub struct Session {
     pub title: String,
     pub messages: Vec<Message>,
     pub status: AgentStatus,
+    /// Tokens every run in this session has used so far, as the providers counted them.
+    pub usage: Usage,
     /// The run whose events this session accepts. Events from any other run are stale
     /// (a cancelled run that kept talking, say) and change nothing.
     active_run: Option<RunId>,
@@ -38,6 +40,7 @@ impl Session {
             title: title.into(),
             messages: Vec::new(),
             status: AgentStatus::Idle,
+            usage: Usage::default(),
             active_run: None,
             next_message: 1,
         }
@@ -98,6 +101,7 @@ impl Session {
             AgentEvent::ToolCallFinished { result, .. } => {
                 self.assistant_message(run).tool_results.push(result.clone())
             }
+            AgentEvent::Usage { usage, .. } => self.usage += *usage,
             AgentEvent::Completed { .. } => self.finish(AgentStatus::Completed),
             AgentEvent::Failed { error, .. } => self.finish(AgentStatus::Failed { error: error.clone() }),
             AgentEvent::Cancelled { .. } => self.finish(AgentStatus::Cancelled),
@@ -244,6 +248,19 @@ mod tests {
         assert_eq!(s.messages.len(), 1, "no empty assistant bubble");
         // A new message can be sent after a failure.
         assert!(s.submit("again", RunId(3)).is_ok());
+    }
+
+    #[test]
+    fn usage_adds_up_across_requests_and_runs_but_not_from_stale_ones() {
+        let mut s = session();
+        s.submit("one", RunId(1)).unwrap();
+        s.apply(&AgentEvent::Usage { run: RunId(1), usage: Usage { input: 100, output: 20 } });
+        s.apply(&AgentEvent::Usage { run: RunId(1), usage: Usage { input: 130, output: 5 } });
+        s.apply(&AgentEvent::Cancelled { run: RunId(1) });
+        assert!(!s.apply(&AgentEvent::Usage { run: RunId(1), usage: Usage { input: 9, output: 9 } }));
+        s.submit("two", RunId(2)).unwrap();
+        s.apply(&AgentEvent::Usage { run: RunId(2), usage: Usage { input: 170, output: 30 } });
+        assert_eq!(s.usage, Usage { input: 400, output: 55 });
     }
 
     #[test]
