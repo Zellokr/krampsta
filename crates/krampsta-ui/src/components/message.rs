@@ -50,9 +50,9 @@ fn assistant(s: &KrampstaApp, m: &Message, streaming: bool, k: &Kit) -> El {
         out = out.child(col().w_full().gap(8.0).children(cards));
     }
     if m.content.is_empty() {
-        // The reasoning header shimmers "Thinking" itself while there is reasoning.
+        // With reasoning streaming, its "Thinking" header shows the model is at work instead.
         if streaming && m.reasoning.is_empty() {
-            out = out.child(thinking(k));
+            out = out.child(working(k));
         }
     } else {
         out = out.child(Markdown::new(m.content.clone()).streaming(streaming).selectable(true).build(k));
@@ -60,10 +60,11 @@ fn assistant(s: &KrampstaApp, m: &Message, streaming: bool, k: &Kit) -> El {
     out
 }
 
-fn thinking(k: &Kit) -> El {
+/// Waiting for the reply's first words. Not reasoning: that one is the "Thinking" block.
+fn working(k: &Kit) -> El {
     row()
         .gap(8.0)
         .items_center()
         .child(Spinner::new().size(12.0).color(theme::accent(k.dark)).build(k))
-        .child(shimmer::view(keys::THINKING, "Thinking…", k.ty.ui, k.c.text_faint, k.c.text_base))
+        .child(shimmer::view(keys::WORKING, "Working…", k.ty.ui, k.c.text_faint, k.c.text_base))
 }
