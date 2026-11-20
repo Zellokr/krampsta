@@ -161,7 +161,12 @@ fn chat_completions_runs_the_calls_and_sends_their_results_back() {
         json!({"type": "function", "function": {"name": "echo", "description": "Echo", "parameters": {"type": "object"}}})
     );
     assert_eq!(first["messages"][0]["role"], "system", "with tools, the instructions lead");
-    assert!(first["messages"][0]["content"].as_str().unwrap().contains("read_file"));
+    let instructions = first["messages"][0]["content"].as_str().unwrap();
+    assert!(instructions.contains("read_file"));
+    assert!(
+        instructions.contains("Change files only with edit_file"),
+        "the model is told not to edit through commands"
+    );
     let mut second = bodies.recv_timeout(Duration::from_secs(5)).unwrap();
     second["messages"].as_array_mut().unwrap().remove(0);
     assert_eq!(

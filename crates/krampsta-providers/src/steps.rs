@@ -8,7 +8,10 @@ use krampsta_core::{ToolCall, ToolCallId, ToolResult};
 /// Added to Krampsta's instructions when the run has tools.
 pub const TOOLS_HINT: &str = "You work in the user's project folder. Before answering about their code, look \
 at it with the tools: list_files to see the layout, search to find where something is, read_file to read it. \
-Paths are relative to the project root. Prefer a few targeted searches over reading whole trees.";
+Paths are relative to the project root. Prefer a few targeted searches over reading whole trees. \
+Change files only with edit_file, never through run_command (no scripts, sed, Set-Content or `>` \
+redirections that write files): edit_file shows the user each change to review, a command doesn't. \
+Use run_command to build, test and inspect.";
 
 /// Requests one run may make before Krampsta stops it: a model calling tools in circles would
 /// otherwise spend tokens forever.

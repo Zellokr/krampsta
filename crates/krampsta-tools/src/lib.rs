@@ -165,7 +165,9 @@ fn specs() -> Arc<[ToolSpec]> {
              sees its output as it runs and must allow it unless one of their rules does. You get \
              stdout and stderr together (the first 8 KB and the last 24 KB) and the exit code. It \
              is stopped at its timeout, with everything it started, so never start servers or \
-             watchers that don't exit. Prefer read_file, list_files and search for looking at files.",
+             watchers that don't exit. Prefer read_file, list_files and search for looking at files, \
+             and never change files with a command (scripts, sed, Set-Content, `>`): use edit_file, \
+             which shows the user each change to review.",
             shell = command::SHELL
         ),
         json!({
@@ -284,6 +286,10 @@ mod tests {
         let specs = tools.specs();
         let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["list_files", "read_file", "edit_file", "search", "run_command"]);
+        // Changes go through edit_file, which the user reviews, never through a command.
+        let run_command = &specs[4].description;
+        assert!(run_command.contains("never change files with a command") && run_command.contains("use edit_file"));
+        assert!(!run_command.contains('\n'), "one paragraph, no stray line breaks");
         assert_eq!(run(&tools, "list_files", "", &cancel).unwrap().text, "hello.txt\n");
         assert_eq!(run(&tools, "read_file", r#"{"path":"hello.txt"}"#, &cancel).unwrap().text, "     1\thi\n");
         assert!(run(&tools, "read_file", "{}", &cancel).unwrap_err().contains("missing field `path`"));
