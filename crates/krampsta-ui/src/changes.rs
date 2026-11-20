@@ -24,6 +24,7 @@ pub struct Changes {
     writing: HashSet<String>,
     /// Why the last write failed, until the next one.
     pub error: Option<String>,
+    validate_after_writes: Option<crate::approvals::Asking>,
 }
 
 impl Changes {
@@ -65,19 +66,74 @@ fn diff_of(change: &FileChange) -> FileDiff {
 impl KrampstaApp {
     /// Shows a change a tool proposed, replacing the one before it for the same file.
     pub fn propose(&mut self, change: FileChange) {
+        if self.stage_proposal(change) {
+            self.refresh_diff();
+        }
+    }
+
+    /// Update the review immediately; the caller refreshes the panel after the batch.
+    pub(crate) fn stage_proposal(&mut self, change: FileChange) -> bool {
         match self.review.proposals.iter().position(|c| c.path == change.path) {
             Some(i) => self.replace_change(i, change),
-            None if change.is_noop() => {}
+            None if change.is_noop() => return false,
             None => {
                 self.review.files.push(diff_of(&change));
                 self.review.proposals.push(change);
-                self.refresh_diff();
+            }
+        }
+        true
+    }
+
+    pub(crate) fn can_apply_and_validate(&self) -> bool {
+        !self.review.proposals.is_empty() && self.review.writing.is_empty() && !self.validating_changes()
+    }
+
+    pub(crate) fn validating_changes(&self) -> bool {
+        self.review.validate_after_writes.is_some()
+    }
+
+    /// Freeze a headless scene mid-write without touching the workspace.
+    pub(crate) fn stage_applying_scene(&mut self) {
+        if let (Some(asking), Some(change)) = (self.approvals.front(), self.review.proposals.first()) {
+            self.review.validate_after_writes = Some(asking.clone());
+            self.review.writing.insert(change.path.clone());
+        }
+    }
+
+    pub(crate) fn apply_and_validate(&mut self) {
+        let Some(asking) = self.approvals.front().filter(|a| a.tool == "run_command").cloned() else { return };
+        if !self.can_apply_and_validate() {
+            return;
+        }
+        self.review.validate_after_writes = Some(asking);
+        for change in self.review.proposals.clone() {
+            self.write(&change.path, change.before, change.after);
+            if self.review.error.is_some() {
+                break;
             }
         }
     }
 
+    pub(crate) fn finish_apply_and_validate(&mut self) -> bool {
+        if !self.review.writing.is_empty() {
+            return false;
+        }
+        let Some(asking) = self.review.validate_after_writes.take() else { return false };
+        if self.approvals.front() == Some(&asking) {
+            if self.review.error.is_none() && self.review.proposals.is_empty() {
+                self.answer(krampsta_agent::Decision::Once);
+            } else {
+                self.review.error.get_or_insert_with(|| "Changes are still pending.".into());
+            }
+        }
+        true
+    }
+
     /// Writes the whole proposal for `file`.
     pub fn accept_file(&mut self, file: usize) {
+        if self.validating_changes() {
+            return;
+        }
         if let Some(c) = self.review.proposals.get(file) {
             let (path, before, after) = (c.path.clone(), c.before.clone(), c.after.clone());
             self.write(&path, before, after);
@@ -113,6 +169,7 @@ impl KrampstaApp {
         let after: Arc<str> = splice_lines(&c.after, new, c.before_text(), old).into();
         let change = FileChange { after, ..c.clone() };
         self.replace_change(file, change);
+        self.refresh_diff();
     }
 
     fn block(&self, file: usize, hunk: usize) -> Option<&Hunk> {
@@ -131,9 +188,10 @@ impl KrampstaApp {
     }
 
     /// Applies finished writes: the disk now holds what was written, so the proposal is compared
-    /// with that (and goes once nothing is left to accept). True when anything visible changed.
-    pub(crate) fn land_writes(&mut self, writes: Vec<Written>) -> bool {
+    /// with that (and goes once nothing is left to accept). Returns (visible change, panel dirty).
+    pub(crate) fn land_writes(&mut self, writes: Vec<Written>) -> (bool, bool) {
         let changed = !writes.is_empty();
+        let mut panel_dirty = false;
         for Written { path, content, result } in writes {
             self.review.writing.remove(&path);
             match result {
@@ -142,11 +200,12 @@ impl KrampstaApp {
                     if let Some(i) = self.review.proposals.iter().position(|c| c.path == path) {
                         let change = FileChange { before: Some(content), ..self.review.proposals[i].clone() };
                         self.replace_change(i, change);
+                        panel_dirty = true;
                     }
                 }
             }
         }
-        changed
+        (changed, panel_dirty)
     }
 
     /// Puts `change` at `i`, or drops it when it no longer changes anything, and tells the tools
@@ -161,11 +220,10 @@ impl KrampstaApp {
             self.review.files[i] = diff_of(&change);
             self.review.proposals[i] = change;
         }
-        self.refresh_diff();
     }
 
     /// Hands the diffs to the panel, with each block's actions under its last changed line.
-    fn refresh_diff(&mut self) {
+    pub(crate) fn refresh_diff(&mut self) {
         let mut notes = Vec::new();
         // A file with one block is accepted from its header; only several blocks need their own.
         for (f, file) in self.review.files.iter().enumerate().filter(|(_, file)| file.hunks.len() > 1) {
@@ -326,6 +384,35 @@ mod tests {
         app.propose(change("a.txt", Some("a\n"), "c\n"));
         assert_eq!(app.review.proposals().len(), 1);
         assert_eq!(&*app.review.proposals()[0].after, "c\n");
+    }
+
+    #[test]
+    fn block_actions_follow_the_remaining_file_after_removal() {
+        let disk = Arc::new(Disk::default());
+        let mut app = app(&disk, &[("a.txt", BEFORE), ("b.txt", BEFORE)]);
+        for path in ["a.txt", "b.txt"] {
+            app.propose(change(path, Some(BEFORE), &two_blocks()));
+        }
+        app.reject_file(0);
+        assert_eq!(app.diff.files()[0].new_path.as_deref(), Some("b.txt"));
+        let actions: Vec<_> = app
+            .diff
+            .annotations()
+            .iter()
+            .map(|note| {
+                assert_eq!(note.file, 0);
+                parse_block_id(&note.id).unwrap()
+            })
+            .collect();
+        assert_eq!(actions, [(0, 0), (0, 1)]);
+
+        app.accept_block(actions[0].0, actions[0].1);
+        pump_until_written(&mut app);
+        app.reject_block(0, 0);
+        assert!(app.review.proposals().is_empty());
+        let files = disk.files.lock().unwrap();
+        assert_eq!(files["a.txt"], BEFORE);
+        assert_eq!(files["b.txt"], BEFORE.replacen("\n2\n", "\ntwo\n", 1));
     }
 
     #[test]

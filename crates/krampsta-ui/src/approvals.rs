@@ -26,6 +26,9 @@ impl KrampstaApp {
 
     /// Answers the call the dialog shows, and moves on to the next one waiting.
     pub fn answer(&mut self, decision: Decision) {
+        if self.validating_changes() && !matches!(decision, Decision::Deny) {
+            return;
+        }
         if let Some(a) = self.approvals.pop_front() {
             // False when the run already ended: nothing waits, nothing to do.
             self.agent.answer(a.run, &a.call, decision);
@@ -72,20 +75,55 @@ pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
                 .color(k.c.text_muted)
                 .wrap(),
         )
-        .child(command)
-        .child(
-            row()
-                .w_full()
-                .gap(8.0)
-                .justify_end()
-                .child(button("Deny", ButtonVariant::Neutral, Decision::Deny, keys::APPROVAL_DENY))
-                .child(button("Always allow", ButtonVariant::Outline, Decision::Always, keys::APPROVAL_ALWAYS))
-                .child(button("Allow once", ButtonVariant::Contrast, Decision::Once, keys::APPROVAL_ONCE)),
+        .child(command);
+    let body = if s.review.proposals().is_empty() {
+        body
+    } else {
+        body.child(
+            text("This command will read files from disk, not the unapplied changes in the Changes panel.")
+                .font(k.ty.small)
+                .color(k.c.text_muted)
+                .wrap(),
+        )
+    };
+    let applying = s.validating_changes();
+    let show_apply = !applying && a.tool == "run_command" && s.can_apply_and_validate();
+    let mut actions = row().w_full().gap(8.0).justify_end().child(button(
+        "Deny",
+        ButtonVariant::Neutral,
+        Decision::Deny,
+        keys::APPROVAL_DENY,
+    ));
+    if !applying {
+        actions = actions
+            .child(button("Always allow", ButtonVariant::Outline, Decision::Always, keys::APPROVAL_ALWAYS))
+            .child(button("Allow once", ButtonVariant::Contrast, Decision::Once, keys::APPROVAL_ONCE));
+    }
+    if show_apply {
+        actions = actions.child(
+            Button::new("Apply all changes and run once")
+                .variant(ButtonVariant::Contrast)
+                .control_size(ControlSize::Regular)
+                .on_press(|s: &mut KrampstaApp| s.apply_and_validate())
+                .build(k)
+                .key(keys::APPROVAL_APPLY_AND_VALIDATE),
         );
+    }
+    let body = if applying {
+        body.child(text("Applying changes… The command has not started.").font(k.ty.small).wrap())
+    } else {
+        body
+    };
+    let body = body.child(actions);
+    let body = if let Some(error) = &s.review.error {
+        body.child(text(format!("Write error: {error}")).font(k.ty.small).wrap())
+    } else {
+        body
+    };
     Dialog::new(keys::APPROVAL, "Run this command?")
         .open(true)
         .fit()
-        .width(520.0)
+        .width(if show_apply { 620.0 } else { 520.0 })
         .child(body)
         .on_close(|s: &mut KrampstaApp| s.answer(Decision::Deny))
         .build(k, layer);
@@ -152,6 +190,9 @@ mod tests {
         fn run(&self, _: &str, _: &str, _: &Call<'_>) -> Result<ToolOutput, String> {
             Ok(String::from("listed").into())
         }
+        fn write(&self, path: &str, _: Option<&str>, _: &str) -> Result<(), String> {
+            if path == "locked.txt" { Err("permission denied".into()) } else { Ok(()) }
+        }
     }
 
     fn send(app: &mut KrampstaApp) {
@@ -183,6 +224,39 @@ mod tests {
         assert!(app.approvals.is_empty());
         pump_until(&mut app, |a| a.current().is_some_and(|s| s.status == AgentStatus::Completed));
         assert_eq!(reply(&app), "listed");
+    }
+
+    #[test]
+    fn command_announced_with_pending_changes_is_marked() {
+        let mut app = KrampstaApp::new(Arc::new(Catalog)).with_tools(Arc::new(Asks));
+        app.propose(krampsta_core::FileChange { path: "a.txt".into(), before: None, after: "draft".into() });
+        send(&mut app);
+        pump_until(&mut app, |a| !a.approvals.is_empty());
+        let asking = app.approvals.front().unwrap();
+        assert!(app.commands_with_pending_changes.contains(&(asking.run, asking.call.clone())));
+    }
+
+    #[test]
+    fn apply_and_validate_only_releases_the_command_after_successful_writes() {
+        for path in ["new.txt", "locked.txt"] {
+            let mut app = KrampstaApp::new(Arc::new(Catalog)).with_tools(Arc::new(Asks));
+            app.propose(krampsta_core::FileChange { path: path.into(), before: None, after: "draft".into() });
+            send(&mut app);
+            pump_until(&mut app, |a| !a.approvals.is_empty());
+            app.apply_and_validate();
+            app.answer(Decision::Once);
+            assert_eq!(app.approvals.len(), 1, "approval must wait for writes to land");
+            pump_until(&mut app, |a| !a.validating_changes());
+            if path == "locked.txt" {
+                assert_eq!(app.approvals.len(), 1);
+                assert!(app.review.error.is_some());
+                app.answer(Decision::Deny);
+            } else {
+                assert!(app.review.proposals().is_empty());
+                pump_until(&mut app, |a| a.current().is_some_and(|s| s.status == AgentStatus::Completed));
+                assert_eq!(reply(&app), "listed");
+            }
+        }
     }
 
     #[test]

@@ -227,6 +227,8 @@ const SCENES: &[Scene] = &[
         scene_command(s);
     }),
     ("approval", scene_approval),
+    ("approval-apply", scene_approval_apply),
+    ("approval-applying", scene_approval_applying),
     ("streaming", scene_streaming),
     ("change-failed", |s| {
         stage_changes(s);
@@ -500,6 +502,20 @@ fn scene_approval(s: &mut KrampstaApp) {
         tool: call.name,
         what: "cargo clean && cargo test --workspace".into(),
     });
+}
+
+fn scene_approval_apply(s: &mut KrampstaApp) {
+    scene_approval(s);
+    s.propose(krampsta_core::FileChange {
+        path: "README.md".into(),
+        before: Some("# Example project\n".into()),
+        after: "# Example project\n\nRun `cargo test` to validate changes.\n".into(),
+    });
+}
+
+fn scene_approval_applying(s: &mut KrampstaApp) {
+    scene_approval_apply(s);
+    s.stage_applying_scene();
 }
 
 /// A reply that has just arrived in one burst, not yet shown: the pacer lets it out over the

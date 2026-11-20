@@ -70,6 +70,8 @@ pub struct KrampstaApp {
     pub api_key: KeyField,
     /// Tool cards the user opened in the transcript.
     pub open_tools: HashSet<ToolCallId>,
+    /// Commands announced while the changes panel held unapplied proposals.
+    pub(crate) commands_with_pending_changes: HashSet<(RunId, ToolCallId)>,
     /// Messages whose reasoning the user opened.
     pub open_reasoning: HashSet<MessageId>,
     /// The context menu showing, if any.
@@ -120,6 +122,7 @@ impl KrampstaApp {
             sign_in: SignIn::Closed,
             api_key: KeyField::default(),
             open_tools: HashSet::new(),
+            commands_with_pending_changes: HashSet::new(),
             open_reasoning: HashSet::new(),
             menu: None,
             confirm_delete: None,
@@ -240,12 +243,13 @@ impl KrampstaApp {
         let writes = self.agent.drain_writes();
         let mut changed = self.land_accounts(accounts);
         changed |= self.land_models(lists);
-        changed |= self.land_writes(writes);
+        let (writes_changed, mut panel_dirty) = self.land_writes(writes);
+        changed |= writes_changed;
         for e in self.agent.drain() {
             match e.event {
                 // A proposal outlives its run: the tools already build on it.
                 AgentEvent::ChangeProposed { change, .. } => {
-                    self.propose(change);
+                    panel_dirty |= self.stage_proposal(change);
                     changed = true;
                 }
                 AgentEvent::ApprovalRequested { run, call, tool, what } => {
@@ -253,6 +257,12 @@ impl KrampstaApp {
                     changed = true;
                 }
                 event => {
+                    if let AgentEvent::ToolCallStarted { run, call } = &event
+                        && call.name == "run_command"
+                        && !self.review.proposals().is_empty()
+                    {
+                        self.commands_with_pending_changes.insert((*run, call.id.clone()));
+                    }
                     if event.is_terminal() {
                         self.forget_approvals(event.run());
                     }
@@ -261,6 +271,10 @@ impl KrampstaApp {
                     }
                 }
             }
+        }
+        changed |= self.finish_apply_and_validate();
+        if panel_dirty {
+            self.refresh_diff();
         }
         changed
     }

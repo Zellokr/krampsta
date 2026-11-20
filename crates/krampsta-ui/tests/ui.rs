@@ -159,7 +159,8 @@ fn typing_and_pressing_enter_runs_the_agent_and_shows_the_reply() {
 
 #[test]
 fn a_tool_card_opens_and_closes_on_click() {
-    let mut rt = runtime();
+    // Keep the card in the viewport after expansion; this test exercises toggling, not scrolling.
+    let mut rt = runtime_with(MockConfig::instant(), (SIZE.0, 1200.0));
     click(&mut rt, keys::COMPOSER);
     type_text(&mut rt, "List the files");
     press(&mut rt, Key::Enter, Mods::default());

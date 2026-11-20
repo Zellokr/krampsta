@@ -46,10 +46,10 @@ fn assistant(s: &KrampstaApp, m: &Message, streaming: bool, k: &Kit) -> El {
         out = out.child(reasoning::view(m, streaming, s.open_reasoning.contains(&m.id), k));
     }
     if !m.tool_calls.is_empty() {
-        let cards = m
-            .tool_calls
-            .iter()
-            .map(|c| tool_card::view(c, m.result_for(c), m.live_output_for(c), s.open_tools.contains(&c.id), k));
+        let cards = m.tool_calls.iter().map(|c| {
+            let pending = m.run.is_some_and(|run| s.commands_with_pending_changes.contains(&(run, c.id.clone())));
+            tool_card::view(c, m.result_for(c), m.live_output_for(c), s.open_tools.contains(&c.id), pending, k)
+        });
         out = out.child(col().w_full().gap(8.0).children(cards));
     }
     // While it streams, the text comes out at a steady pace (`pace.rs`), not as it arrives.

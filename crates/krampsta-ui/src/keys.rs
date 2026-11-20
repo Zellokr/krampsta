@@ -53,6 +53,7 @@ pub const APPROVAL: &str = "krampsta-approval";
 pub const APPROVAL_DENY: &str = "krampsta-approval-deny";
 pub const APPROVAL_ONCE: &str = "krampsta-approval-once";
 pub const APPROVAL_ALWAYS: &str = "krampsta-approval-always";
+pub const APPROVAL_APPLY_AND_VALIDATE: &str = "krampsta-approval-apply-and-validate";
 
 /// Provider and model pickers. rune-kit keys a select's trigger `<key>-trigger` and its
 /// options `option<i>` inside `<key>-content`.

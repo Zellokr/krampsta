@@ -43,7 +43,14 @@ impl Outcome {
     }
 }
 
-pub fn view(call: &ToolCall, result: Option<&ToolResult>, live: Option<&str>, open: bool, k: &Kit) -> El {
+pub fn view(
+    call: &ToolCall,
+    result: Option<&ToolResult>,
+    live: Option<&str>,
+    open: bool,
+    pending: bool,
+    k: &Kit,
+) -> El {
     let outcome = Outcome::of(result);
     let border = if outcome == Outcome::Failed { k.c.danger.icon } else { k.c.border_weak };
     let mut card =
@@ -51,6 +58,16 @@ pub fn view(call: &ToolCall, result: Option<&ToolResult>, live: Option<&str>, op
     if let Some(r) = result.filter(|_| outcome == Outcome::Failed && !open) {
         let first = r.output.lines().next().unwrap_or_default().to_owned();
         card = card.child(text(first).font(k.ty.small).color(k.c.danger.icon).truncate().px(12.0).pb(10.0));
+    }
+    if pending {
+        card = card.child(
+            text("Commands read files from disk. Unapplied changes were present when this command was requested.")
+                .font(k.ty.small)
+                .color(k.c.text_muted)
+                .wrap()
+                .px(12.0)
+                .pb(10.0),
+        );
     }
     // A running command shows where it is: its last lines, open or not.
     if let Some(live) = live.filter(|l| result.is_none() && !l.trim().is_empty()) {
