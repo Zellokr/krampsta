@@ -3,7 +3,7 @@
 
 use krampsta_agent::Decision;
 use krampsta_core::{RunId, ToolCallId};
-use rune::{El, col, row, text};
+use rune::{El, ScrollSpec, col, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 
 use crate::keys;
@@ -41,6 +41,9 @@ impl KrampstaApp {
     }
 }
 
+/// The tallest the command block gets before it scrolls, in points.
+const COMMAND_MAX_H: f32 = 240.0;
+
 /// The dialog for the first call waiting, if any. Closing it denies, as Escape would.
 pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
     let Some(a) = s.approvals.front() else { return };
@@ -52,14 +55,27 @@ pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
             .build(k)
             .key(key)
     };
-    let command = col().w_full().px(12.0).py(10.0).radius(k.radius.sm).fill(k.c.layer_02).child(
-        text(a.what.clone())
-            .font(k.ty.mono)
-            .color(k.c.text_base)
-            .wrap_anywhere()
-            .selectable(true)
-            .selection_color(k.selection()),
-    );
+    // A command can be a whole script: it scrolls in a block of bounded height, so the dialog
+    // never outgrows the window and its buttons stay on screen.
+    let command = col()
+        .key(keys::APPROVAL_COMMAND)
+        .w_full()
+        .max_h(COMMAND_MAX_H)
+        .min_h(0.0)
+        .radius(k.radius.sm)
+        .fill(k.c.layer_02)
+        .scroll(ScrollSpec { stick_bottom: false })
+        .scroll_edge_fade(12.0)
+        .child(
+            col().w_full().px(12.0).py(10.0).child(
+                text(a.what.clone())
+                    .font(k.ty.mono)
+                    .color(k.c.text_base)
+                    .wrap_anywhere()
+                    .selectable(true)
+                    .selection_color(k.selection()),
+            ),
+        );
     let more = match s.approvals.len() {
         1 => String::new(),
         n => format!(" ({} more waiting)", n - 1),

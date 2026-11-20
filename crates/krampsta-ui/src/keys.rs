@@ -50,6 +50,7 @@ pub fn tool_live(id: &krampsta_core::ToolCallId) -> String {
 /// The dialog that asks to allow a command (rune-kit keys its panel `<key>-dialog`), and its
 /// buttons.
 pub const APPROVAL: &str = "krampsta-approval";
+pub const APPROVAL_COMMAND: &str = "krampsta-approval-command";
 pub const APPROVAL_DENY: &str = "krampsta-approval-deny";
 pub const APPROVAL_ONCE: &str = "krampsta-approval-once";
 pub const APPROVAL_ALWAYS: &str = "krampsta-approval-always";

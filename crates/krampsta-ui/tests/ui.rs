@@ -424,3 +424,30 @@ fn the_changes_panel_rejects_a_block_and_a_whole_file_from_their_buttons() {
     assert!(rt.state.review.proposals().is_empty());
     assert!(has(&rt, keys::CHANGES_EMPTY), "back to the empty state");
 }
+
+#[test]
+fn a_very_long_command_scrolls_and_its_buttons_stay_on_screen() {
+    let mut rt = runtime();
+    // A whole script, as an agent editing files through a shell sends one.
+    let script: String =
+        (1..=120).map(|n| format!("edit('src/file{n}.rs', lambda s: s.replace('a', 'b'))\n")).collect();
+    rt.update(|s, _| {
+        s.approvals.push_back(krampsta_ui::approvals::Asking {
+            run: krampsta_core::RunId(1),
+            call: krampsta_core::ToolCallId("long".into()),
+            tool: "run_command".into(),
+            what: script,
+        });
+    });
+    settle(&mut rt);
+    let window = [0.0, 0.0, SIZE.0, SIZE.1];
+    for key in [keys::APPROVAL_DENY, keys::APPROVAL_ALWAYS, keys::APPROVAL_ONCE] {
+        let button = element(&rt, key).unwrap_or_else(|| panic!("no {key}"));
+        assert!(inside(button.rect, window), "{key} is off screen: {:?}", button.rect);
+    }
+    let block = element(&rt, keys::APPROVAL_COMMAND).expect("the command block");
+    assert!(block.rect[3] <= 241.0, "the block is bounded and scrolls: {:?}", block.rect);
+
+    click(&mut rt, keys::APPROVAL_ONCE);
+    assert!(rt.state.approvals.is_empty(), "the button answered");
+}

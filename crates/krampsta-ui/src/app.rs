@@ -227,6 +227,7 @@ const SCENES: &[Scene] = &[
         scene_command(s);
     }),
     ("approval", scene_approval),
+    ("approval-long", scene_approval_long),
     ("approval-apply", scene_approval_apply),
     ("approval-applying", scene_approval_applying),
     ("streaming", scene_streaming),
@@ -527,4 +528,18 @@ fn scene_streaming(s: &mut KrampstaApp) {
                  session. The view then shows the reply at a steady pace instead of in the bursts the \
                  provider sends, a whole word at a time, each fading in as it comes out.";
     apply(s, &[AgentEvent::TextDelta { run, text: reply.into() }]);
+}
+
+/// A command that is a whole script: it scrolls inside the dialog, the buttons stay on screen.
+fn scene_approval_long(s: &mut KrampstaApp) {
+    let run = staged(s, "Rename the helper everywhere");
+    let what: String =
+        (1..=80).map(|n| format!("edit('src/file{n}.rs', lambda s: s.replace('old_name', 'new_name'))\n")).collect();
+    let call = ToolCall {
+        id: ToolCallId("scene-approval-long".into()),
+        name: "run_command".into(),
+        arguments: serde_json::json!({ "command": what }).to_string(),
+    };
+    apply(s, &[AgentEvent::ToolCallStarted { run, call: call.clone() }]);
+    s.ask(crate::approvals::Asking { run, call: call.id, tool: call.name, what });
 }

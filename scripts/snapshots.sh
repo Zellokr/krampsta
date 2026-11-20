@@ -15,7 +15,7 @@ export KRAMPSTA_PROVIDER=mock
 mkdir -p "$OUT"
 snap() { "$BIN" --snap "$OUT/$1.png" --size "${2:-1200x800}" --scale 1 "${@:3}" > /dev/null; echo "  $OUT/$1.png"; }
 snap krampsta
-for scene in empty changes-empty changes change-failed command approval approval-apply approval-applying running tools thinking reasoning completed failed cancelled settings api-key api-key-saved signed-in sign-in sign-in-failed session-menu message-menu delete-session light provider-picker effort-picker model-picker model-error; do snap "$scene" 1200x800 --scene "$scene"; done
+for scene in empty changes-empty changes change-failed command approval approval-long approval-apply approval-applying running tools thinking reasoning completed failed cancelled settings api-key api-key-saved signed-in sign-in sign-in-failed session-menu message-menu delete-session light provider-picker effort-picker model-picker model-error; do snap "$scene" 1200x800 --scene "$scene"; done
 # Narrow windows: give the side panes a moment to fold away (they close after the first layout).
 snap narrow 800x560 --scene completed --at 1.0
 snap send-message 1200x800 --script scripts/send-message.json --at mark:end
