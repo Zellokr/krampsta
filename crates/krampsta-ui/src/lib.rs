@@ -20,6 +20,7 @@ pub mod keys;
 pub mod menus;
 pub mod pace;
 pub mod picker;
+pub mod prefs;
 pub mod projects;
 pub mod sample;
 pub mod state;

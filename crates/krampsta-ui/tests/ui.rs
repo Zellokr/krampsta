@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use krampsta_agent::{Effort, MemoryStore, MockCatalog, MockConfig, OpenedProject, ProjectOpener};
 use krampsta_core::{AgentStatus, MessageRole, Session, SessionId};
 use krampsta_ui::picker::Picker;
-use krampsta_ui::{KrampstaApp, Screen, app, keys};
+use krampsta_ui::prefs::Prefs;
+use krampsta_ui::{KrampstaApp, Screen, ThemeChoice, app, keys};
 use rune::runtime::ElementInfo;
 use rune::{Env, Ime, Key, KeyEvent, Mods, Runtime};
 
@@ -141,6 +142,42 @@ fn saved_sessions_show_up_in_the_sidebar_and_open_with_their_messages() {
         rt.elements().iter().any(|e| e.text.as_deref().is_some_and(|t| t.contains("Where is the parser?"))),
         "the saved conversation shows"
     );
+}
+
+#[test]
+fn changed_settings_are_saved_once_they_settle() {
+    let store = Arc::new(MemoryStore::new());
+    let state = KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant()))).with_store(store.clone());
+    let mut rt = Runtime::new(state, app::view, SIZE, Env::new(true, 1.0));
+    settle(&mut rt);
+    let sync = |rt: &mut Runtime<KrampstaApp>, clock: f64| {
+        rt.update_if(|s, tx| {
+            s.sync_prefs(clock, tx);
+            false
+        });
+    };
+    sync(&mut rt, 1.0);
+    assert_eq!(store.settings(), None, "nothing changed, nothing saved");
+
+    rt.update(|s, _| {
+        s.theme = ThemeChoice::Light;
+        s.sidebar.set_width(320.0);
+    });
+    sync(&mut rt, 2.0);
+    // Still moving: the pane dragged on restarts the wait.
+    rt.update(|s, _| s.sidebar.set_width(330.0));
+    sync(&mut rt, 2.3);
+    sync(&mut rt, 2.6);
+    assert_eq!(store.settings(), None, "not until it has stood still for half a second");
+    sync(&mut rt, 2.85);
+    let saved = Prefs::from_json(store.settings().expect("saved once settled")).unwrap();
+    assert_eq!(saved.theme, Some(ThemeChoice::Light));
+    assert_eq!(saved.sidebar_width, Some(330.0), "the width it ended at");
+
+    // A later launch opens as this one was left.
+    let again = KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant()))).with_prefs(saved, true);
+    assert_eq!(again.theme, ThemeChoice::Light);
+    assert_eq!(again.sidebar.width(), 330.0);
 }
 
 /// No tools: these tests only need a folder to become the project.

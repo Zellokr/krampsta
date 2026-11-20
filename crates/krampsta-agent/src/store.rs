@@ -35,6 +35,10 @@ pub trait SessionStore: Send + Sync {
     /// Queues the session's removal.
     fn delete(&self, id: SessionId);
 
+    /// Queues the app's settings to be written, replacing the saved ones. The UI owns their
+    /// shape; the store keeps them as given.
+    fn save_settings(&self, settings: serde_json::Value);
+
     /// Writes and removals that failed since the last call, as messages a person can read.
     fn drain_failures(&self) -> Vec<String>;
 }
@@ -44,6 +48,7 @@ pub trait SessionStore: Send + Sync {
 pub struct MemoryStore {
     sessions: Mutex<Vec<Session>>,
     history: Mutex<Option<History>>,
+    settings: Mutex<Option<serde_json::Value>>,
 }
 
 impl MemoryStore {
@@ -53,7 +58,12 @@ impl MemoryStore {
 
     /// A store that already holds `sessions` (newest first), as if saved by an earlier launch.
     pub fn with_sessions(sessions: Vec<Session>) -> Self {
-        MemoryStore { sessions: Mutex::new(sessions), history: Mutex::default() }
+        MemoryStore { sessions: Mutex::new(sessions), ..Self::default() }
+    }
+
+    /// The settings saved last, if any.
+    pub fn settings(&self) -> Option<serde_json::Value> {
+        self.settings.lock().ok().and_then(|s| s.clone())
     }
 
     /// What is saved now, in the order sessions were first saved.
@@ -86,6 +96,12 @@ impl SessionStore for MemoryStore {
     fn delete(&self, id: SessionId) {
         if let Ok(mut saved) = self.sessions.lock() {
             saved.retain(|s| s.id != id);
+        }
+    }
+
+    fn save_settings(&self, settings: serde_json::Value) {
+        if let Ok(mut saved) = self.settings.lock() {
+            *saved = Some(settings);
         }
     }
 

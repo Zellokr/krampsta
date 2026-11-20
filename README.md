@@ -108,7 +108,9 @@ krampsta-app ──▶ krampsta-store ──────▶ krampsta-agent
   terminar cada herramienta y al acabar la ejecución, nunca por palabra. Las ejecuciones
   headless no guardan nada. Al arrancar, `setup` pide el historial (`SessionStore::load`); el
   mismo hilo lo lee y despierta la ventana, y `poll` pone las sesiones guardadas bajo las
-  abiertas: el primer frame no espera al disco.
+  abiertas: el primer frame no espera al disco. Los ajustes (`Prefs` de la UI) van a
+  `<carpeta de configuración>/krampsta/settings.json` por el mismo hilo; se leen antes del primer
+  frame (un archivo pequeño) para que la ventana abra como se dejó.
 
 ## Requisitos
 

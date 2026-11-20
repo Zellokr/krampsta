@@ -33,6 +33,8 @@ pub fn default_dir() -> Option<PathBuf> {
 pub enum StoreError {
     #[error("could not save the session to {path}: {source}")]
     Write { path: PathBuf, source: std::io::Error },
+    #[error("could not save the settings to {path}: {source}")]
+    Settings { path: PathBuf, source: std::io::Error },
     #[error("could not delete the saved session {path}: {source}")]
     Delete { path: PathBuf, source: std::io::Error },
     #[error("could not read the saved session {path}: {source}")]
@@ -108,6 +110,8 @@ enum Op {
 #[derive(Default)]
 struct Queue {
     pending: HashMap<SessionId, Op>,
+    /// The newest settings not yet written, and the file they go to.
+    settings: Option<(PathBuf, serde_json::Value)>,
     failures: Vec<String>,
     /// A load was asked for: whom to wake once `history` holds it.
     load: Option<Notifier>,
@@ -133,6 +137,8 @@ impl Shared {
 /// Sessions saved as JSON files in one folder, written by a background thread.
 pub struct FileStore {
     dir: PathBuf,
+    /// Where the settings go. None: they can't be saved (and saying so is a failure).
+    settings_file: Option<PathBuf>,
     shared: Arc<Shared>,
     writer: Option<JoinHandle<()>>,
 }
@@ -155,7 +161,13 @@ impl FileStore {
                 .spawn(move || write_loop(&dir, &shared))
                 .map_err(StoreError::Thread)?
         };
-        Ok(FileStore { dir, shared, writer: Some(writer) })
+        Ok(FileStore { dir, settings_file: None, shared, writer: Some(writer) })
+    }
+
+    /// Saves the settings to `file` (see [`load_settings`]).
+    pub fn with_settings_file(mut self, file: impl Into<PathBuf>) -> Self {
+        self.settings_file = Some(file.into());
+        self
     }
 
     pub fn dir(&self) -> &Path {
@@ -186,6 +198,16 @@ impl SessionStore for FileStore {
         self.queue(id, Op::Delete);
     }
 
+    fn save_settings(&self, settings: serde_json::Value) {
+        let mut queue = self.shared.lock();
+        match &self.settings_file {
+            Some(file) => queue.settings = Some((file.clone(), settings)),
+            None => queue.failures.push("the settings have nowhere to be saved".into()),
+        }
+        drop(queue);
+        self.shared.wake.notify_one();
+    }
+
     fn drain_failures(&self) -> Vec<String> {
         std::mem::take(&mut self.shared.lock().failures)
     }
@@ -206,12 +228,12 @@ impl Drop for FileStore {
 
 fn write_loop(dir: &Path, shared: &Shared) {
     loop {
-        let (load_for, batch, closing) = {
+        let (load_for, batch, settings, closing) = {
             let mut queue = shared.lock();
-            while queue.pending.is_empty() && queue.load.is_none() && !queue.closing {
+            while queue.pending.is_empty() && queue.settings.is_none() && queue.load.is_none() && !queue.closing {
                 queue = shared.wake.wait(queue).unwrap_or_else(std::sync::PoisonError::into_inner);
             }
-            (queue.load.take(), std::mem::take(&mut queue.pending), queue.closing)
+            (queue.load.take(), std::mem::take(&mut queue.pending), queue.settings.take(), queue.closing)
         };
         if let Some(done) = load_for {
             let loaded = load(dir);
@@ -219,9 +241,13 @@ fn write_loop(dir: &Path, shared: &Shared) {
             shared.lock().history = Some(History { sessions: loaded.sessions, failures });
             done();
         }
+        let settings = settings.and_then(|(path, value)| {
+            write_atomically(&path, &value).err().map(|source| StoreError::Settings { path, source })
+        });
         let failures: Vec<String> = batch
             .into_iter()
             .filter_map(|(id, op)| apply(dir, id, op).err())
+            .chain(settings)
             .map(|e| {
                 let message = e.to_string();
                 if closing {
@@ -234,7 +260,7 @@ fn write_loop(dir: &Path, shared: &Shared) {
         if !failures.is_empty() {
             shared.lock().failures.extend(failures);
         }
-        if closing && shared.lock().pending.is_empty() {
+        if closing && shared.lock().pending.is_empty() && shared.lock().settings.is_none() {
             return;
         }
     }
@@ -243,7 +269,8 @@ fn write_loop(dir: &Path, shared: &Shared) {
 fn apply(dir: &Path, id: SessionId, op: Op) -> Result<(), StoreError> {
     let path = file_for(dir, id);
     match op {
-        Op::Save(session) => write_atomically(dir, &path, &SavedSession::from_session(&session)),
+        Op::Save(session) => write_atomically(&path, &SavedSession::from_session(&session))
+            .map_err(|source| StoreError::Write { path, source }),
         Op::Delete => match fs::remove_file(&path) {
             Ok(()) => Ok(()),
             // Never saved (an empty session), or already gone: nothing to do.
@@ -253,16 +280,34 @@ fn apply(dir: &Path, id: SessionId, op: Op) -> Result<(), StoreError> {
     }
 }
 
-fn write_atomically(dir: &Path, path: &Path, saved: &SavedSession) -> Result<(), StoreError> {
-    let fail = |source| StoreError::Write { path: path.to_owned(), source };
-    let json = serde_json::to_vec_pretty(saved).map_err(|e| fail(std::io::Error::other(e)))?;
-    fs::create_dir_all(dir).map_err(fail)?;
+/// Writes `value` as JSON beside `path`, then renames it over `path`, creating its folder.
+fn write_atomically(path: &Path, value: &impl serde::Serialize) -> std::io::Result<()> {
+    let json = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
+    if let Some(folder) = path.parent() {
+        fs::create_dir_all(folder)?;
+    }
     let temp = path.with_extension("json.tmp");
-    fs::write(&temp, json).and_then(|()| fs::rename(&temp, path)).map_err(|e| {
+    fs::write(&temp, json).and_then(|()| fs::rename(&temp, path)).inspect_err(|_| {
         // Best effort: a leftover temporary file is harmless (loading skips it).
         let _ = fs::remove_file(&temp);
-        fail(e)
     })
+}
+
+/// Where the settings live unless told otherwise: `<config folder>/krampsta/settings.json`,
+/// beside the permission rules.
+pub fn default_settings_file() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("krampsta").join("settings.json"))
+}
+
+/// Reads the saved settings. Blocking, but one small file: the app reads it before its first
+/// frame so the window opens as it was left. None when nothing was saved yet.
+pub fn load_settings(file: &Path) -> Result<Option<serde_json::Value>, StoreError> {
+    let text = match fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(StoreError::Read { path: file.to_owned(), source }),
+    };
+    serde_json::from_str(&text).map(Some).map_err(|source| StoreError::Damaged { path: file.to_owned(), source })
 }
 
 #[cfg(test)]
@@ -420,6 +465,31 @@ mod tests {
         assert_eq!(history.failures.len(), 1);
         assert!(history.failures[0].contains("ses3.json"), "{:?}", history.failures);
         assert!(store.take_history().is_none(), "handed over once");
+    }
+
+    #[test]
+    fn settings_save_beside_nothing_else_and_load_back_the_newest() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config").join("settings.json");
+        assert!(load_settings(&file).unwrap().is_none(), "nothing saved yet");
+        let store = FileStore::open(dir.path().join("sessions")).unwrap().with_settings_file(&file);
+        store.save_settings(serde_json::json!({ "theme": "dark" }));
+        store.save_settings(serde_json::json!({ "theme": "light" }));
+        drop(store);
+        assert_eq!(load_settings(&file).unwrap(), Some(serde_json::json!({ "theme": "light" })));
+        assert!(load(&dir.path().join("sessions")).sessions.is_empty(), "no session files");
+    }
+
+    #[test]
+    fn damaged_settings_and_a_store_without_a_settings_file_say_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        fs::write(&file, "{ nope").unwrap();
+        assert!(matches!(load_settings(&file), Err(StoreError::Damaged { .. })));
+
+        let store = FileStore::open(dir.path()).unwrap();
+        store.save_settings(serde_json::json!({}));
+        assert_eq!(store.drain_failures(), vec!["the settings have nowhere to be saved".to_owned()]);
     }
 
     #[test]

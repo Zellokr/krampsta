@@ -22,6 +22,7 @@ use crate::changes::Changes;
 use crate::menus::OpenMenu;
 use crate::pace::Pace;
 use crate::picker::EngineChoice;
+use crate::prefs::PrefsSync;
 use crate::projects::ProjectInfo;
 use crate::sample;
 use crate::theme::ThemeChoice;
@@ -94,6 +95,8 @@ pub struct KrampstaApp {
     pub collapsed_groups: HashSet<Option<PathBuf>>,
     /// The folder being opened in the background, if one is.
     pub opening_project: Option<PathBuf>,
+    /// The settings saved last, to tell when they change.
+    pub(crate) prefs: PrefsSync,
     /// Turns a folder into tools. None: folders can't be opened (tests, scenes).
     pub(crate) opener: Option<Arc<dyn ProjectOpener>>,
     ids: IdGen,
@@ -204,6 +207,7 @@ impl KrampstaApp {
             project: None,
             collapsed_groups: HashSet::new(),
             opening_project: None,
+            prefs: PrefsSync::default(),
             opener: None,
             ids,
             window_width: None,
@@ -212,6 +216,8 @@ impl KrampstaApp {
         };
         app.keep_selection_usable();
         app.rebuild_engine();
+        // Where it starts isn't a change to save.
+        app.prefs = PrefsSync::starting_at(app.prefs_now());
         app
     }
 

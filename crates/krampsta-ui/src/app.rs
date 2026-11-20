@@ -54,6 +54,8 @@ fn setup(s: &mut KrampstaApp, waker: Waker) {
 /// Runs before every frame and whenever the agent host wakes the window.
 pub fn poll(s: &mut KrampstaApp, clock: f64, tx: &mut Tx) -> bool {
     let landed = s.pump();
+    // Settings that changed are saved once they settle (nothing visible changes).
+    s.sync_prefs(clock, tx);
     // Then one frame's worth of the streaming reply (asks for the next frame while any waits).
     s.step_pace(clock, tx) | landed
 }

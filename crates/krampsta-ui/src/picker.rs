@@ -70,6 +70,18 @@ impl EngineChoice {
         }
     }
 
+    /// The model last used with each provider.
+    pub fn remembered_models(&self) -> &HashMap<String, String> {
+        &self.remembered
+    }
+
+    /// Adds models used with providers before (from saved settings). Ones known already win.
+    pub fn remember_models<'a>(&mut self, models: impl Iterator<Item = (&'a String, &'a String)>) {
+        for (provider, model) in models {
+            self.remembered.entry(provider.clone()).or_insert_with(|| model.clone());
+        }
+    }
+
     pub fn provider(&self) -> Option<&Provider> {
         self.providers.iter().find(|p| p.id == self.selection.provider)
     }
