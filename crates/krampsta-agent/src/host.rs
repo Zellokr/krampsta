@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{DeviceCode, LoginPrompt};
 use crate::engine::{AgentEngine, AgentError, Approvals, BoxFuture, RunContext, RunRequest, lock};
+use crate::projects::{ProjectOpened, ProjectOpener};
 use crate::tools::{Decision, Toolbox};
 
 /// Called from a worker thread after each event is queued, to wake the UI so it drains them.
@@ -36,6 +37,8 @@ pub struct AgentHost {
     accounts_rx: Receiver<AccountEvent>,
     writes_tx: Sender<Written>,
     writes_rx: Receiver<Written>,
+    projects_tx: Sender<ProjectOpened>,
+    projects_rx: Receiver<ProjectOpened>,
     /// Calls waiting for the user to allow them, shared with every run's context.
     approvals: Approvals,
     /// The sign-in in progress, if any (one at a time).
@@ -87,9 +90,12 @@ impl AgentHost {
         let (lookups_tx, lookups_rx) = channel();
         let (accounts_tx, accounts_rx) = channel();
         let (writes_tx, writes_rx) = channel();
+        let (projects_tx, projects_rx) = channel();
         AgentHost {
             writes_tx,
             writes_rx,
+            projects_tx,
+            projects_rx,
             approvals: Approvals::default(),
             engine,
             tools: None,
@@ -147,6 +153,27 @@ impl AgentHost {
     /// Takes every finished write, without blocking.
     pub fn drain_writes(&mut self) -> Vec<Written> {
         self.writes_rx.try_iter().collect()
+    }
+
+    /// Opens `path` as a project with `opener`, off the UI thread; the answer arrives through
+    /// [`drain_projects`](Self::drain_projects). The tools runs use don't change until the
+    /// caller hands them to [`set_toolbox`](Self::set_toolbox).
+    pub fn open_project(&mut self, opener: Arc<dyn ProjectOpener>, path: std::path::PathBuf) -> Result<(), AgentError> {
+        let (tx, notify) = (self.projects_tx.clone(), self.notify.clone());
+        self.runtime()?.spawn(async move {
+            let asked = path.clone();
+            let job = tokio::task::spawn_blocking(move || opener.open(&asked));
+            let result = job.await.unwrap_or_else(|e| Err(format!("opening the folder stopped abnormally: {e}")));
+            if tx.send(ProjectOpened { path, result }).is_ok() {
+                notify();
+            }
+        });
+        Ok(())
+    }
+
+    /// Takes every answer to [`open_project`](Self::open_project), without blocking.
+    pub fn drain_projects(&mut self) -> Vec<ProjectOpened> {
+        self.projects_rx.try_iter().collect()
     }
 
     /// What the agent's next edits and reads of `path` build on (see [`Toolbox::set_pending`]).
@@ -603,5 +630,35 @@ mod tests {
         until(&mut host, &mut events, |e| e.last().is_some_and(AgentEvent::is_terminal));
         assert!(matches!(events.last(), Some(AgentEvent::Cancelled { .. })));
         assert!(!host.answer(run, &ToolCallId("c1".into()), Decision::Once), "nothing waits any more");
+    }
+
+    /// Opens folders whose name starts with "ok", off whichever thread calls it.
+    struct Opens;
+
+    impl ProjectOpener for Opens {
+        fn open(&self, root: &std::path::Path) -> Result<crate::OpenedProject, String> {
+            if root.to_string_lossy().starts_with("ok") {
+                Ok(crate::OpenedProject { root: root.to_owned(), tools: Arc::new(Asks::default()) })
+            } else {
+                Err(format!("{} is not a folder", root.display()))
+            }
+        }
+    }
+
+    #[test]
+    fn projects_open_in_the_background_and_report_how_it_went() {
+        let mut host = AgentHost::new(Arc::new(Scripted(Ok(()))));
+        host.open_project(Arc::new(Opens), "ok-project".into()).unwrap();
+        host.open_project(Arc::new(Opens), "missing".into()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut answers = Vec::new();
+        while answers.len() < 2 {
+            assert!(Instant::now() < deadline, "the opener never answered");
+            answers.extend(host.drain_projects());
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        answers.sort_by(|a, b| a.path.cmp(&b.path));
+        assert_eq!(answers[0].result.as_ref().unwrap_err(), "missing is not a folder");
+        assert_eq!(answers[1].result.as_ref().map(|p| p.name()).unwrap(), "ok-project");
     }
 }

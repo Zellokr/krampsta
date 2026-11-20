@@ -28,6 +28,11 @@ pub fn sessions(ids: &IdGen) -> Vec<Session> {
     vec![welcome, retry]
 }
 
+/// The project folder stills show.
+pub fn project() -> crate::projects::ProjectInfo {
+    crate::projects::ProjectInfo { root: "/Users/you/code/krampsta".into(), name: "krampsta".into() }
+}
+
 const OLD_RS: &str = "use std::time::Duration;
 
 /// How long to wait before trying a request again.

@@ -127,6 +127,8 @@ krampsta-app ──▶ krampsta-store ──────▶ krampsta-agent
 ```bash
 git clone <este repositorio> krampsta && cd krampsta
 cargo run -p krampsta-app             # abre la ventana (binario: target/debug/krampsta)
+cargo run -p krampsta-app -- ~/code/x  # con ~/code/x como proyecto (sin argumento: la carpeta actual;
+                                      # en la app, la fila del proyecto o Ctrl+O abre otra)
 cargo run -p krampsta-app --release   # versión optimizada
 ```
 

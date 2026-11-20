@@ -18,12 +18,31 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
 
-use krampsta_agent::{Access, Approval, Call, ToolOutput, ToolSpec, Toolbox};
+use krampsta_agent::{Access, Approval, Call, OpenedProject, ProjectOpener, ToolOutput, ToolSpec, Toolbox};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
 pub use policy::Policy;
 pub use project::Project;
+
+/// Opens projects as [`Workspace`]s, with the user's rules from their config folder.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WorkspaceOpener;
+
+impl ProjectOpener for WorkspaceOpener {
+    fn open(&self, root: &Path) -> Result<OpenedProject, String> {
+        Workspace::open_project(root)
+    }
+}
+
+/// Why `root` can't be the project, in words a person can act on.
+fn folder_error(root: &Path, e: &std::io::Error) -> String {
+    match e.kind() {
+        std::io::ErrorKind::NotFound => format!("{} doesn't exist", root.display()),
+        std::io::ErrorKind::NotADirectory => format!("{} is not a folder", root.display()),
+        _ => format!("{} can't be opened as the project: {e}", root.display()),
+    }
+}
 
 /// The project folder, the tools that work in it, the changes they have proposed, and the
 /// rules for the commands they may run.
@@ -66,6 +85,16 @@ impl Workspace {
 
     pub fn root(&self) -> &Path {
         self.project.root()
+    }
+
+    /// Opens `root` as the app opens a project, the [`OpenedProject`] the UI switches to.
+    pub fn open_project(root: &Path) -> Result<OpenedProject, String> {
+        Self::open(root).map(Self::into_project).map_err(|e| folder_error(root, &e))
+    }
+
+    /// This workspace as the project the UI shows.
+    pub fn into_project(self) -> OpenedProject {
+        OpenedProject { root: self.root().to_owned(), tools: Arc::new(self) }
     }
 
     fn run_command(&self, args: &command::Args, call: &Call<'_>) -> Result<ToolOutput, String> {
@@ -261,7 +290,7 @@ fn specs() -> Arc<[ToolSpec]> {
 
 #[cfg(test)]
 mod tests {
-    use krampsta_agent::CancellationToken;
+    use krampsta_agent::{CancellationToken, project_name};
 
     use super::*;
 
@@ -277,6 +306,27 @@ mod tests {
 
     fn run(tools: &Workspace, name: &str, arguments: &str, cancel: &CancellationToken) -> Result<ToolOutput, String> {
         tools.run(name, arguments, &Call { cancel, approval: &Approval::NotNeeded, output: &|_| {} })
+    }
+
+    #[test]
+    fn a_workspace_becomes_the_project_named_after_its_resolved_folder() {
+        let (dir, _c, tools) = workspace(&[("hello.txt", "hi\n")]);
+        let project = tools.into_project();
+        assert_eq!(project.root, dir.path().canonicalize().unwrap());
+        assert_eq!(project.name(), project_name(&dir.path().canonicalize().unwrap()));
+        assert!(project.tools.specs().iter().any(|s| s.name == "read_file"));
+    }
+
+    #[test]
+    fn folders_that_cant_be_projects_say_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("notes.txt");
+        std::fs::write(&file, "").unwrap();
+        let missing = dir.path().join("gone");
+        let not_found = Project::open(&missing).unwrap_err();
+        assert_eq!(folder_error(&missing, &not_found), format!("{} doesn't exist", missing.display()));
+        let not_dir = Project::open(&file).unwrap_err();
+        assert_eq!(folder_error(&file, &not_dir), format!("{} is not a folder", file.display()));
     }
 
     #[test]

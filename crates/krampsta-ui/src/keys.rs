@@ -4,6 +4,8 @@
 //! and keys share one namespace, so every Krampsta key carries a recognisable prefix.
 
 pub const NEW_SESSION: &str = "krampsta-new-session";
+/// The project folder row; pressing it opens the folder dialog.
+pub const PROJECT: &str = "krampsta-project";
 pub const SETTINGS: &str = "krampsta-settings";
 pub const BRAND: &str = "krampsta-brand";
 pub const TRANSCRIPT: &str = "krampsta-transcript";

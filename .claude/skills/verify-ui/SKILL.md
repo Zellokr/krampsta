@@ -34,7 +34,7 @@ Escribe en `assets/screenshots/`: `krampsta` (estado inicial), `empty`, `changes
 mientras piensa y abierto al terminar), `completed`,
 `failed`, `cancelled`, `settings`, `api-key` y `api-key-saved` (clave de OpenAI escrita y guardada), `signed-in`, `sign-in` (diálogo con el código), `sign-in-failed` (el fallo, con «Try again»), `session-menu`, `message-menu` y `delete-session` (menús contextuales y la confirmación de borrado), `light`,
 `provider-picker`, `effort-picker` (esfuerzo de razonamiento, con ChatGPT), `model-picker`, `model-error`
-(selectores abiertos y servidor local caído), `narrow` (800×560) y `send-message` (script real:
+(selectores abiertos y servidor local caído), `no-project` y `opening-project` (fila del proyecto sin carpeta y abriendo otra), `narrow` (800×560) y `send-message` (script real:
 escribe en el composer y pulsa Enter), más `krampsta-tree.json` (árbol de elementos, no versionado).
 
 Para una escena suelta:

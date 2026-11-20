@@ -58,7 +58,7 @@ pub fn poll(s: &mut KrampstaApp, clock: f64, tx: &mut Tx) -> bool {
     s.step_pace(clock, tx) | landed
 }
 
-pub fn on_key(s: &mut KrampstaApp, ev: &KeyEvent, _tx: &mut Tx) -> bool {
+pub fn on_key(s: &mut KrampstaApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
     if ev.key == Key::Escape && s.sign_in != SignIn::Closed {
         s.close_sign_in();
         return true;
@@ -73,6 +73,10 @@ pub fn on_key(s: &mut KrampstaApp, ev: &KeyEvent, _tx: &mut Tx) -> bool {
     }
     if ev.is_command('n') && !ev.mods.shift {
         s.new_session();
+        return true;
+    }
+    if ev.is_command('o') && !ev.mods.shift {
+        s.choose_project(tx);
         return true;
     }
     if ev.is_command('j') {
@@ -276,6 +280,15 @@ const SCENES: &[Scene] = &[
         );
         s.engine.problem = Some("Choose a model for Ollama.".into());
         s.engine.open = Some(Picker::ComposerModel);
+    }),
+    // No folder open: the row invites opening one.
+    ("no-project", |s| {
+        s.project = None;
+        s.opening_project = None;
+    }),
+    ("opening-project", |s| {
+        s.project = Some(crate::sample::project());
+        s.opening_project = Some("/Users/you/code/rune".into());
     }),
 ];
 

@@ -27,11 +27,13 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
 - `crates/krampsta-ui` — `KrampstaApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`
   (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
   (piezas), `accounts.rs` (diálogo de inicio de sesión), `approvals.rs` (permitir comandos),
-  `changes.rs` (revisar los cambios
+  `projects.rs` (carpeta del proyecto: diálogo nativo con `tx.open_folder`, se abre con el
+  `ProjectOpener` en el host y sólo entonces cambian las herramientas), `changes.rs` (revisar los cambios
   propuestos: aceptar o rechazar archivos y bloques), `theme.rs` (único sitio de colores),
   `keys.rs` (claves estables), `sample.rs` (datos
   de ejemplo).
-- `crates/krampsta-app` — binario `krampsta`; sólo construye el catálogo y arranca.
+- `crates/krampsta-app` — binario `krampsta`; construye el catálogo, abre el proyecto inicial
+  (`krampsta <carpeta>` o la carpeta actual; en headless, el de ejemplo) y arranca.
 - Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
   `providers → core`, `app → tools → agent`, `app → store → agent`, `store → core`. Sin ciclos;
   la UI nunca depende de `krampsta-providers`, `krampsta-tools` ni `krampsta-store`.

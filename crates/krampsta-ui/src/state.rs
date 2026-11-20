@@ -4,11 +4,12 @@
 //! reach it through [`KrampstaApp::pump`], which `poll` runs when the agent host wakes the window.
 
 use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use krampsta_agent::{
-    AgentError, AgentHost, EngineCatalog, History, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest,
-    SessionStore, Toolbox,
+    AgentError, AgentHost, EngineCatalog, History, MockAgent, MockCatalog, MockConfig, Notifier, ProjectOpener,
+    RunRequest, SessionStore, Toolbox,
 };
 use krampsta_core::{AgentEvent, IdGen, MessageId, RunId, Session, SessionError, SessionId, ToolCallId};
 use rune::TextEdit;
@@ -21,6 +22,7 @@ use crate::changes::Changes;
 use crate::menus::OpenMenu;
 use crate::pace::Pace;
 use crate::picker::EngineChoice;
+use crate::projects::ProjectInfo;
 use crate::sample;
 use crate::theme::ThemeChoice;
 
@@ -83,6 +85,12 @@ pub struct KrampstaApp {
     pub(crate) agent: AgentHost,
     /// Where sessions are saved. None: nothing outlives the window (tests, headless scenes).
     pub(crate) store: Option<Arc<dyn SessionStore>>,
+    /// The folder the agent's tools work in. None: runs have no tools.
+    pub project: Option<ProjectInfo>,
+    /// The folder being opened in the background, if one is.
+    pub opening_project: Option<PathBuf>,
+    /// Turns a folder into tools. None: folders can't be opened (tests, scenes).
+    pub(crate) opener: Option<Arc<dyn ProjectOpener>>,
     ids: IdGen,
     window_width: Option<f32>,
     auto_hidden: AutoHidden,
@@ -188,6 +196,9 @@ impl KrampstaApp {
             catalog,
             agent,
             store: None,
+            project: None,
+            opening_project: None,
+            opener: None,
             ids,
             window_width: None,
             auto_hidden: AutoHidden::default(),
@@ -302,7 +313,9 @@ impl KrampstaApp {
         let accounts = self.agent.drain_accounts();
         let lists = self.agent.drain_models();
         let writes = self.agent.drain_writes();
+        let projects = self.agent.drain_projects();
         let mut changed = self.land_accounts(accounts);
+        changed |= self.land_projects(projects);
         changed |= self.land_models(lists);
         let (writes_changed, mut panel_dirty) = self.land_writes(writes);
         changed |= writes_changed;
