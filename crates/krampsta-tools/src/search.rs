@@ -1,22 +1,25 @@
 //! `search`: lines matching a regex (or a literal string) across the project, as ripgrep finds
 //! them: a parallel walk that honours `.gitignore`, SIMD-accelerated line matching, binary files
-//! skipped at their first NUL byte, and a global cap that stops every thread once reached.
+//! skipped at their first NUL byte, and a global cap on matching lines (or paths in paths-only mode).
 //!
-//! Cost: each file is read once, by one thread, streaming through a fixed buffer; the walk quits
-//! when the cap is hit, and only the hits found (at most the cap) are sorted.
+//! Each file is streamed once by one thread. Context is collected in the same pass, and only
+//! files with hits are sorted.
 
+use std::collections::HashSet;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use grep_regex::RegexMatcherBuilder;
-use grep_searcher::sinks::Lossy;
-use grep_searcher::{BinaryDetection, SearcherBuilder};
+use grep_searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkContext, SinkMatch};
 use ignore::WalkState;
 use ignore::overrides::OverrideBuilder;
 use krampsta_agent::CancellationToken;
 use serde::Deserialize;
 
+use crate::edit::Pending;
 use crate::list::walker;
+use crate::overlay::{Overlay, VirtualIgnores};
 use crate::project::Project;
 use crate::read::push_cut;
 
@@ -40,19 +43,86 @@ pub struct Args {
     /// Case: `true` exact, `false` ignored; by default ignored unless the pattern has a capital.
     #[serde(default)]
     case_sensitive: Option<bool>,
+    #[serde(default)]
+    context: usize,
+    #[serde(default)]
+    paths_only: bool,
 }
 
-/// One file's matching lines.
+const MAX_CONTEXT: usize = 10;
+
 struct Hits {
     path: String,
-    lines: Vec<(u64, String)>,
+    lines: Vec<(u64, bool, String)>,
 }
 
-pub fn run(project: &Project, args: Args, cancel: &CancellationToken) -> Result<String, String> {
+struct Collect<'a> {
+    count: &'a AtomicUsize,
+    cancel: &'a CancellationToken,
+    context: usize,
+    paths_only: bool,
+    last_match: Option<u64>,
+    lines: Vec<(u64, bool, String)>,
+}
+
+impl Collect<'_> {
+    fn push(&mut self, number: u64, matched: bool, bytes: &[u8]) {
+        let mut text = String::new();
+        if !self.paths_only {
+            let line = String::from_utf8_lossy(bytes);
+            push_cut(&mut text, line.trim_end_matches(['\n', '\r']), MAX_LINE_CHARS);
+        }
+        self.lines.push((number, matched, text));
+    }
+
+    fn within_tail(&self, number: u64) -> bool {
+        self.last_match.is_some_and(|last| number - last <= self.context as u64)
+    }
+}
+
+impl Sink for Collect<'_> {
+    type Error = std::io::Error;
+
+    fn matched(&mut self, _: &Searcher, mat: &SinkMatch<'_>) -> std::io::Result<bool> {
+        if self.cancel.is_cancelled() {
+            return Ok(false);
+        }
+        let number = mat.line_number().ok_or_else(|| std::io::Error::other("search line numbers are disabled"))?;
+        if self.count.fetch_add(1, Ordering::Relaxed) >= MAX_MATCHES {
+            if self.within_tail(number) {
+                self.push(number, false, mat.bytes());
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        self.last_match = Some(number);
+        self.push(number, true, mat.bytes());
+        Ok(!self.paths_only)
+    }
+
+    fn context(&mut self, _: &Searcher, ctx: &SinkContext<'_>) -> std::io::Result<bool> {
+        let number = ctx.line_number().ok_or_else(|| std::io::Error::other("search line numbers are disabled"))?;
+        if self.cancel.is_cancelled() {
+            return Ok(false);
+        }
+        if self.count.load(Ordering::Relaxed) >= MAX_MATCHES && !self.within_tail(number) {
+            return Ok(false);
+        }
+        self.push(number, false, ctx.bytes());
+        Ok(true)
+    }
+}
+
+pub fn run(project: &Project, pending: &Pending, args: Args, cancel: &CancellationToken) -> Result<String, String> {
     if args.pattern.is_empty() {
         return Err("the pattern is empty".into());
     }
-    let base = project.resolve(args.path.as_deref().unwrap_or("."))?;
+    if args.context > MAX_CONTEXT {
+        return Err(format!("context must be between 0 and {MAX_CONTEXT}"));
+    }
+    let context = if args.paths_only { 0 } else { args.context };
+    let overlay = Overlay::new(project, pending, cancel)?;
+    let base = overlay.resolve(project, args.path.as_deref().unwrap_or("."))?;
     let matcher = RegexMatcherBuilder::new()
         .fixed_strings(args.literal)
         .case_smart(args.case_sensitive.is_none())
@@ -61,44 +131,80 @@ pub fn run(project: &Project, args: Args, cancel: &CancellationToken) -> Result<
         .build(&args.pattern)
         .map_err(|e| format!("the pattern is not a valid regex ({e}); pass literal: true to search plain text"))?;
 
-    let mut walk = walker(&base);
+    let mut overrides = OverrideBuilder::new(&base);
     if let Some(glob) = args.glob.as_deref().filter(|g| !g.trim().is_empty()) {
-        let mut overrides = OverrideBuilder::new(&base);
         overrides.add(glob).map_err(|e| format!("the glob `{glob}` is not valid: {e}"))?;
-        walk.overrides(overrides.build().map_err(|e| format!("the glob `{glob}` is not valid: {e}"))?);
     }
-
+    let overrides = overrides.build().map_err(|e| format!("the glob is not valid: {e}"))?;
     let found = Mutex::new(Vec::<Hits>::new());
     let count = AtomicUsize::new(0);
-    walk.build_parallel().run(|| {
-        let (matcher, found, count) = (matcher.clone(), &found, &count);
-        let mut searcher = SearcherBuilder::new().binary_detection(BinaryDetection::quit(0)).line_number(true).build();
-        Box::new(move |entry| {
-            if cancel.is_cancelled() || count.load(Ordering::Relaxed) >= MAX_MATCHES {
-                return WalkState::Quit;
+    let stopped = || cancel.is_cancelled() || count.load(Ordering::Relaxed) >= MAX_MATCHES;
+    let scan = |searcher: &mut Searcher, path: &Path| {
+        let mut sink = Collect {
+            count: &count,
+            cancel,
+            context,
+            paths_only: args.paths_only,
+            last_match: None,
+            lines: Vec::new(),
+        };
+        let result = match overlay.get(path) {
+            Some(content) => searcher.search_reader(&matcher, content.as_bytes(), &mut sink),
+            None => searcher.search_path(&matcher, path, &mut sink),
+        };
+        // An unreadable file is skipped, as ripgrep does by default.
+        if result.is_ok() && sink.last_match.is_some() {
+            let hits = Hits { path: project.show(path), lines: sink.lines };
+            found.lock().unwrap_or_else(PoisonError::into_inner).push(hits);
+        }
+    };
+
+    let mut walk = walker(&base);
+    walk.overrides(overrides.clone());
+    let mut scanned = HashSet::new();
+    let mut ignores = None;
+    let mut virtual_searcher = make_searcher(context);
+    for (file, _) in overlay.under(&base) {
+        if stopped() {
+            break;
+        }
+        if file.exists() {
+            continue;
+        }
+        if file != base {
+            let matched = overrides.matched(file, false);
+            if matched.is_ignore()
+                || ignores.get_or_insert_with(|| VirtualIgnores::new(project.root())).skips(
+                    file,
+                    &base,
+                    false,
+                    matched.is_whitelist(),
+                )
+            {
+                continue;
             }
-            let Ok(entry) = entry else { return WalkState::Continue };
-            if !entry.file_type().is_some_and(|t| t.is_file()) {
-                return WalkState::Continue;
-            }
-            let mut lines = Vec::new();
-            let sink = Lossy(|number, line: &str| {
-                if count.fetch_add(1, Ordering::Relaxed) >= MAX_MATCHES {
-                    return Ok(false);
+        }
+        scan(&mut virtual_searcher, file);
+        scanned.insert(file);
+    }
+    if base.exists() && !stopped() {
+        walk.build_parallel().run(|| {
+            let mut searcher = make_searcher(context);
+            let scanned = &scanned;
+            Box::new(move |entry| {
+                if stopped() {
+                    return WalkState::Quit;
                 }
-                let mut text = String::with_capacity(line.len().min(MAX_LINE_CHARS + 32));
-                push_cut(&mut text, line.trim_end_matches(['\n', '\r']), MAX_LINE_CHARS);
-                lines.push((number, text));
-                Ok(true)
-            });
-            // An unreadable file is skipped, as ripgrep does by default.
-            if searcher.search_path(&matcher, entry.path(), sink).is_ok() && !lines.is_empty() {
-                let hits = Hits { path: project.show(entry.path()), lines };
-                found.lock().unwrap_or_else(PoisonError::into_inner).push(hits);
-            }
-            WalkState::Continue
-        })
-    });
+                if let Ok(entry) = entry
+                    && entry.file_type().is_some_and(|t| t.is_file())
+                    && !scanned.contains(entry.path())
+                {
+                    scan(&mut searcher, entry.path());
+                }
+                WalkState::Continue
+            })
+        });
+    }
     if cancel.is_cancelled() {
         return Err("stopped".into());
     }
@@ -112,15 +218,35 @@ pub fn run(project: &Project, args: Args, cancel: &CancellationToken) -> Result<
     for hits in &found {
         out.push_str(&hits.path);
         out.push('\n');
-        for (number, text) in &hits.lines {
+        if args.paths_only {
+            continue;
+        }
+        let mut previous = None;
+        for (number, matched, text) in &hits.lines {
             use std::fmt::Write as _;
-            let _ = writeln!(out, "{number:>6}: {text}");
+            if context > 0 && previous.is_some_and(|n: u64| n + 1 < *number) {
+                out.push_str("--\n");
+            }
+            let marker = if *matched { ':' } else { '-' };
+            let _ = writeln!(out, "{number:>6}{marker} {text}");
+            previous = Some(*number);
         }
     }
     if count.load(Ordering::Relaxed) >= MAX_MATCHES {
-        out.push_str("\n(Stopped at 200 matching lines; narrow the pattern, path or glob.)");
+        let unit = if args.paths_only { "matching paths" } else { "matching lines" };
+        use std::fmt::Write as _;
+        let _ = write!(out, "\n(Stopped at {MAX_MATCHES} {unit}; narrow the pattern, path or glob.)");
     }
     Ok(out)
+}
+
+fn make_searcher(context: usize) -> Searcher {
+    SearcherBuilder::new()
+        .binary_detection(BinaryDetection::quit(0))
+        .line_number(true)
+        .before_context(context)
+        .after_context(context)
+        .build()
 }
 
 #[cfg(test)]
@@ -142,9 +268,17 @@ mod tests {
     }
 
     fn search(p: &Project, pattern: &str, f: impl FnOnce(&mut Args)) -> Result<String, String> {
-        let mut args = Args { pattern: pattern.into(), path: None, literal: false, glob: None, case_sensitive: None };
+        let mut args = Args {
+            pattern: pattern.into(),
+            path: None,
+            literal: false,
+            glob: None,
+            case_sensitive: None,
+            context: 0,
+            paths_only: false,
+        };
         f(&mut args);
-        run(p, args, &CancellationToken::new())
+        run(p, &Pending::default(), args, &CancellationToken::new())
     }
 
     #[test]
@@ -166,6 +300,22 @@ mod tests {
         assert_eq!(search(&p, "function", |a| a.glob = Some("*.rs".into())).unwrap(), "No matches for `function`.");
         assert!(search(&p, "run(", |_| {}).unwrap_err().contains("literal: true"));
         assert!(search(&p, "", |_| {}).is_err());
+    }
+
+    #[test]
+    fn overlapping_context_is_printed_once_and_disjoint_groups_are_separated() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "before\nhit\nbetween\nhit\nafter\nskipped\nbefore\nhit\nafter\n")
+            .unwrap();
+        let p = Project::open(dir.path()).unwrap();
+        let out = search(&p, "hit", |a| a.context = 1).unwrap();
+        assert_eq!(
+            out,
+            concat!(
+                "a.txt\n     1- before\n     2: hit\n     3- between\n     4: hit\n     5- after\n",
+                "--\n     7- before\n     8: hit\n     9- after\n",
+            )
+        );
     }
 
     #[test]

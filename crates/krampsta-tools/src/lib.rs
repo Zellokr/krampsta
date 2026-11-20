@@ -8,6 +8,7 @@
 mod command;
 mod edit;
 mod list;
+mod overlay;
 mod policy;
 mod project;
 mod read;
@@ -107,8 +108,8 @@ impl Toolbox for Workspace {
         let (project, pending, cancel) = (&self.project, &self.pending, call.cancel);
         match name {
             "read_file" => read::run(project, pending, parse(arguments)?, cancel).map(ToolOutput::from),
-            "list_files" => list::run(project, parse(arguments)?, cancel).map(ToolOutput::from),
-            "search" => search::run(project, parse(arguments)?, cancel).map(ToolOutput::from),
+            "list_files" => list::run(project, pending, parse(arguments)?, cancel).map(ToolOutput::from),
+            "search" => search::run(project, pending, parse(arguments)?, cancel).map(ToolOutput::from),
             "edit_file" => edit::run(project, pending, parse(arguments)?),
             "run_command" => self.run_command(&parse(arguments)?, call),
             other => Err(format!("there is no tool named `{other}`")),
@@ -191,16 +192,29 @@ fn specs() -> Arc<[ToolSpec]> {
         ),
         spec(
             "read_file",
-            "Read a text file of the project. Lines come numbered; long files come in parts and say \
-             which offset reads on.",
+            "Read numbered lines from the project. Pass path/offset/limit for one read, or ranges \
+             for up to 32 reads in order, sharing one text budget. Batch results show actual lines, \
+             disk/proposal source and next_offset when there is more.",
             json!({
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "File path relative to the project root."},
                     "offset": {"type": "integer", "minimum": 1, "description": "First line to read (from 1). Default: 1."},
-                    "limit": {"type": "integer", "minimum": 1, "description": "Lines to read. Default: 2000."}
-                },
-                "required": ["path"]
+                    "limit": {"type": "integer", "minimum": 1, "description": "Lines to read. Default: 2000."},
+                    "ranges": {
+                        "type": "array", "minItems": 1, "maxItems": 32,
+                        "description": "Use instead of top-level path, offset and limit.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string"},
+                                "offset": {"type": "integer", "minimum": 1},
+                                "limit": {"type": "integer", "minimum": 1}
+                            },
+                            "required": ["path"]
+                        }
+                    }
+                }
             }),
         ),
         spec(
@@ -232,7 +246,9 @@ fn specs() -> Arc<[ToolSpec]> {
                     "path": {"type": "string", "description": "Folder or file to search, relative to the root. Default: the whole project."},
                     "literal": {"type": "boolean", "description": "Match the pattern as plain text. Default: false."},
                     "glob": {"type": "string", "description": "Only files matching this glob, such as `*.rs` or `src/**/*.ts`."},
-                    "case_sensitive": {"type": "boolean", "description": "Default: case-insensitive unless the pattern has a capital letter."}
+                    "case_sensitive": {"type": "boolean", "description": "Default: case-insensitive unless the pattern has a capital letter."},
+                    "context": {"type": "integer", "minimum": 0, "maximum": 10, "description": "Lines before and after each match. Default: 0. Matches use ':', context uses '-'."},
+                    "paths_only": {"type": "boolean", "description": "List matching paths only, once per file. Ignores context. Default: false."}
                 },
                 "required": ["pattern"]
             }),
@@ -272,6 +288,52 @@ mod tests {
         assert_eq!(run(&tools, "read_file", r#"{"path":"hello.txt"}"#, &cancel).unwrap().text, "     1\thi\n");
         assert!(run(&tools, "read_file", "{}", &cancel).unwrap_err().contains("missing field `path`"));
         assert!(run(&tools, "delete_everything", "{}", &cancel).unwrap_err().contains("no tool named"));
+    }
+
+    #[test]
+    fn exploration_sees_proposals_without_writing_them() {
+        let (dir, _config, tools) = workspace(&[("old.txt", "needle on disk\n"), (".gitignore", "ignored/\n")]);
+        let cancel = CancellationToken::new();
+        let tool = |name, args| run(&tools, name, args, &cancel).unwrap().text;
+        tool("edit_file", r#"{"path":"old.txt","old_string":"on disk","new_string":"in proposal"}"#);
+        tool("edit_file", r#"{"path":"new/nested/a.txt","old_string":"","new_string":"\nneedle new\n"}"#);
+        tool("edit_file", r#"{"path":"ignored/b.txt","old_string":"","new_string":"needle ignored\n"}"#);
+
+        assert_eq!(tool("list_files", r#"{"depth":1}"#), ".gitignore\nnew/\nold.txt\n");
+        assert_eq!(tool("list_files", r#"{"path":"new"}"#), "new/nested/\nnew/nested/a.txt\n");
+        assert_eq!(
+            tool("search", r#"{"pattern":"needle"}"#),
+            "new/nested/a.txt\n     2: needle new\nold.txt\n     1: needle in proposal\n"
+        );
+        assert_eq!(
+            tool("search", r#"{"pattern":"needle","path":"new/nested/a.txt"}"#),
+            "new/nested/a.txt\n     2: needle new\n"
+        );
+        assert_eq!(tool("search", r#"{"pattern":"needle","path":"new","glob":"*.rs"}"#), "No matches for `needle`.");
+        assert_eq!(
+            tool("search", r#"{"pattern":"needle","context":1}"#),
+            "new/nested/a.txt\n     1- \n     2: needle new\nold.txt\n     1: needle in proposal\n"
+        );
+        assert_eq!(tool("search", r#"{"pattern":"needle","paths_only":true}"#), "new/nested/a.txt\nold.txt\n");
+        let batch = tool(
+            "read_file",
+            r#"{"ranges":[{"path":"old.txt"},{"path":"new/nested/a.txt","offset":2},{"path":".gitignore"}]}"#,
+        );
+        assert_eq!(
+            batch,
+            concat!(
+                "\"old.txt\" (proposal)\nlines: 1–1\n     1\tneedle in proposal\n\n",
+                "\"new/nested/a.txt\" (proposal)\nlines: 2–2\n     2\tneedle new\n\n",
+                "\".gitignore\" (disk)\nlines: 1–1\n     1\tignored/\n\n",
+            )
+        );
+        assert_eq!(std::fs::read_to_string(dir.path().join("old.txt")).unwrap(), "needle on disk\n");
+        assert!(!dir.path().join("new").exists());
+
+        tools.set_pending("old.txt", None);
+        tools.set_pending("new/nested/a.txt", None);
+        assert_eq!(tool("search", r#"{"pattern":"needle"}"#), "old.txt\n     1: needle on disk\n");
+        assert_eq!(tool("list_files", "{}"), ".gitignore\nold.txt\n");
     }
 
     #[test]

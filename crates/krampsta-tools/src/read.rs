@@ -1,7 +1,7 @@
 //! `read_file`: a file's lines, numbered, streamed only as far as the range asked for.
 //!
-//! Cost: one pass over the bytes up to the last line shown, through one reused line buffer;
-//! nothing past the range is read, and a huge file never sits in memory.
+//! Each range is streamed independently, with one lookahead line to detect continuation.
+//! Batch ranges share a budget for the rendered file text.
 
 use std::fmt::Write as _;
 use std::fs::File;
@@ -24,6 +24,14 @@ const SNIFF: usize = 8 * 1024;
 
 #[derive(Deserialize)]
 pub struct Args {
+    path: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+    ranges: Option<Vec<Range>>,
+}
+
+#[derive(Deserialize)]
+struct Range {
     path: String,
     /// The first line to show, counting from 1.
     #[serde(default)]
@@ -33,37 +41,114 @@ pub struct Args {
 }
 
 pub fn run(project: &Project, pending: &Pending, args: Args, cancel: &CancellationToken) -> Result<String, String> {
+    let mut budget = MAX_BYTES;
+    if let Some(ranges) = args.ranges {
+        if args.path.is_some() || args.offset.is_some() || args.limit.is_some() {
+            return Err("pass either ranges or path/offset/limit, not both".into());
+        }
+        if !(1..=32).contains(&ranges.len()) {
+            return Err("ranges must contain between 1 and 32 entries".into());
+        }
+        let mut out = String::new();
+        for range in ranges {
+            if cancel.is_cancelled() {
+                return Err("stopped".into());
+            }
+            match read_range(project, pending, &range, &mut budget, cancel) {
+                Ok(fragment) => {
+                    let _ = writeln!(out, "{:?} ({})", fragment.path, fragment.source);
+                    if let Some(last) = fragment.last {
+                        let _ = writeln!(out, "lines: {}–{last}", fragment.first);
+                    } else {
+                        out.push_str("lines: none\n");
+                    }
+                    if let Some(next) = fragment.next {
+                        let _ = writeln!(out, "next_offset: {next}");
+                    }
+                    out.push_str(&fragment.text);
+                }
+                Err(error) => {
+                    let _ = writeln!(out, "{:?}: {error}", range.path);
+                }
+            }
+            out.push('\n');
+        }
+        return if cancel.is_cancelled() { Err("stopped".into()) } else { Ok(out) };
+    }
+
+    let range = Range {
+        path: args.path.ok_or("missing field `path` (or pass `ranges`)")?,
+        offset: args.offset,
+        limit: args.limit,
+    };
+    let fragment = read_range(project, pending, &range, &mut budget, cancel)?;
+    let Fragment { path, first, last, next, mut text, .. } = fragment;
+    if let (Some(last), Some(next)) = (last, next) {
+        let _ = write!(text, "\n(Lines {first}–{last} of `{path}`; there is more. Read on with offset {next}.)");
+    } else if last.is_none() {
+        return Ok(format!("`{path}` is empty."));
+    }
+    Ok(text)
+}
+
+struct Fragment {
+    path: String,
+    source: &'static str,
+    first: usize,
+    last: Option<usize>,
+    next: Option<usize>,
+    text: String,
+}
+
+fn read_range(
+    project: &Project,
+    pending: &Pending,
+    range: &Range,
+    budget: &mut usize,
+    cancel: &CancellationToken,
+) -> Result<Fragment, String> {
     // A file with a change proposed reads as proposed: the agent sees its own edits.
-    if let Ok(real) = project.resolve_for_write(&args.path)
+    if let Ok(real) = project.resolve_for_write(&range.path)
         && let Some(content) = pending.get(&project.show(&real))
     {
-        return lines(content.as_bytes(), &project.show(&real), &args, cancel);
+        return lines(content.as_bytes(), project.show(&real), "proposal", range, budget, cancel);
     }
-    let path = project.resolve(&args.path)?;
+    let path = project.resolve(&range.path)?;
     let shown = project.show(&path);
     if path.is_dir() {
         return Err(format!("`{shown}` is a folder; use list_files to see what it holds"));
     }
     let file = File::open(&path).map_err(|e| format!("could not open `{shown}`: {e}"))?;
-    lines(BufReader::with_capacity(64 * 1024, file), &shown, &args, cancel)
+    lines(BufReader::with_capacity(64 * 1024, file), shown, "disk", range, budget, cancel)
 }
 
-/// The numbered lines of the range `args` asks for, read from `reader` only as far as needed.
-fn lines(mut reader: impl BufRead, shown: &str, args: &Args, cancel: &CancellationToken) -> Result<String, String> {
+/// Stream to the requested range and read at most one extra line to detect continuation.
+fn lines(
+    mut reader: impl BufRead,
+    shown: String,
+    source: &'static str,
+    range: &Range,
+    budget: &mut usize,
+    cancel: &CancellationToken,
+) -> Result<Fragment, String> {
+    if cancel.is_cancelled() {
+        return Err("stopped".into());
+    }
+    let first = range.offset.unwrap_or(1).max(1);
+    let mut fragment = Fragment { path: shown, source, first, last: None, next: None, text: String::new() };
+    let shown = &fragment.path;
     let head = reader.fill_buf().map_err(|e| format!("could not read `{shown}`: {e}"))?;
     if head.is_empty() {
-        return Ok(format!("`{shown}` is empty."));
+        return Ok(fragment);
     }
     if head[..head.len().min(SNIFF)].contains(&0) {
         return Err(format!("`{shown}` is a binary file; it can't be shown as text"));
     }
 
-    let first = args.offset.unwrap_or(1).max(1);
-    let limit = args.limit.unwrap_or(DEFAULT_LINES).max(1);
-    let mut out = String::with_capacity(4096);
+    let limit = range.limit.unwrap_or(DEFAULT_LINES).max(1);
     let mut line = Vec::with_capacity(256);
-    let (mut number, mut last) = (0usize, 0usize);
-    let mut more = false;
+    let mut rendered = String::new();
+    let mut number = 0usize;
     loop {
         line.clear();
         let read = reader.read_until(b'\n', &mut line).map_err(|e| format!("could not read `{shown}`: {e}"))?;
@@ -71,29 +156,33 @@ fn lines(mut reader: impl BufRead, shown: &str, args: &Args, cancel: &Cancellati
             break;
         }
         number += 1;
-        if number % 4096 == 0 && cancel.is_cancelled() {
+        if number.is_multiple_of(4096) && cancel.is_cancelled() {
             return Err("stopped".into());
         }
         if number < first {
             continue; // Skipped lines are never decoded.
         }
-        if number - first == limit || out.len() >= MAX_BYTES {
-            more = true;
+        if number - first == limit || *budget == 0 {
+            fragment.next = Some(number);
             break;
         }
         let text = String::from_utf8_lossy(trim_newline(&line));
-        let _ = write!(out, "{number:>6}\t");
-        push_cut(&mut out, &text, MAX_LINE_CHARS);
-        out.push('\n');
-        last = number;
+        rendered.clear();
+        let _ = write!(rendered, "{number:>6}\t");
+        push_cut(&mut rendered, &text, MAX_LINE_CHARS);
+        rendered.push('\n');
+        if rendered.len() > *budget {
+            fragment.next = Some(number);
+            break;
+        }
+        *budget -= rendered.len();
+        fragment.text.push_str(&rendered);
+        fragment.last = Some(number);
     }
-    if last == 0 {
+    if fragment.last.is_none() && fragment.next.is_none() {
         return Err(format!("`{shown}` has {number} lines; offset {first} is past its end"));
     }
-    if more {
-        let _ = write!(out, "\n(Lines {first}–{last} of `{shown}`; there is more. Read on with offset {}.)", last + 1);
-    }
-    Ok(out)
+    Ok(fragment)
 }
 
 fn trim_newline(line: &[u8]) -> &[u8] {
@@ -126,7 +215,12 @@ mod tests {
     }
 
     fn read(p: &Project, path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String> {
-        run(p, &Pending::default(), Args { path: path.into(), offset, limit }, &CancellationToken::new())
+        run(
+            p,
+            &Pending::default(),
+            Args { path: Some(path.into()), offset, limit, ranges: None },
+            &CancellationToken::new(),
+        )
     }
 
     #[test]
@@ -136,7 +230,12 @@ mod tests {
         pending.set("a.txt", Some("new\n".into()));
         pending.set("src/b.txt", Some("born\n".into()));
         let read = |path: &str| {
-            run(&p, &pending, Args { path: path.into(), offset: None, limit: None }, &CancellationToken::new())
+            run(
+                &p,
+                &pending,
+                Args { path: Some(path.into()), offset: None, limit: None, ranges: None },
+                &CancellationToken::new(),
+            )
         };
         assert_eq!(read("./a.txt").unwrap(), "     1\tnew\n");
         assert_eq!(read("src/b.txt").unwrap(), "     1\tborn\n");
@@ -150,6 +249,20 @@ mod tests {
         assert!(part.starts_with("     2\ttwo\n     3\tthree\n"), "{part}");
         assert!(part.ends_with("Read on with offset 4.)"), "{part}");
         assert!(read(&p, "a.txt", Some(9), None).unwrap_err().contains("has 4 lines"));
+    }
+
+    #[test]
+    fn batch_ranges_share_a_budget_and_resume_at_the_first_omitted_line() {
+        let content = format!("{}\n", "x".repeat(1000)).repeat(300);
+        let (_d, p) = project(&[("a.txt", content.as_bytes())]);
+        let args = serde_json::from_str(
+            r#"{"ranges":[{"path":"a.txt","limit":200},{"path":"a.txt","offset":201},{"path":"a.txt","offset":300}]}"#,
+        )
+        .unwrap();
+        let out = run(&p, &Pending::default(), args, &CancellationToken::new()).unwrap();
+        assert!(out.contains("lines: 1–200\nnext_offset: 201\n"));
+        assert!(out.contains("lines: 201–260\nnext_offset: 261\n"));
+        assert!(out.contains("lines: none\nnext_offset: 300\n"));
     }
 
     #[test]

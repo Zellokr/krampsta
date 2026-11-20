@@ -29,6 +29,10 @@ impl Pending {
         self.lock().get(path).cloned()
     }
 
+    pub fn snapshot(&self) -> HashMap<String, Arc<str>> {
+        self.lock().clone()
+    }
+
     pub fn set(&self, path: &str, content: Option<Arc<str>>) {
         let mut map = self.lock();
         match content {
@@ -70,7 +74,7 @@ pub fn run(project: &Project, pending: &Pending, args: Args) -> Result<ToolOutpu
         Some(_) if old.is_empty() => {
             return Err(format!("`{shown}` already exists; give old_string, the exact text to replace"));
         }
-        Some(text) => replace(text, old, new, args.replace_all).map_err(|why| why.message(&shown))?,
+        Some(text) => replace(text, old, new, args.replace_all).map_err(|why| why.message(&shown, text, old))?,
     };
     if current.as_deref() == Some(after.as_str()) {
         return Err("the edit changes nothing: old_string and new_string give the same file".into());
@@ -93,16 +97,33 @@ enum Miss {
 }
 
 impl Miss {
-    fn message(&self, shown: &str) -> String {
+    fn message(&self, shown: &str, text: &str, old: &str) -> String {
         match self {
             Miss::NotFound => format!(
                 "old_string was not found in `{shown}`. It must match the file exactly, spaces and \
                  line breaks included; read the file again and copy the text from it"
             ),
-            Miss::MoreThanOnce => format!(
-                "old_string appears more than once in `{shown}`; add surrounding lines to make it \
-                 unique, or pass replace_all: true to change every occurrence"
-            ),
+            Miss::MoreThanOnce => {
+                const MAX_CANDIDATES: usize = 10;
+                let mut matches = text.match_indices(old);
+                let mut line = 1;
+                let mut previous = 0;
+                let lines = matches
+                    .by_ref()
+                    .take(MAX_CANDIDATES)
+                    .map(|(at, _)| {
+                        line += text.as_bytes()[previous..at].iter().filter(|&&b| b == b'\n').count();
+                        previous = at;
+                        line.to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let suffix = if matches.next().is_some() { ", …" } else { "" };
+                format!(
+                    "old_string appears more than once in `{shown}` (candidate start lines: {lines}{suffix}); \
+                     add surrounding lines to make it unique, or pass replace_all: true to change every occurrence"
+                )
+            }
         }
     }
 }
@@ -208,7 +229,10 @@ mod tests {
     fn the_text_must_be_found_exactly_once_unless_all_are_asked_for() {
         let (_d, p, pending) = setup();
         assert!(edit(&p, &pending, "a.rs", "fn c", "x", false).unwrap_err().contains("not found"));
-        assert!(edit(&p, &pending, "a.rs", "fn a() {}", "x", false).unwrap_err().contains("more than once"));
+        let ambiguous = edit(&p, &pending, "a.rs", "fn a() {}", "x", false).unwrap_err();
+        assert!(ambiguous.contains("more than once"));
+        assert!(ambiguous.contains("candidate start lines: 1, 3"));
+        assert!(pending.get("a.rs").is_none());
         let all = edit(&p, &pending, "a.rs", "fn a() {}", "fn z() {}", true).unwrap().change.unwrap();
         assert_eq!(&*all.after, "fn z() {}\nfn b() {}\nfn z() {}\n");
         assert!(edit(&p, &pending, "a.rs", "fn b() {}", "fn b() {}", false).unwrap_err().contains("changes nothing"));
