@@ -57,6 +57,10 @@ pub struct VirtualIgnores<'a> {
     exclude: Gitignore,
 }
 
+/// Ignore files are read as the disk walk (the `ignore` crate) reads them: a missing file is no
+/// rules, and an unreadable one or a bad line is skipped, keeping the rest. So proposals and
+/// files on disk are hidden by the same rules, and a malformed `.gitignore` never makes a
+/// listing or a search fail.
 impl<'a> VirtualIgnores<'a> {
     pub fn new(root: &'a Path) -> Self {
         let global = GitignoreBuilder::new(root).build_global().0;

@@ -239,6 +239,24 @@ mod tests {
     }
 
     #[test]
+    fn a_repeated_old_string_names_the_lines_it_starts_on() {
+        let (dir, p, pending) = setup();
+        // `fn a() {}` is on lines 1 and 3.
+        let two = edit(&p, &pending, "a.rs", "fn a() {}", "x", false).unwrap_err();
+        assert!(two.contains("(candidate start lines: 1, 3)"), "{two}");
+
+        // Twelve on the odd lines 1–23: the first ten are named, then an ellipsis.
+        std::fs::write(dir.path().join("many.rs"), "dup\nfill\n".repeat(12)).unwrap();
+        let many = edit(&p, &pending, "many.rs", "dup", "x", false).unwrap_err();
+        assert!(many.contains("(candidate start lines: 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, …)"), "{many}");
+
+        // A match spanning lines starts where it starts.
+        std::fs::write(dir.path().join("span.rs"), "a\nb\nc\na\nb\n").unwrap();
+        let span = edit(&p, &pending, "span.rs", "a\nb", "x", false).unwrap_err();
+        assert!(span.contains("(candidate start lines: 1, 4)"), "{span}");
+    }
+
+    #[test]
     fn files_are_created_with_an_empty_old_string_only_when_missing() {
         let (_d, p, pending) = setup();
         let change = edit(&p, &pending, "src/new.rs", "", "pub fn new() {}\n", false).unwrap().change.unwrap();

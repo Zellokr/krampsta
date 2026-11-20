@@ -291,6 +291,27 @@ mod tests {
     }
 
     #[test]
+    fn proposals_are_hidden_as_git_would_hide_them_if_they_were_on_disk() {
+        let (dir, _config, tools) = workspace(&[(".gitignore", "target/\n!target/keep.rs\n*.log\n")]);
+        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/.gitignore"), "local.txt\n").unwrap();
+        std::fs::create_dir_all(dir.path().join(".git/info")).unwrap();
+        std::fs::write(dir.path().join(".git/info/exclude"), "secret.txt\n").unwrap();
+        let cancel = CancellationToken::new();
+        let tool = |name, args: &str| run(&tools, name, args, &cancel).unwrap().text;
+        for path in ["target/keep.rs", "debug.log", "sub/local.txt", "secret.txt", "sub/ok.txt"] {
+            tool("edit_file", &format!(r#"{{"path":"{path}","old_string":"","new_string":"needle\n"}}"#));
+        }
+
+        // `!target/keep.rs` can't bring back a file inside an excluded folder, as in git; a file
+        // pattern, a subfolder's own rules and .git/info/exclude all apply to proposals too.
+        assert_eq!(tool("list_files", "{}"), ".gitignore\nsub/\nsub/.gitignore\nsub/ok.txt\n");
+        assert_eq!(tool("search", r#"{"pattern":"needle"}"#), "sub/ok.txt\n     1: needle\n");
+        // A proposal still reads by its path, ignored or not: the agent wrote it.
+        assert_eq!(tool("read_file", r#"{"path":"target/keep.rs"}"#), "     1\tneedle\n");
+    }
+
+    #[test]
     fn exploration_sees_proposals_without_writing_them() {
         let (dir, _config, tools) = workspace(&[("old.txt", "needle on disk\n"), (".gitignore", "ignored/\n")]);
         let cancel = CancellationToken::new();
