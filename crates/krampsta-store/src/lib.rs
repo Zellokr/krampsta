@@ -6,7 +6,8 @@
 //! thread serializes and writes it, so no frame waits on the disk. Saves of the same session
 //! that pile up before the writer gets to them collapse into one write of the newest copy.
 //! Each file is written beside its final name and renamed over it, so a crash never leaves
-//! half a session behind.
+//! half a session behind. The same thread reads the history when asked
+//! ([`SessionStore::load`](krampsta_agent::SessionStore::load)), before any write queued after.
 //!
 //! This crate knows nothing about the UI framework.
 
@@ -18,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 
-use krampsta_agent::SessionStore;
+use krampsta_agent::{History, Notifier, SessionStore};
 use krampsta_core::{Session, SessionId};
 
 use crate::format::SavedSession;
@@ -108,6 +109,9 @@ enum Op {
 struct Queue {
     pending: HashMap<SessionId, Op>,
     failures: Vec<String>,
+    /// A load was asked for: whom to wake once `history` holds it.
+    load: Option<Notifier>,
+    history: Option<History>,
     /// The store is being dropped: write what is left, then stop.
     closing: bool,
 }
@@ -165,6 +169,15 @@ impl FileStore {
 }
 
 impl SessionStore for FileStore {
+    fn load(&self, done: Notifier) {
+        self.shared.lock().load = Some(done);
+        self.shared.wake.notify_one();
+    }
+
+    fn take_history(&self) -> Option<History> {
+        self.shared.lock().history.take()
+    }
+
     fn save(&self, session: Session) {
         self.queue(session.id, Op::Save(Box::new(session)));
     }
@@ -193,13 +206,19 @@ impl Drop for FileStore {
 
 fn write_loop(dir: &Path, shared: &Shared) {
     loop {
-        let (batch, closing) = {
+        let (load_for, batch, closing) = {
             let mut queue = shared.lock();
-            while queue.pending.is_empty() && !queue.closing {
+            while queue.pending.is_empty() && queue.load.is_none() && !queue.closing {
                 queue = shared.wake.wait(queue).unwrap_or_else(std::sync::PoisonError::into_inner);
             }
-            (std::mem::take(&mut queue.pending), queue.closing)
+            (queue.load.take(), std::mem::take(&mut queue.pending), queue.closing)
         };
+        if let Some(done) = load_for {
+            let loaded = load(dir);
+            let failures = loaded.failures.iter().map(ToString::to_string).collect();
+            shared.lock().history = Some(History { sessions: loaded.sessions, failures });
+            done();
+        }
         let failures: Vec<String> = batch
             .into_iter()
             .filter_map(|(id, op)| apply(dir, id, op).err())
@@ -375,6 +394,27 @@ mod tests {
         assert_eq!(loaded.failures.len(), 2);
         assert!(loaded.failures.iter().any(|e| matches!(e, StoreError::Damaged { .. })));
         assert!(loaded.failures.iter().any(|e| matches!(e, StoreError::Newer { found: 99, .. })));
+    }
+
+    #[test]
+    fn load_reads_in_the_background_and_wakes_the_caller_once_it_is_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        save_all(dir.path(), &[worked_session(1), worked_session(2)]);
+        fs::write(dir.path().join("ses3.json"), "{ not json").unwrap();
+
+        let store = FileStore::open(dir.path()).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        store.load(Arc::new(move || {
+            let _ = tx.lock().map(|tx| tx.send(()));
+        }));
+        rx.recv_timeout(std::time::Duration::from_secs(5)).expect("load wakes the caller");
+        let history = store.take_history().expect("the history is ready once woken");
+        let ids: Vec<SessionId> = history.sessions.iter().map(|s| s.id).collect();
+        assert_eq!(ids, vec![SessionId(2), SessionId(1)]);
+        assert_eq!(history.failures.len(), 1);
+        assert!(history.failures[0].contains("ses3.json"), "{:?}", history.failures);
+        assert!(store.take_history().is_none(), "handed over once");
     }
 
     #[test]

@@ -106,7 +106,9 @@ krampsta-app ──▶ krampsta-store ──────▶ krampsta-agent
   sólo encola; un hilo escribe, junta los guardados repetidos de una sesión y renombra un
   temporal sobre el archivo para que un cierre a medias no lo corrompa. Se guarda al enviar, al
   terminar cada herramienta y al acabar la ejecución, nunca por palabra. Las ejecuciones
-  headless no guardan nada.
+  headless no guardan nada. Al arrancar, `setup` pide el historial (`SessionStore::load`); el
+  mismo hilo lo lee y despierta la ventana, y `poll` pone las sesiones guardadas bajo las
+  abiertas: el primer frame no espera al disco.
 
 ## Requisitos
 

@@ -35,7 +35,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
 - Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
   `providers → core`, `app → tools → agent`, `app → store → agent`, `store → core`. Sin ciclos;
   la UI nunca depende de `krampsta-providers`, `krampsta-tools` ni `krampsta-store`.
-- Historial: la UI guarda con `SessionStore` (sólo encola), en momentos discretos (enviar, fin de
+- Historial: se lee una vez, en `setup` (`load_history`), y llega por `poll` (`take_history`).
+  La UI guarda con `SessionStore` (sólo encola), en momentos discretos (enviar, fin de
   herramienta, fin de ejecución, borrar), nunca por delta ni por frame. Con almacén, los ids de
   sesión salen de `IdGen::from_clock` para no repetir uno guardado. Las ejecuciones headless
   (`rune::is_headless()`) no abren almacén. Un cambio en la forma en disco sube

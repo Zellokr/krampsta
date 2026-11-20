@@ -1,15 +1,33 @@
 //! Where sessions are kept between launches.
 //!
 //! The UI calls a [`SessionStore`] from its own thread, so every method returns at once: an
-//! implementation queues the work and does the I/O elsewhere. What fails comes back later
-//! through [`SessionStore::drain_failures`].
+//! implementation queues the work and does the I/O elsewhere. What it reads comes back through
+//! [`SessionStore::take_history`] once it wakes the window; what fails, through
+//! [`SessionStore::drain_failures`].
 
 use std::sync::Mutex;
 
 use krampsta_core::{Session, SessionId};
 
+use crate::Notifier;
+
+/// The saved sessions, newest first, and why any that are there couldn't be read.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct History {
+    pub sessions: Vec<Session>,
+    /// One readable message per session file that couldn't be read.
+    pub failures: Vec<String>,
+}
+
 /// Keeps sessions somewhere durable. Never blocks the caller.
 pub trait SessionStore: Send + Sync {
+    /// Starts reading every saved session in the background, and calls `done` once
+    /// [`take_history`](Self::take_history) has them.
+    fn load(&self, done: Notifier);
+
+    /// The history [`load`](Self::load) read, once (None before it is ready, and after).
+    fn take_history(&self) -> Option<History>;
+
     /// Queues `session` to be written, replacing what was saved for it. Saving the same session
     /// again before the write happens only writes the newest copy.
     fn save(&self, session: Session);
@@ -21,15 +39,21 @@ pub trait SessionStore: Send + Sync {
     fn drain_failures(&self) -> Vec<String>;
 }
 
-/// A store that keeps the latest copy of each session in memory (tests).
+/// A store that keeps the latest copy of each session in memory (tests). Loading is immediate.
 #[derive(Debug, Default)]
 pub struct MemoryStore {
     sessions: Mutex<Vec<Session>>,
+    history: Mutex<Option<History>>,
 }
 
 impl MemoryStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A store that already holds `sessions` (newest first), as if saved by an earlier launch.
+    pub fn with_sessions(sessions: Vec<Session>) -> Self {
+        MemoryStore { sessions: Mutex::new(sessions), history: Mutex::default() }
     }
 
     /// What is saved now, in the order sessions were first saved.
@@ -39,6 +63,17 @@ impl MemoryStore {
 }
 
 impl SessionStore for MemoryStore {
+    fn load(&self, done: Notifier) {
+        if let Ok(mut history) = self.history.lock() {
+            *history = Some(History { sessions: self.sessions(), failures: Vec::new() });
+        }
+        done();
+    }
+
+    fn take_history(&self) -> Option<History> {
+        self.history.lock().ok().and_then(|mut h| h.take())
+    }
+
     fn save(&self, session: Session) {
         if let Ok(mut saved) = self.sessions.lock() {
             match saved.iter_mut().find(|s| s.id == session.id) {
@@ -61,6 +96,9 @@ impl SessionStore for MemoryStore {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use super::*;
 
     #[test]
@@ -73,5 +111,17 @@ mod tests {
         let saved = store.sessions();
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].title, "renamed");
+    }
+
+    #[test]
+    fn memory_store_hands_its_history_over_once_and_wakes_the_caller() {
+        let store = MemoryStore::with_sessions(vec![Session::new(SessionId(5))]);
+        assert_eq!(store.take_history(), None, "nothing before a load");
+        let woke = Arc::new(AtomicBool::new(false));
+        let flag = woke.clone();
+        store.load(Arc::new(move || flag.store(true, Ordering::SeqCst)));
+        assert!(woke.load(Ordering::SeqCst));
+        assert_eq!(store.take_history().map(|h| h.sessions.len()), Some(1));
+        assert_eq!(store.take_history(), None, "handed over once");
     }
 }

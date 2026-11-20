@@ -7,8 +7,8 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use krampsta_agent::{
-    AgentError, AgentHost, EngineCatalog, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest, SessionStore,
-    Toolbox,
+    AgentError, AgentHost, EngineCatalog, History, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest,
+    SessionStore, Toolbox,
 };
 use krampsta_core::{AgentEvent, IdGen, MessageId, RunId, Session, SessionError, SessionId, ToolCallId};
 use rune::TextEdit;
@@ -110,6 +110,37 @@ impl KrampstaApp {
         }
         self.store = Some(store);
         self
+    }
+
+    /// Starts reading the saved sessions in the background; they land in [`pump`](Self::pump)
+    /// after `done` wakes the window. Without a store there is nothing to read.
+    pub fn load_history(&self, done: Notifier) {
+        if let Some(store) = &self.store {
+            store.load(done);
+        }
+    }
+
+    /// Lists the saved sessions below the ones already here (sessions made this launch are
+    /// newer), keeping the selection. Files that couldn't be read are reported in the notice.
+    fn land_history(&mut self, history: History) -> bool {
+        let before = self.sessions.len();
+        for session in history.sessions {
+            if self.session(session.id).is_none() {
+                self.sessions.push(session);
+            }
+        }
+        let mut changed = self.sessions.len() != before;
+        if let Some(first) = history.failures.first() {
+            for failure in &history.failures {
+                eprintln!("krampsta: {failure}");
+            }
+            self.notice = Some(match history.failures.len() {
+                1 => first.clone(),
+                n => format!("{n} saved sessions couldn't be read; the first: {first}"),
+            });
+            changed = true;
+        }
+        changed
     }
 
     /// Queues the session for saving, if there is a store and it has something worth keeping.
@@ -308,6 +339,9 @@ impl KrampstaApp {
             }
         }
         changed |= self.finish_apply_and_validate();
+        if let Some(history) = self.store.as_ref().and_then(|s| s.take_history()) {
+            changed |= self.land_history(history);
+        }
         if let Some(failure) = self.store.as_ref().and_then(|s| s.drain_failures().pop()) {
             self.notice = Some(failure);
             changed = true;
@@ -480,6 +514,53 @@ mod tests {
         app.ask_delete(id);
         app.confirm_delete();
         assert!(store.sessions().is_empty(), "deleting a session deletes what was saved");
+    }
+
+    /// A session an earlier launch saved: a question and its answer.
+    fn saved_session(id: u64, title: &str) -> Session {
+        let mut s = Session::with_title(SessionId(id), title);
+        s.push_message(MessageRole::User, "Where is the parser?");
+        s.push_message(MessageRole::Assistant, "In `src/parse.rs`.");
+        s.status = AgentStatus::Completed;
+        s
+    }
+
+    #[test]
+    fn saved_sessions_land_below_the_open_ones_and_keep_the_selection() {
+        let older = saved_session(1_700_000_000_000, "Older");
+        let newer = saved_session(1_700_000_000_500, "Newer");
+        let store = Arc::new(krampsta_agent::MemoryStore::with_sessions(vec![newer.clone(), older.clone()]));
+        let mut app = app().with_store(store);
+        let (open, selected) = (app.sessions.len(), app.selected);
+        assert!(app.session(newer.id).is_none(), "nothing is read before load_history");
+
+        app.load_history(Arc::new(|| {}));
+        assert!(app.pump(), "landing the history is a visible change");
+        assert_eq!(app.sessions.len(), open + 2);
+        assert_eq!(app.sessions[open].id, newer.id, "newest saved first, after the open sessions");
+        assert_eq!(app.sessions[open + 1].id, older.id);
+        assert_eq!(app.selected, selected);
+        assert!(!app.pump(), "handed over once");
+
+        // A saved conversation goes on where it left off.
+        app.select(newer.id);
+        app.draft = TextEdit::new("And the lexer?");
+        app.send().unwrap();
+        pump_until_idle(&mut app);
+        let s = app.session(newer.id).unwrap();
+        assert_eq!(s.messages.len(), 4);
+        let ids: HashSet<MessageId> = s.messages.iter().map(|m| m.id).collect();
+        assert_eq!(ids.len(), 4, "new messages don't reuse saved ids");
+    }
+
+    #[test]
+    fn unreadable_saved_sessions_are_reported_in_the_notice() {
+        let mut app = app();
+        assert!(app.land_history(History { sessions: Vec::new(), failures: vec!["ses9.json is damaged".into()] }));
+        assert_eq!(app.notice.as_deref(), Some("ses9.json is damaged"));
+        let failures = vec!["a".into(), "b".into()];
+        app.land_history(History { sessions: Vec::new(), failures });
+        assert_eq!(app.notice.as_deref(), Some("2 saved sessions couldn't be read; the first: a"));
     }
 
     #[test]

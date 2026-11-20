@@ -43,6 +43,9 @@ pub fn chrome() -> Chrome {
 }
 
 fn setup(s: &mut KrampstaApp, waker: Waker) {
+    // The saved sessions are read off the UI thread and land in `poll`: the first frame never
+    // waits on the disk.
+    s.load_history(waker.clone());
     s.set_notifier(waker);
     // The selected provider's models load in the background while the window opens.
     s.ensure_models();

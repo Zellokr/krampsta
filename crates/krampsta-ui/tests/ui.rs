@@ -4,8 +4,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use krampsta_agent::{Effort, MockCatalog, MockConfig};
-use krampsta_core::AgentStatus;
+use krampsta_agent::{Effort, MemoryStore, MockCatalog, MockConfig};
+use krampsta_core::{AgentStatus, MessageRole, Session, SessionId};
 use krampsta_ui::picker::Picker;
 use krampsta_ui::{KrampstaApp, Screen, app, keys};
 use rune::runtime::ElementInfo;
@@ -115,6 +115,31 @@ fn new_session_adds_a_selected_row_with_an_empty_conversation() {
     let row = element(&rt, &keys::session(id)).expect("the new row");
     assert!(row.item_selected, "the new session is the selected row");
     assert!(has(&rt, keys::EMPTY_STATE));
+}
+
+#[test]
+fn saved_sessions_show_up_in_the_sidebar_and_open_with_their_messages() {
+    let mut saved = Session::with_title(SessionId(1_700_000_000_000), "Saved yesterday");
+    saved.push_message(MessageRole::User, "Where is the parser?");
+    saved.push_message(MessageRole::Assistant, "In `src/parse.rs`.");
+    let store = Arc::new(MemoryStore::with_sessions(vec![saved.clone()]));
+    let state = KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant()))).with_store(store);
+    let mut rt = Runtime::new(state, app::view, SIZE, Env::new(true, 1.0));
+    settle(&mut rt);
+    assert!(!has(&rt, &keys::session(saved.id)), "the first frames don't wait for the history");
+
+    // What `setup` does with the window's waker, then the `poll` it triggers.
+    rt.update_if(|s, _| {
+        s.load_history(Arc::new(|| {}));
+        s.pump()
+    });
+    settle(&mut rt);
+    click(&mut rt, &keys::session(saved.id));
+    assert_eq!(rt.state.selected, saved.id);
+    assert!(
+        rt.elements().iter().any(|e| e.text.as_deref().is_some_and(|t| t.contains("Where is the parser?"))),
+        "the saved conversation shows"
+    );
 }
 
 #[test]

@@ -34,6 +34,6 @@ pub use host::Notifier;
 pub use host::{AccountEvent, ModelList, Written};
 pub use mock::MockAgent;
 pub use mock::MockConfig;
-pub use store::{MemoryStore, SessionStore};
+pub use store::{History, MemoryStore, SessionStore};
 pub use tokio_util::sync::CancellationToken;
 pub use tools::{Access, Approval, Call, Decision, ToolOutput, ToolSpec, Toolbox};
