@@ -7,7 +7,8 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use krampsta_agent::{
-    AgentError, AgentHost, EngineCatalog, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest, Toolbox,
+    AgentError, AgentHost, EngineCatalog, MockAgent, MockCatalog, MockConfig, Notifier, RunRequest, SessionStore,
+    Toolbox,
 };
 use krampsta_core::{AgentEvent, IdGen, MessageId, RunId, Session, SessionError, SessionId, ToolCallId};
 use rune::TextEdit;
@@ -80,6 +81,8 @@ pub struct KrampstaApp {
     pub confirm_delete: Option<SessionId>,
     pub(crate) catalog: Arc<dyn EngineCatalog>,
     pub(crate) agent: AgentHost,
+    /// Where sessions are saved. None: nothing outlives the window (tests, headless scenes).
+    pub(crate) store: Option<Arc<dyn SessionStore>>,
     ids: IdGen,
     window_width: Option<f32>,
     auto_hidden: AutoHidden,
@@ -91,6 +94,31 @@ impl KrampstaApp {
     pub fn with_tools(mut self, tools: Arc<dyn Toolbox>) -> Self {
         self.agent.set_toolbox(Some(tools));
         self
+    }
+
+    /// Saves sessions to `store` from now on: each one once it has a message, again as its
+    /// runs make progress, and removes it when deleted. Session ids then come from the clock,
+    /// so they never repeat a saved one; the sessions already here are renumbered.
+    pub fn with_store(mut self, store: Arc<dyn SessionStore>) -> Self {
+        self.ids = IdGen::from_clock();
+        for session in &mut self.sessions {
+            let id = SessionId(self.ids.next());
+            if self.selected == session.id {
+                self.selected = id;
+            }
+            session.id = id;
+        }
+        self.store = Some(store);
+        self
+    }
+
+    /// Queues the session for saving, if there is a store and it has something worth keeping.
+    fn persist(&self, id: SessionId) {
+        if let (Some(store), Some(session)) = (&self.store, self.session(id))
+            && !session.messages.is_empty()
+        {
+            store.save(session.clone());
+        }
     }
 
     /// A fresh app running what `catalog` offers, starting from its initial selection, with
@@ -128,6 +156,7 @@ impl KrampstaApp {
             confirm_delete: None,
             catalog,
             agent,
+            store: None,
             ids,
             window_width: None,
             auto_hidden: AutoHidden::default(),
@@ -211,13 +240,14 @@ impl KrampstaApp {
         self.draft = TextEdit::new("");
         self.draft.focused = true;
         self.notice = None;
-        if let Err(e) = self.agent.start(request) {
-            if let Some(s) = self.session_mut(id) {
-                s.apply(&AgentEvent::Failed { run, error: e.to_string() });
-            }
-            return Err(e.into());
+        let started = self.agent.start(request);
+        if let Err(e) = &started
+            && let Some(s) = self.session_mut(id)
+        {
+            s.apply(&AgentEvent::Failed { run, error: e.to_string() });
         }
-        Ok(run)
+        self.persist(id);
+        started.map_err(SendError::from)
     }
 
     /// `send` for a handler: problems become the composer's notice instead of an error.
@@ -266,13 +296,22 @@ impl KrampstaApp {
                     if event.is_terminal() {
                         self.forget_approvals(event.run());
                     }
-                    if let Some(s) = self.session_mut(e.session) {
-                        changed |= s.apply(&event);
+                    let applied = self.session_mut(e.session).is_some_and(|s| s.apply(&event));
+                    changed |= applied;
+                    // Saved at each step's end, not per word: a crash mid-run keeps the
+                    // finished steps, and no frame writes.
+                    let step_ended = matches!(event, AgentEvent::ToolCallFinished { .. }) || event.is_terminal();
+                    if applied && step_ended {
+                        self.persist(e.session);
                     }
                 }
             }
         }
         changed |= self.finish_apply_and_validate();
+        if let Some(failure) = self.store.as_ref().and_then(|s| s.drain_failures().pop()) {
+            self.notice = Some(failure);
+            changed = true;
+        }
         if panel_dirty {
             self.refresh_diff();
         }
@@ -419,6 +458,28 @@ mod tests {
         assert_eq!(s.messages.len(), 2);
         assert_eq!(s.messages[1].role, MessageRole::Assistant);
         assert!(s.messages[1].content.contains("Refactor the parser"));
+    }
+
+    #[test]
+    fn sessions_are_saved_once_they_have_a_message_and_again_when_the_run_ends() {
+        let store = Arc::new(krampsta_agent::MemoryStore::new());
+        let mut app = app().with_store(store.clone());
+        assert!(app.sessions.iter().all(|s| s.id.0 > 1_600_000_000_000), "clock ids, not 1, 2…");
+        assert_eq!(app.current().map(|s| s.id), Some(app.selected), "the selection follows the new ids");
+
+        let id = app.new_session();
+        assert!(store.sessions().is_empty(), "an empty session isn't saved");
+        app.draft = TextEdit::new("Refactor the parser");
+        app.send().unwrap();
+        assert_eq!(store.sessions()[0].status, AgentStatus::Running, "saved as soon as it was sent");
+        pump_until_idle(&mut app);
+        let saved = store.sessions();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(Some(&saved[0]), app.session(id), "the finished run, reply included");
+
+        app.ask_delete(id);
+        app.confirm_delete();
+        assert!(store.sessions().is_empty(), "deleting a session deletes what was saved");
     }
 
     #[test]

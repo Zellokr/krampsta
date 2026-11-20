@@ -58,6 +58,21 @@ impl IdGen {
         IdGen(AtomicU64::new(1))
     }
 
+    /// Ids starting at `first`.
+    pub const fn starting_at(first: u64) -> Self {
+        IdGen(AtomicU64::new(first))
+    }
+
+    /// Ids starting at the current time in milliseconds, for ids that must not repeat across
+    /// launches (saved sessions): a later launch starts past every id an earlier one minted,
+    /// unless that one minted more than one id per millisecond it ran. Ids grow with time.
+    pub fn from_clock() -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(1, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX / 2));
+        Self::starting_at(now)
+    }
+
     pub fn next(&self) -> u64 {
         self.0.fetch_add(1, Ordering::Relaxed)
     }
@@ -75,5 +90,13 @@ mod tests {
         assert!(b > a);
         assert_eq!(a.to_string(), "ses1");
         assert_eq!(RunId(7).to_string(), "run7");
+    }
+
+    #[test]
+    fn clock_ids_start_past_the_small_ones() {
+        let ids = IdGen::from_clock();
+        let first = ids.next();
+        assert!(first > 1_600_000_000_000, "milliseconds since 1970");
+        assert_eq!(ids.next(), first + 1);
     }
 }

@@ -20,6 +20,10 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `list_files`, `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
   propone, y la escritura al aceptar), `command` (`run_command`), `policy` (reglas de permisos).
   No depende de Rune.
+- `crates/krampsta-store` — historial en disco: `FileStore` (implementa `SessionStore` de
+  `krampsta-agent`; un JSON por sesión, escrito por un hilo propio, de forma atómica), `load`
+  (lectura bloqueante, fuera del hilo de la UI) y `format` (la forma en disco, versionada,
+  separada del dominio). No depende de Rune.
 - `crates/krampsta-ui` — `KrampstaApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`
   (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
   (piezas), `accounts.rs` (diálogo de inicio de sesión), `approvals.rs` (permitir comandos),
@@ -29,8 +33,13 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   de ejemplo).
 - `crates/krampsta-app` — binario `krampsta`; sólo construye el catálogo y arranca.
 - Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
-  `providers → core`, `app → tools → agent`. Sin ciclos; la UI nunca depende de
-  `krampsta-providers` ni de `krampsta-tools`.
+  `providers → core`, `app → tools → agent`, `app → store → agent`, `store → core`. Sin ciclos;
+  la UI nunca depende de `krampsta-providers`, `krampsta-tools` ni `krampsta-store`.
+- Historial: la UI guarda con `SessionStore` (sólo encola), en momentos discretos (enviar, fin de
+  herramienta, fin de ejecución, borrar), nunca por delta ni por frame. Con almacén, los ids de
+  sesión salen de `IdGen::from_clock` para no repetir uno guardado. Las ejecuciones headless
+  (`rune::is_headless()`) no abren almacén. Un cambio en la forma en disco sube
+  `format::VERSION`; los tests usan `MemoryStore` o `tempfile`, nunca la carpeta real.
 
 ## Comandos (todos deben pasar antes de terminar)
 

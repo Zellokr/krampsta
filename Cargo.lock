@@ -1976,6 +1976,7 @@ dependencies = [
  "krampsta-agent",
  "krampsta-core",
  "krampsta-providers",
+ "krampsta-store",
  "krampsta-tools",
  "krampsta-ui",
  "rune",
@@ -2004,6 +2005,19 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "krampsta-store"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "krampsta-agent",
+ "krampsta-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 krampsta-agent.workspace = true
 krampsta-providers.workspace = true
+krampsta-store.workspace = true
 krampsta-tools.workspace = true
 krampsta-ui.workspace = true
 rune.workspace = true

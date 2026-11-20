@@ -57,6 +57,7 @@ krampsta/
 │   ├── krampsta-agent/        contrato AgentEngine, AgentHost (runtime async) y MockAgent
 │   ├── krampsta-providers/    motores reales: HTTP + SSE (reqwest) y OpenAI/compatibles
 │   │   └── tests/          servidor HTTP falso que reproduce streams grabados
+│   ├── krampsta-store/        historial: cada sesión en un JSON, escrito en un hilo propio
 │   ├── krampsta-tools/        herramientas del agente: read_file, list_files, search, edit_file,
 │   │                       run_command, y las reglas de permisos
 │   ├── krampsta-ui/           estado de la UI, tema, vistas y componentes Rune/rune-kit
@@ -70,7 +71,8 @@ krampsta/
 krampsta-app ──▶ krampsta-ui ─────────▶ krampsta-agent ──▶ krampsta-core
 krampsta-app ──▶ krampsta-providers ──▶ krampsta-agent
 krampsta-app ──▶ krampsta-tools ──────▶ krampsta-agent
-       (krampsta-ui y krampsta-providers también usan krampsta-core)
+krampsta-app ──▶ krampsta-store ──────▶ krampsta-agent
+       (krampsta-ui, krampsta-providers y krampsta-store también usan krampsta-core)
           (Rune y rune-kit sólo en krampsta-ui y krampsta-app)
 ```
 
@@ -99,6 +101,12 @@ krampsta-app ──▶ krampsta-tools ──────▶ krampsta-agent
   paralelo con detección de binarios. Cada herramienta lee sólo lo necesario, pone tope a su
   salida y se detiene al cancelar. Peor caso medido (764 MB, 31 495 archivos, sin
   coincidencias): ~340 ms, a la par que `rg`.
+- **krampsta-store**: `FileStore` implementa el `SessionStore` de `krampsta-agent`. Guarda cada
+  sesión en `<carpeta de datos>/krampsta/sessions/<id>.json` (en Windows, `%APPDATA%`). La UI
+  sólo encola; un hilo escribe, junta los guardados repetidos de una sesión y renombra un
+  temporal sobre el archivo para que un cierre a medias no lo corrompa. Se guarda al enviar, al
+  terminar cada herramienta y al acabar la ejecución, nunca por palabra. Las ejecuciones
+  headless no guardan nada.
 
 ## Requisitos
 

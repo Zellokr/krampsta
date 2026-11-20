@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use krampsta_agent::{EngineCatalog, MockCatalog, MockConfig, Toolbox};
+use krampsta_agent::{EngineCatalog, MockCatalog, MockConfig, SessionStore, Toolbox};
 use krampsta_ui::KrampstaApp;
 
 fn catalog() -> Arc<dyn EngineCatalog> {
@@ -37,16 +37,38 @@ fn tools() -> Option<Arc<dyn Toolbox>> {
     }
 }
 
+/// Where sessions are saved. None in headless runs (stills, scripts): they must neither depend
+/// on nor add to this machine's history.
+fn store() -> Option<Arc<dyn SessionStore>> {
+    if rune::is_headless() {
+        return None;
+    }
+    let Some(dir) = krampsta_store::default_dir() else {
+        eprintln!("krampsta: no data folder on this system; sessions won't be saved");
+        return None;
+    };
+    match krampsta_store::FileStore::open(dir) {
+        Ok(store) => Some(Arc::new(store)),
+        Err(e) => {
+            eprintln!("krampsta: {e}; sessions won't be saved");
+            None
+        }
+    }
+}
+
 fn main() {
     rune::prewarm_gpu();
     rune::App::new(krampsta_ui::spec())
         .chrome(krampsta_ui::chrome())
         .init(|| {
-            let app = KrampstaApp::new(catalog());
-            match tools() {
-                Some(tools) => app.with_tools(tools),
-                None => app,
+            let mut app = KrampstaApp::new(catalog());
+            if let Some(tools) = tools() {
+                app = app.with_tools(tools);
             }
+            if let Some(store) = store() {
+                app = app.with_store(store);
+            }
+            app
         })
         .run();
 }

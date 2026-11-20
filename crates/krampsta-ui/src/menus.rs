@@ -68,6 +68,9 @@ impl KrampstaApp {
             return;
         }
         let removed = self.sessions.remove(index);
+        if let Some(store) = &self.store {
+            store.delete(id);
+        }
         for m in &removed.messages {
             for c in &m.tool_calls {
                 self.open_tools.remove(&c.id);

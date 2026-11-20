@@ -7,6 +7,8 @@
 //! - [`AgentHost`] owns the async runtime, starts and cancels runs, guarantees each run's
 //!   `Started` / terminal events, and hands events to the UI through a channel plus a
 //!   [`Notifier`] (Rune's `Waker` fits it), so the UI thread never blocks.
+//! - [`SessionStore`] is where sessions outlive the window (`krampsta-store` writes them to
+//!   disk); like the host, it never blocks the UI thread.
 //!
 //! This crate knows nothing about the UI framework.
 
@@ -14,6 +16,7 @@ mod catalog;
 mod engine;
 mod host;
 mod mock;
+mod store;
 mod tools;
 
 pub use catalog::{
@@ -31,5 +34,6 @@ pub use host::Notifier;
 pub use host::{AccountEvent, ModelList, Written};
 pub use mock::MockAgent;
 pub use mock::MockConfig;
+pub use store::{MemoryStore, SessionStore};
 pub use tokio_util::sync::CancellationToken;
 pub use tools::{Access, Approval, Call, Decision, ToolOutput, ToolSpec, Toolbox};

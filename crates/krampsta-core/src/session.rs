@@ -46,6 +46,15 @@ impl Session {
         }
     }
 
+    /// A session as it was saved. No run is attached: one that was running when saved is
+    /// marked [`AgentStatus::Cancelled`], since nothing will finish it. New messages are
+    /// numbered after the highest id in `messages`.
+    pub fn restore(id: SessionId, title: String, messages: Vec<Message>, status: AgentStatus, usage: Usage) -> Self {
+        let next_message = messages.iter().map(|m| m.id.0).max().map_or(1, |max| max.saturating_add(1));
+        let status = if status.is_running() { AgentStatus::Cancelled } else { status };
+        Session { id, title, messages, status, usage, active_run: None, next_message }
+    }
+
     pub fn active_run(&self) -> Option<RunId> {
         self.active_run
     }
@@ -307,6 +316,16 @@ mod tests {
         assert!(!s.apply(&AgentEvent::TextDelta { run: RunId(1), text: "late".into() }));
         assert!(!s.apply(&AgentEvent::Completed { run: RunId(1) }));
         assert_eq!(s, before);
+    }
+
+    #[test]
+    fn restored_sessions_number_after_their_messages_and_never_resume_a_run() {
+        let messages = vec![Message::user(MessageId(3), "hi"), Message::assistant(MessageId(7), RunId(2))];
+        let mut s = Session::restore(SessionId(5), "Saved".into(), messages, AgentStatus::Running, Usage::default());
+        assert_eq!(s.status, AgentStatus::Cancelled);
+        assert_eq!(s.active_run(), None);
+        assert!(!s.apply(&AgentEvent::TextDelta { run: RunId(2), text: "late".into() }));
+        assert_eq!(s.push_message(MessageRole::User, "again"), MessageId(8));
     }
 
     #[test]

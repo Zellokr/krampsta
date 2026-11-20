@@ -1,0 +1,22 @@
+[package]
+name = "krampsta-store"
+description = "Krampsta's saved history: sessions and messages on disk, written off the UI thread."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+krampsta-agent.workspace = true
+krampsta-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Where the history lives (the user's data folder).
+dirs = "7"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
