@@ -3,9 +3,10 @@
 
 use krampsta_core::{ToolCall, ToolResult};
 use rune::{El, col, icon, row, text};
+use rune_kit::diff::FileDiff;
 use rune_kit::{Kit, Spinner};
 
-use crate::components::icons;
+use crate::components::{icons, inline_diff};
 use crate::keys;
 use crate::state::KrampstaApp;
 use crate::theme;
@@ -49,6 +50,7 @@ pub fn view(
     live: Option<&str>,
     open: bool,
     pending: bool,
+    change: Option<&FileDiff>,
     k: &Kit,
 ) -> El {
     let outcome = Outcome::of(result);
@@ -74,6 +76,11 @@ pub fn view(
         let tail = text(last_lines(live, LIVE_LINES).to_owned()).font(k.ty.mono).color(k.c.text_muted).wrap_anywhere();
         let pane = col().w_full().px(10.0).py(8.0).radius(k.radius.sm).fill(k.c.layer_02).child(tail);
         card = card.child(col().key(keys::tool_live(&call.id)).w_full().px(12.0).pb(12.0).child(pane));
+    }
+    // The change a call proposed shows in its card, open or not: what the agent did, at a glance.
+    if let Some(diff) = change {
+        card = card
+            .child(col().key(keys::tool_diff(&call.id)).w_full().px(12.0).pb(12.0).child(inline_diff::view(diff, k)));
     }
     if open {
         card = card.child(body(call, result, k));

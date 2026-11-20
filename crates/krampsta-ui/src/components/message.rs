@@ -48,7 +48,8 @@ fn assistant(s: &KrampstaApp, session: SessionId, m: &Message, streaming: bool, 
     if !m.tool_calls.is_empty() {
         let cards = m.tool_calls.iter().map(|c| {
             let pending = m.run.is_some_and(|run| s.commands_with_pending_changes.contains(&(run, c.id.clone())));
-            tool_card::view(c, m.result_for(c), m.live_output_for(c), s.open_tools.contains(&c.id), pending, k)
+            let change = s.card_diffs.get(&c.id);
+            tool_card::view(c, m.result_for(c), m.live_output_for(c), s.open_tools.contains(&c.id), pending, change, k)
         });
         out = out.child(col().w_full().gap(8.0).children(cards));
     }

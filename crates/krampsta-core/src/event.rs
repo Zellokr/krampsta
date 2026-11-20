@@ -117,9 +117,11 @@ pub enum AgentEvent {
         tool: String,
         what: String,
     },
-    /// A tool proposed a change to a file (not written: the user reviews it).
+    /// A tool proposed a change to a file (not written: the user reviews it). `call` is the
+    /// tool call that proposed it, whose card shows it.
     ChangeProposed {
         run: RunId,
+        call: ToolCallId,
         change: FileChange,
     },
     /// Tokens one request to the provider used. A run that makes several requests reports each.

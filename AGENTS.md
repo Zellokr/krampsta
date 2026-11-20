@@ -32,6 +32,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   sesiones por `Session::project`, y una sesión sin proyecto adopta el abierto al enviar),
   `prefs.rs` (ajustes entre arranques: tema, anchos, proveedor y modelo, proyecto, grupos
   plegados; `poll` compara sin asignar y guarda medio segundo después de que paren de cambiar),
+  `components/inline_diff.rs` (el cambio de un `edit_file` dentro de su tarjeta: diff compacto
+  de sólo lectura; `ChangeProposed` lleva el `call` y `pump` guarda su `FileDiff` en `card_diffs`),
   `panes.rs` (dos sesiones lado a lado: `split` guarda la del otro panel; la seleccionada es
   siempre la del panel activo; claves del panel derecho por ruta, `krampsta-pane-1/…`),
   `tabs.rs` (sesiones abiertas en pestañas sobre el chat, `TabStrip` de rune-kit; la activa es

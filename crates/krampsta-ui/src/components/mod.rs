@@ -5,6 +5,7 @@ pub mod composer;
 pub mod empty;
 pub mod engine_picker;
 pub mod icons;
+pub mod inline_diff;
 pub mod menus;
 pub mod message;
 pub mod reasoning;

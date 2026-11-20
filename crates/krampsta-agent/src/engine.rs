@@ -185,7 +185,7 @@ impl RunContext {
         let (output, is_error) = match outcome {
             Ok(ToolOutput { text, change }) => {
                 if let Some(change) = change {
-                    self.emit(AgentEvent::ChangeProposed { run: self.run, change });
+                    self.emit(AgentEvent::ChangeProposed { run: self.run, call: call.id.clone(), change });
                 }
                 (text, false)
             }

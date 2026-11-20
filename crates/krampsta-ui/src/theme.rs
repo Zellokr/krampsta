@@ -59,6 +59,13 @@ pub fn status_color(k: &Kit, status: &krampsta_core::AgentStatus) -> Color {
     }
 }
 
+/// A line a change adds or removes, in a tool card's diff: its row's wash and its sign's ink,
+/// from the kit's success and danger tones as rune-kit's `DiffView` takes them.
+pub fn diff_line(k: &Kit, added: bool) -> (Color, Color) {
+    let tone = if added { k.c.success.icon } else { k.c.danger.icon };
+    (k.alpha(tone, if k.dark { 0.16 } else { 0.12 }), tone)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

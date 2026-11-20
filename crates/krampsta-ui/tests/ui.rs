@@ -508,6 +508,78 @@ fn a_split_shows_two_sessions_and_each_composer_sends_to_its_own() {
     assert_eq!(rt.state.split, None, "its x closes the split");
 }
 
+/// An engine that edits one file and says so.
+struct Edits;
+
+impl krampsta_agent::AgentEngine for Edits {
+    fn name(&self) -> &str {
+        "edits"
+    }
+    fn run(
+        self: Arc<Self>,
+        _: krampsta_agent::RunRequest,
+        ctx: krampsta_agent::RunContext,
+    ) -> krampsta_agent::BoxFuture<'static, Result<(), krampsta_agent::AgentError>> {
+        Box::pin(async move {
+            let id = krampsta_core::ToolCallId("edit-1".into());
+            let call = krampsta_core::ToolCall { id, name: "edit_file".into(), arguments: "{}".into() };
+            ctx.run_tool(call).await?;
+            ctx.text("Done.");
+            Ok(())
+        })
+    }
+}
+
+struct EditsCatalog;
+
+impl krampsta_agent::EngineCatalog for EditsCatalog {
+    fn providers(&self) -> Vec<krampsta_agent::Provider> {
+        MockCatalog::default().providers()
+    }
+    fn initial(&self) -> krampsta_agent::Selection {
+        MockCatalog::default().initial()
+    }
+    fn engine(&self, _: &str, _: &str) -> Result<Arc<dyn krampsta_agent::AgentEngine>, krampsta_agent::AgentError> {
+        Ok(Arc::new(Edits))
+    }
+    fn models(&self, p: &str) -> krampsta_agent::BoxFuture<'static, Result<Vec<String>, krampsta_agent::AgentError>> {
+        MockCatalog::default().models(p)
+    }
+}
+
+/// `edit_file` proposes "two" in place of "one" in notes.txt.
+struct ProposesChange;
+
+impl krampsta_agent::Toolbox for ProposesChange {
+    fn specs(&self) -> Arc<[krampsta_agent::ToolSpec]> {
+        Arc::from(Vec::new())
+    }
+    fn run(&self, _: &str, _: &str, _: &krampsta_agent::Call<'_>) -> Result<krampsta_agent::ToolOutput, String> {
+        let change =
+            krampsta_core::FileChange { path: "notes.txt".into(), before: Some("one\n".into()), after: "two\n".into() };
+        Ok(krampsta_agent::ToolOutput { text: "Proposed a change to notes.txt.".into(), change: Some(change) })
+    }
+}
+
+#[test]
+fn an_edit_shows_its_change_in_its_tool_card() {
+    let state = KrampstaApp::new(Arc::new(EditsCatalog)).with_tools(Arc::new(ProposesChange));
+    let mut rt = Runtime::new(state, app::view, SIZE, Env::new(true, 1.0));
+    settle(&mut rt);
+    click(&mut rt, keys::COMPOSER);
+    type_text(&mut rt, "change the note");
+    press(&mut rt, Key::Enter, Mods::default());
+    pump_until_finished(&mut rt);
+
+    let call = krampsta_core::ToolCallId("edit-1".into());
+    assert!(has(&rt, &keys::tool_diff(&call)), "the card shows the change it proposed");
+    let shown: Vec<String> = rt.elements().into_iter().filter_map(|e| e.text).collect();
+    for expected in ["notes.txt", "+1", "-1", "one", "two"] {
+        assert!(shown.iter().any(|t| t == expected), "the card shows {expected:?}: {shown:?}");
+    }
+    assert_eq!(rt.state.review.proposals().len(), 1, "and the changes panel has it to review");
+}
+
 #[test]
 fn keyboard_shortcut_creates_a_session() {
     let mut rt = runtime();

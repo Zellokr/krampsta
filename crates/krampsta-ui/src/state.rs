@@ -14,7 +14,7 @@ use krampsta_agent::{
 use krampsta_core::{AgentEvent, IdGen, MessageId, RunId, Session, SessionError, SessionId, ToolCallId};
 use rune::TextEdit;
 use rune_kit::PaneState;
-use rune_kit::diff::DiffState;
+use rune_kit::diff::{DiffState, FileDiff};
 
 use crate::accounts::{KeyField, SignIn};
 use crate::approvals::Asking;
@@ -83,6 +83,8 @@ pub struct KrampstaApp {
     pub sign_in: SignIn,
     /// The API key field in settings.
     pub api_key: KeyField,
+    /// The change each `edit_file` call proposed, as its card shows it.
+    pub card_diffs: HashMap<ToolCallId, FileDiff>,
     /// Tool cards the user opened in the transcript.
     pub open_tools: HashSet<ToolCallId>,
     /// Commands announced while the changes panel held unapplied proposals.
@@ -238,6 +240,7 @@ impl KrampstaApp {
             engine,
             sign_in: SignIn::Closed,
             api_key: KeyField::default(),
+            card_diffs: HashMap::new(),
             open_tools: HashSet::new(),
             commands_with_pending_changes: HashSet::new(),
             open_reasoning: HashSet::new(),
@@ -406,7 +409,9 @@ impl KrampstaApp {
         for e in self.agent.drain() {
             match e.event {
                 // A proposal outlives its run: the tools already build on it.
-                AgentEvent::ChangeProposed { change, .. } => {
+                AgentEvent::ChangeProposed { call, change, .. } => {
+                    // Its card shows it (worked out once, here, never in the view).
+                    self.card_diffs.insert(call, crate::changes::diff_of(&change));
                     panel_dirty |= self.stage_proposal(change);
                     changed = true;
                 }

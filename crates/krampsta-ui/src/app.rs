@@ -298,6 +298,7 @@ const SCENES: &[Scene] = &[
         s.engine.open = Some(Picker::ComposerModel);
     }),
     ("projects", scene_projects),
+    ("edit", scene_edit),
     // Two sessions side by side: a finished conversation (active) and the welcome beside it.
     ("split", |s| {
         scene_completed(s);
@@ -348,6 +349,31 @@ fn tool(run: RunId) -> (AgentEvent, AgentEvent) {
     let call = ToolCall { id: id.clone(), name: "list_files".into(), arguments: r#"{"path": "."}"#.into() };
     let result = ToolResult { call_id: id, output: "Cargo.toml\ncrates/".into(), is_error: false };
     (AgentEvent::ToolCallStarted { run, call }, AgentEvent::ToolCallFinished { run, result })
+}
+
+/// An `edit_file` call whose proposed change shows in its card, and in the changes panel.
+fn scene_edit(s: &mut KrampstaApp) {
+    let run = staged(s, "Add jitter to the retry backoff");
+    let id = ToolCallId("scene-edit".into());
+    let arguments = r#"{"path": "src/net/backoff.rs"}"#.into();
+    let call = ToolCall { id: id.clone(), name: "edit_file".into(), arguments };
+    let output = "Proposed a change to src/net/backoff.rs for review.".into();
+    let result = ToolResult { call_id: id.clone(), output, is_error: false };
+    let reply = "Each wait now spreads by ±20%, so clients that failed together retry apart.";
+    apply(
+        s,
+        &[
+            AgentEvent::ToolCallStarted { run, call },
+            AgentEvent::ToolCallFinished { run, result },
+            AgentEvent::TextDelta { run, text: reply.into() },
+            AgentEvent::Completed { run },
+        ],
+    );
+    if let Some(change) = crate::sample::changes().into_iter().next() {
+        // What `pump` does with the call's `ChangeProposed`.
+        s.card_diffs.insert(id, crate::changes::diff_of(&change));
+        s.propose(change);
+    }
 }
 
 fn scene_running(s: &mut KrampstaApp) {

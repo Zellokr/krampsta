@@ -58,7 +58,7 @@ pub fn parse_block_id(id: &str) -> Option<(usize, usize)> {
     Some((file.parse().ok()?, hunk.parse().ok()?))
 }
 
-fn diff_of(change: &FileChange) -> FileDiff {
+pub(crate) fn diff_of(change: &FileChange) -> FileDiff {
     let old_path = change.before.is_some().then(|| change.path.clone());
     FileDiff::between(old_path, Some(change.path.clone()), change.before_text(), &change.after)
 }

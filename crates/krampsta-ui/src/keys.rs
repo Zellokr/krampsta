@@ -45,6 +45,11 @@ pub fn tool(id: &krampsta_core::ToolCallId) -> String {
 }
 
 /// A running call's live output (a command's last lines).
+/// The change a call proposed, shown in its card.
+pub fn tool_diff(id: &krampsta_core::ToolCallId) -> String {
+    format!("krampsta-tool-diff-{id}")
+}
+
 pub fn tool_live(id: &krampsta_core::ToolCallId) -> String {
     format!("krampsta-tool-live-{id}")
 }

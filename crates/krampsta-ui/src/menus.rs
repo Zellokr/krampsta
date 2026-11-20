@@ -81,6 +81,7 @@ impl KrampstaApp {
         for m in &removed.messages {
             for c in &m.tool_calls {
                 self.open_tools.remove(&c.id);
+                self.card_diffs.remove(&c.id);
             }
         }
         if self.sessions.is_empty() {
