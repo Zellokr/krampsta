@@ -168,8 +168,7 @@ impl KrampstaApp {
     }
 }
 
-/// With `KRAMPSTA_TRACE_PACE=1`, one stderr line per paced frame: the clock, bytes arrived, the
-/// pace's position, bytes shown, the estimated rate. Never the text.
+/// With `KRAMPSTA_TRACE_PACE=1`, log pacing metrics to stderr, never the text.
 fn trace(clock: f64, arrived: usize, at: usize, shown: usize, rate: f64, arriving: bool) {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     if *ON.get_or_init(|| std::env::var_os("KRAMPSTA_TRACE_PACE").is_some_and(|v| v == "1")) {

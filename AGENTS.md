@@ -56,7 +56,7 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   Añade las nuevas a `keys.rs` y úsalas en tests y scripts.
 - Gotchas de layout (flexbox): un `.scroll(..)` dentro de `.grow()` necesita `.min_h(0.0)` en
   cada columna intermedia; `.grow` tiene base 0.
-- El texto en streaming no se pinta según llega (traza: `KRAMPSTA_TRACE_PACE=1`, sin contenido): `pace.rs` (`Pacer`) estima a qué ritmo llega y
+- El texto en streaming no se pinta según llega: `pace.rs` (`Pacer`) estima a qué ritmo llega y
   lo suelta a ese ritmo desde `poll`, con una reserva de ~0,25 s que cubre los huecos entre
   ráfagas (`tx.wake_after(Duration::ZERO)` mientras queda texto), por palabras enteras, con
   `Markdown::reveal` para el fundido y el chat como growth stack con `edge::WORD_FADE` (los bordes
@@ -64,6 +64,7 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   escena que prepara una respuesta a medias llama a `catch_up` para mostrarla. Para ver cómo sale,
   una tira de fotogramas: `krampsta --scene streaming --frames 16 --start 0.05 --out DIR --strip
   tira.png --crop 280,140,470,200 --every 1 --cols 2`; una captura suelta no enseña animaciones.
+  `KRAMPSTA_TRACE_PACE=1` registra métricas de ritmo por fotograma en stderr, sin contenido.
 - Estado con modos = `enum` cuyas variantes llevan sólo sus datos (ver `AgentStatus`), no
   grupos de booleanos.
 - Parches: `[patch.crates-io]` del `Cargo.toml` raíz replica los de Rune, todos al mismo SHA que
