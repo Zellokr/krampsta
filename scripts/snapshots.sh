@@ -18,5 +18,6 @@ snap krampsta
 for scene in empty changes-empty changes change-failed command approval approval-long approval-apply approval-applying running tools thinking reasoning completed failed cancelled settings api-key api-key-saved signed-in sign-in sign-in-failed session-menu message-menu delete-session light provider-picker effort-picker model-picker model-error projects fresh cost prices no-project opening-project; do snap "$scene" 1200x800 --scene "$scene"; done
 # Narrow windows: give the side panes a moment to fold away (they close after the first layout).
 snap narrow 800x560 --scene completed --at 1.0
+snap split 1200x800 --scene split --at 1.0
 snap send-message 1200x800 --script scripts/send-message.json --at mark:end
 "$BIN" --tree "$OUT/krampsta-tree.json" --size 1200x800 > /dev/null && echo "  $OUT/krampsta-tree.json"

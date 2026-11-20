@@ -21,6 +21,7 @@ use crate::approvals::Asking;
 use crate::changes::Changes;
 use crate::costs::{Price, PriceField};
 use crate::menus::OpenMenu;
+use crate::panes::Split;
 use crate::picker::EngineChoice;
 use crate::prefs::PrefsSync;
 use crate::projects::ProjectInfo;
@@ -58,6 +59,8 @@ pub struct KrampstaApp {
     /// Sessions open in tabs, in order; the selected one is the active tab. Never empty.
     pub tabs: Vec<SessionId>,
     pub(crate) tab_drag: TabDragState,
+    /// A second session shown beside the selected one, if the conversation is split.
+    pub split: Option<Split>,
     /// What the window keeps per session: the unsent draft, the reply being paced out.
     pub(crate) views: HashMap<SessionId, SessionView>,
     /// What a session with nothing typed yet shows in its composer.
@@ -221,6 +224,7 @@ impl KrampstaApp {
             selected,
             tabs: vec![selected],
             tab_drag: TabDragState::default(),
+            split: None,
             views,
             blank_draft: TextEdit::new(""),
             notice: None,
@@ -318,6 +322,7 @@ impl KrampstaApp {
     pub fn select(&mut self, id: SessionId) {
         if self.session(id).is_some() {
             self.open_tab(id);
+            self.swap_if_other(id);
             self.selected = id;
             self.screen = Screen::Chat;
             // Say up front when it can't go on here, rather than on the next send.
@@ -454,13 +459,22 @@ impl KrampstaApp {
         }
     }
 
+    /// Fits the panes to the window again after the conversation area changed (a split).
+    pub(crate) fn refit(&mut self) {
+        if let Some(w) = self.window_width {
+            self.fit_width(w);
+        }
+    }
+
     /// Keeps the conversation readable as the window narrows: side panes close (the one the
     /// user opened last closes last) and reopen once there is room again. Runs whenever the
     /// window's width changes.
     pub fn fit_width(&mut self, width: f32) {
         self.window_width = Some(width);
-        let needed_for = |main: f32, side: Option<f32>, changes: Option<f32>| {
-            main + PANE_SLACK + side.unwrap_or(0.0) + changes.unwrap_or(0.0)
+        // Two conversations side by side need more room than one (each a little under one).
+        let panes = if self.split.is_some() { SPLIT_ROOM } else { 1.0 };
+        let needed_for = move |main: f32, side: Option<f32>, changes: Option<f32>| {
+            main * panes + PANE_SLACK + side.unwrap_or(0.0) + changes.unwrap_or(0.0)
         };
         let needed = |side: Option<f32>, changes: Option<f32>| needed_for(MIN_MAIN, side, changes);
         let shown = |p: &PaneState| p.is_open().then(|| p.width());
@@ -501,6 +515,8 @@ impl KrampstaApp {
 pub const MIN_MAIN: f32 = 440.0;
 /// The floor for the pane the user opened most recently.
 pub const MIN_MAIN_HARD: f32 = 320.0;
+/// How many single conversations' worth of room a split takes.
+pub const SPLIT_ROOM: f32 = 1.6;
 /// Frame insets and pane padding around the panes' own widths.
 const PANE_SLACK: f32 = 40.0;
 

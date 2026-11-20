@@ -472,6 +472,43 @@ fn sessions_open_in_tabs_that_switch_and_close() {
 }
 
 #[test]
+fn a_split_shows_two_sessions_and_each_composer_sends_to_its_own() {
+    let mut rt = runtime();
+    let (first, second) = (rt.state.sessions[0].id, rt.state.sessions[1].id);
+    click(&mut rt, keys::SPLIT_TOGGLE);
+    assert_eq!(rt.state.panes(), [(first, true), (second, false)]);
+    assert!(has(&rt, keys::PANES) && has(&rt, &keys::pane(1)));
+
+    // The right pane's composer: the one further right.
+    let composers: Vec<ElementInfo> =
+        rt.elements().into_iter().filter(|e| e.key.as_deref() == Some(keys::COMPOSER) && !e.exiting).collect();
+    assert_eq!(composers.len(), 2, "a composer per pane");
+    let right = composers.iter().max_by(|a, b| a.rect[0].total_cmp(&b.rect[0])).unwrap().rect;
+    let (x, y) = (right[0] + right[2] / 2.0, right[1] + right[3] / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    type_text(&mut rt, "From the right");
+    assert_eq!(rt.state.selected, second, "typing makes the right pane active");
+    assert_eq!(rt.state.draft_of(first).text, "", "the left pane's draft is untouched");
+    press(&mut rt, Key::Enter, Mods::default());
+    pump_until_finished(&mut rt);
+    let sent = rt.state.session(second).unwrap();
+    assert!(sent.messages.iter().any(|m| m.content == "From the right"), "it went to the right pane's session");
+    assert_eq!(rt.state.panes(), [(first, false), (second, true)], "the panes kept their places");
+
+    // Pressing the left pane's background makes it active again.
+    let left = element(&rt, &keys::pane_header(0)).unwrap().rect;
+    rt.pointer_down(left[0] + 40.0, left[1] + 120.0);
+    rt.pointer_up(left[0] + 40.0, left[1] + 120.0);
+    settle(&mut rt);
+    assert_eq!(rt.state.selected, first);
+
+    click(&mut rt, &keys::pane_close(0));
+    assert_eq!(rt.state.split, None, "its x closes the split");
+}
+
+#[test]
 fn keyboard_shortcut_creates_a_session() {
     let mut rt = runtime();
     let before = rt.state.sessions.len();

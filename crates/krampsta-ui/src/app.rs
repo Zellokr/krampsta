@@ -9,13 +9,13 @@ use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit};
 
 use crate::accounts::SignIn;
-use crate::components::{menus, sign_in, status};
+use crate::components::{icons, menus, sign_in, status};
 use crate::keys;
 use crate::menus::MenuTarget;
 use crate::picker::{Models, Picker};
 use crate::state::{KrampstaApp, Screen};
 use crate::theme::{self, ThemeChoice};
-use crate::views::{changes, chat, settings, sidebar};
+use crate::views::{changes, settings, sidebar};
 
 pub const TITLE: &str = "Krampsta";
 pub const SIZE: (f32, f32) = (1200.0, 800.0);
@@ -77,6 +77,10 @@ pub fn on_key(s: &mut KrampstaApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
         s.new_session();
         return true;
     }
+    if ev.is_command('\\') && s.screen == Screen::Chat {
+        s.toggle_split();
+        return true;
+    }
     if ev.is_command('w') && !ev.mods.shift && s.screen == Screen::Chat {
         s.close_tab(s.selected);
         return true;
@@ -133,12 +137,21 @@ fn workspace(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec
         .on_press(|s: &mut KrampstaApp| s.toggle_changes())
         .build(k)
         .key(keys::CHANGES_TOGGLE);
+    let split = s.split.is_some();
+    let split_toggle = IconButton::new(&icons::SPLIT)
+        .variant(IconButtonVariant::GhostMuted)
+        .expanded(split)
+        .label(if split { "Close the split" } else { "Split the conversation" })
+        .help(if cfg!(target_os = "macos") { "Side by side (⌘\\)" } else { "Side by side (Ctrl+\\)" })
+        .on_press(|s: &mut KrampstaApp| s.toggle_split())
+        .build(k)
+        .key(keys::SPLIT_TOGGLE);
     // The open sessions' tabs fill the leading side (the active one names the session) and
     // scroll when they don't fit, so they never run under the pill.
     let toolbar = Toolbar::new()
         .leading(row().shrink().min_w(0.0).child(crate::tabs::strip(s, cx, k, layer)))
-        .trailing(row().gap(8.0).items_center().child(status::pill(&status, k)).child(toggle));
-    SplitView::new(chat::view(s, k, layer))
+        .trailing(row().gap(8.0).items_center().child(status::pill(&status, k)).child(split_toggle).child(toggle));
+    SplitView::new(crate::panes::view(s, k, layer))
         .sidebar(&s.sidebar, |s: &mut KrampstaApp| &mut s.sidebar, sidebar::view(s, k, layer))
         .inspector(&s.changes, |s: &mut KrampstaApp| &mut s.changes, changes::view(s, k))
         .toolbar(toolbar)
@@ -285,6 +298,11 @@ const SCENES: &[Scene] = &[
         s.engine.open = Some(Picker::ComposerModel);
     }),
     ("projects", scene_projects),
+    // Two sessions side by side: a finished conversation (active) and the welcome beside it.
+    ("split", |s| {
+        scene_completed(s);
+        s.toggle_split();
+    }),
     // A first launch: no history yet, so one new, empty session and no examples.
     ("fresh", |s| {
         s.sessions.clear();

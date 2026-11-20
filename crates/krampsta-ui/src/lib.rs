@@ -20,6 +20,7 @@ pub mod costs;
 pub mod keys;
 pub mod menus;
 pub mod pace;
+pub mod panes;
 pub mod picker;
 pub mod prefs;
 pub mod projects;

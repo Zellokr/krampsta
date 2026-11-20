@@ -73,6 +73,11 @@ impl KrampstaApp {
         }
         self.views.remove(&id);
         self.drop_tab(id);
+        self.forget_pane(id);
+        if self.selected == id {
+            // The active pane's session went: the other pane, if any, takes the window.
+            self.split = None;
+        }
         for m in &removed.messages {
             for c in &m.tool_calls {
                 self.open_tools.remove(&c.id);

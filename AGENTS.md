@@ -32,6 +32,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   sesiones por `Session::project`, y una sesión sin proyecto adopta el abierto al enviar),
   `prefs.rs` (ajustes entre arranques: tema, anchos, proveedor y modelo, proyecto, grupos
   plegados; `poll` compara sin asignar y guarda medio segundo después de que paren de cambiar),
+  `panes.rs` (dos sesiones lado a lado: `split` guarda la del otro panel; la seleccionada es
+  siempre la del panel activo; claves del panel derecho por ruta, `krampsta-pane-1/…`),
   `tabs.rs` (sesiones abiertas en pestañas sobre el chat, `TabStrip` de rune-kit; la activa es
   la seleccionada; la última no se cierra; Ctrl+W), `costs.rs` (coste por sesión: tokens por modelo, `Session::by_model`, por los precios por
   millón que pone el usuario; sólo proveedores `Cloud`, sin precios de serie),

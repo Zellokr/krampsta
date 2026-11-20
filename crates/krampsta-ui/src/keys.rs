@@ -164,3 +164,18 @@ pub fn tab(id: krampsta_core::SessionId) -> String {
 pub fn tab_session(tab: &str) -> Option<krampsta_core::SessionId> {
     tab.strip_prefix("krampsta-tab-")?.parse().ok().map(krampsta_core::SessionId)
 }
+
+/// The two conversation panes side by side, and each pane (0 left, 1 right). The left (or only)
+/// pane's parts keep their usual keys; a path reaches the right one's (`krampsta-pane-1/…`).
+pub const PANES: &str = "krampsta-panes";
+pub fn pane(index: usize) -> String {
+    format!("krampsta-pane-{index}")
+}
+pub fn pane_header(index: usize) -> String {
+    format!("krampsta-pane-{index}-header")
+}
+pub fn pane_close(index: usize) -> String {
+    format!("krampsta-pane-{index}-close")
+}
+/// The toolbar button that opens or closes the split.
+pub const SPLIT_TOGGLE: &str = "krampsta-split-toggle";

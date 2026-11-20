@@ -28,6 +28,14 @@ impl KrampstaApp {
         }
         let Some(at) = self.tabs.iter().position(|t| *t == id) else { return };
         self.tabs.remove(at);
+        self.forget_pane(id);
+        // Split: closing the active pane's tab leaves the other pane, whole.
+        if self.selected == id
+            && let Some(split) = self.split.take()
+        {
+            self.select(split.other);
+            return;
+        }
         if self.selected == id {
             let next = self.tabs[at.min(self.tabs.len() - 1)];
             self.select(next);

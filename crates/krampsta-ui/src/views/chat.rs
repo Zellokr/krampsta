@@ -1,6 +1,6 @@
-//! The main pane: the transcript of the selected session and the composer under it.
+//! A conversation pane: one session's transcript and the composer under it.
 
-use krampsta_core::{AgentStatus, MessageRole, Session};
+use krampsta_core::{AgentStatus, MessageRole, Session, SessionId};
 use rune::{El, GrowthSpec, ScrollSpec, col, row, text};
 use rune_kit::Kit;
 
@@ -13,8 +13,8 @@ use crate::theme;
 
 const COLUMN: f32 = 820.0;
 
-pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
-    let (content, running) = match s.current() {
+pub fn view(s: &KrampstaApp, id: SessionId, k: &Kit, layer: &mut Vec<El>) -> El {
+    let (content, running) = match s.session(id) {
         Some(session) if !session.messages.is_empty() => {
             (transcript(s, session, k, layer), session.status.is_running())
         }
@@ -30,7 +30,7 @@ pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
         .scroll_edge_fade(12.0)
         .child(col().w_full().items_center().px(28.0).pt(24.0).pb(16.0).child(content));
     let composer =
-        col().w_full().items_center().px(28.0).pt(8.0).pb(18.0).child(composer::view(s, s.selected, running, k, layer));
+        col().w_full().items_center().px(28.0).pt(8.0).pb(18.0).child(composer::view(s, id, running, k, layer));
     col().w_full().h_full().min_h(0.0).child(scroll).child(composer)
 }
 

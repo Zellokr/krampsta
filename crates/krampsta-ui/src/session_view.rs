@@ -58,7 +58,7 @@ impl KrampstaApp {
     /// The sessions on screen now.
     pub(crate) fn visible_sessions(&self) -> Vec<SessionId> {
         match self.screen {
-            crate::state::Screen::Chat => vec![self.selected],
+            crate::state::Screen::Chat => self.panes().into_iter().map(|(id, _)| id).collect(),
             crate::state::Screen::Settings => Vec::new(),
         }
     }

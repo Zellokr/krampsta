@@ -19,8 +19,15 @@ pub fn view(s: &KrampstaApp, session: SessionId, running: bool, k: &Kit, layer: 
         .auto_grow(2, 10)
         .width(None)
         .on_edit(move |s: &mut KrampstaApp| &mut s.view_mut(session).draft)
-        .on_change(|s: &mut KrampstaApp, _: &mut Tx| s.notice = None)
-        .on_submit(|s: &mut KrampstaApp, _: &mut Tx| s.submit())
+        // Typing or sending in a pane makes its session the active one, so the send goes there.
+        .on_change(move |s: &mut KrampstaApp, _: &mut Tx| {
+            s.focus_session(session);
+            s.notice = None;
+        })
+        .on_submit(move |s: &mut KrampstaApp, _: &mut Tx| {
+            s.focus_session(session);
+            s.submit();
+        })
         .build(k)
         .key(keys::COMPOSER);
 
@@ -29,7 +36,8 @@ pub fn view(s: &KrampstaApp, session: SessionId, running: bool, k: &Kit, layer: 
             .variant(IconButtonVariant::Neutral)
             .label("Stop the agent")
             .help("Stop")
-            .on_press(|s: &mut KrampstaApp| {
+            .on_press(move |s: &mut KrampstaApp| {
+                s.focus_session(session);
                 s.cancel();
             })
             .build(k)
@@ -40,13 +48,18 @@ pub fn view(s: &KrampstaApp, session: SessionId, running: bool, k: &Kit, layer: 
             .label("Send message")
             .help("Send (Enter)")
             .disabled(draft.text.trim().is_empty())
-            .on_press(|s: &mut KrampstaApp| s.submit())
+            .on_press(move |s: &mut KrampstaApp| {
+                s.focus_session(session);
+                s.submit();
+            })
             .build(k)
             .key(keys::SEND)
     };
 
     // Why a send failed, else why the selection can't run, else how to use the composer.
-    let hint = match (&s.notice, &s.engine.warning()) {
+    // The notice is about the active session: only its pane shows it.
+    let notice = s.notice.as_ref().filter(|_| session == s.selected);
+    let hint = match (notice, &s.engine.warning()) {
         (Some(n), _) => text(n.clone()).font(k.ty.small).color(k.c.danger.icon),
         (None, Some(p)) => text(p.clone()).font(k.ty.small).color(k.c.warning.icon),
         (None, None) if s.engine.selection.provider == MOCK_PROVIDER => {
