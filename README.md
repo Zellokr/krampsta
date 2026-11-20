@@ -162,6 +162,16 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+Si estás modificando Krampsta desde la propia app, ejecuta `cargo self-test` desde la raíz.
+Compila y prueba el workspace en `target/self-test`, sin reemplazar el ejecutable de desarrollo
+abierto desde `target/debug`. Aplica antes los cambios que quieras probar: Cargo solo lee el disco.
+Si solo quieres compilar la app o probar las herramientas, usa un destino alternativo:
+
+```bash
+cargo build -p krampsta-app --target-dir target/validation
+cargo test -p krampsta-tools --target-dir target/validation
+```
+
 - `krampsta-core`: transiciones de sesión (envío, streaming, fallo, cancelación, eventos obsoletos).
 - `krampsta-agent`: el host enmarca cada ejecución, convierte errores y *panics* en `Failed`,
   notifica cada evento; el mock llama herramientas, falla con `/fail` y se cancela rápido.

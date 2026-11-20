@@ -1,0 +1,3 @@
+[alias]
+# Test Krampsta without replacing the executable used by the open desktop app.
+self-test = "test --workspace --target-dir target/self-test"
