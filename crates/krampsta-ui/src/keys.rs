@@ -151,3 +151,16 @@ pub fn open_group(root: Option<&std::path::Path>) -> String {
 pub fn price(provider: &str, model: &str, side: &str) -> String {
     format!("krampsta-price-{provider}-{model}-{side}")
 }
+
+/// The strip of open sessions above the conversation.
+pub const TABS: &str = "krampsta-tabs";
+
+/// A session's id in the tab strip; rune-kit keys the tab itself `t-<this>`.
+pub fn tab(id: krampsta_core::SessionId) -> String {
+    format!("krampsta-tab-{}", id.0)
+}
+
+/// The session a tab id ([`tab`]) names.
+pub fn tab_session(tab: &str) -> Option<krampsta_core::SessionId> {
+    tab.strip_prefix("krampsta-tab-")?.parse().ok().map(krampsta_core::SessionId)
+}

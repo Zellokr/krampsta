@@ -3,11 +3,11 @@
 
 use krampsta_agent::MOCK_PROVIDER;
 use krampsta_core::SessionId;
-use rune::{El, Tx, col, row, text};
+use rune::{El, Tx, col, el, row, text};
 use rune_kit::{IconButton, IconButtonVariant, Kit, TextArea};
 
 use crate::components::engine_picker::{self, Place};
-use crate::components::icons;
+use crate::components::{icons, status};
 use crate::keys;
 use crate::state::KrampstaApp;
 
@@ -72,5 +72,14 @@ pub fn view(s: &KrampstaApp, session: SessionId, running: bool, k: &Kit, layer: 
         .gap(8.0)
         .child(row().w_full().items_center().justify_end().child(pickers))
         .child(row().w_full().gap(8.0).items_end().child(col().grow(1.0).min_w(0.0).child(field)).child(action))
-        .child(row().w_full().child(hint.key(keys::COMPOSER_HINT).truncate().shrink().min_w(0.0)))
+        .child(
+            row()
+                .w_full()
+                .gap(12.0)
+                .items_center()
+                .child(hint.key(keys::COMPOSER_HINT).truncate().shrink().min_w(0.0))
+                .child(el().grow(1.0))
+                // What the session has used (and cost), out of the toolbar the tabs need.
+                .children(s.session(session).and_then(|x| status::usage(x.usage, s.cost(x), k))),
+        )
 }

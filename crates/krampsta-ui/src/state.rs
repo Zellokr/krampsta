@@ -27,6 +27,7 @@ use crate::projects::ProjectInfo;
 use crate::sample;
 use crate::session_view::SessionView;
 use crate::theme::ThemeChoice;
+use rune_kit::shell::TabDragState;
 
 /// Which full-window screen shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -54,6 +55,9 @@ pub struct KrampstaApp {
     /// Newest first, as the sidebar lists them. Never empty.
     pub sessions: Vec<Session>,
     pub selected: SessionId,
+    /// Sessions open in tabs, in order; the selected one is the active tab. Never empty.
+    pub tabs: Vec<SessionId>,
+    pub(crate) tab_drag: TabDragState,
     /// What the window keeps per session: the unsent draft, the reply being paced out.
     pub(crate) views: HashMap<SessionId, SessionView>,
     /// What a session with nothing typed yet shows in its composer.
@@ -127,6 +131,7 @@ impl KrampstaApp {
             self.selected = first.id;
         }
         self.views.clear();
+        self.tabs = vec![self.selected];
         self.focus_composer(self.selected);
         self
     }
@@ -142,9 +147,14 @@ impl KrampstaApp {
             if self.selected == session.id {
                 self.selected = id;
             }
-            // Its draft and focus follow it to the new id.
+            // Its draft, focus and tab follow it to the new id.
             if let Some(view) = views.remove(&session.id) {
                 self.views.insert(id, view);
+            }
+            for tab in &mut self.tabs {
+                if *tab == session.id {
+                    *tab = id;
+                }
             }
             session.id = id;
         }
@@ -209,6 +219,8 @@ impl KrampstaApp {
         let mut app = KrampstaApp {
             sessions,
             selected,
+            tabs: vec![selected],
+            tab_drag: TabDragState::default(),
             views,
             blank_draft: TextEdit::new(""),
             notice: None,
@@ -305,6 +317,7 @@ impl KrampstaApp {
 
     pub fn select(&mut self, id: SessionId) {
         if self.session(id).is_some() {
+            self.open_tab(id);
             self.selected = id;
             self.screen = Screen::Chat;
             // Say up front when it can't go on here, rather than on the next send.

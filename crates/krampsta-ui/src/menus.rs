@@ -72,6 +72,7 @@ impl KrampstaApp {
             store.delete(id);
         }
         self.views.remove(&id);
+        self.drop_tab(id);
         for m in &removed.messages {
             for c in &m.tool_calls {
                 self.open_tools.remove(&c.id);

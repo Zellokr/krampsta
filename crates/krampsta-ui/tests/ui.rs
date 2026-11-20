@@ -447,6 +447,31 @@ fn settings_open_from_the_sidebar_and_close_with_back() {
 }
 
 #[test]
+fn sessions_open_in_tabs_that_switch_and_close() {
+    let mut rt = runtime();
+    let (first, second) = (rt.state.sessions[0].id, rt.state.sessions[1].id);
+    let tab = |id| format!("t-{}", keys::tab(id));
+    assert!(has(&rt, &tab(first)) && !has(&rt, &tab(second)), "only the selected session has a tab");
+
+    click(&mut rt, &keys::session(second));
+    assert!(has(&rt, &tab(second)), "picking it in the sidebar opens its tab");
+    assert_eq!(rt.state.selected, second);
+
+    click(&mut rt, &tab(first));
+    assert_eq!(rt.state.selected, first, "a tab switches to its session");
+    assert!(has(&rt, &tab(second)), "and the other stays open");
+
+    let close = KeyEvent { key: Key::Command('w'), mods: Mods { cmd: true, ..Mods::default() } };
+    rt.update(|s, tx| {
+        app::on_key(s, &close, tx);
+    });
+    settle(&mut rt);
+    assert!(!has(&rt, &tab(first)), "Ctrl+W closes the active tab");
+    assert_eq!(rt.state.selected, second, "its neighbour shows");
+    assert!(has(&rt, &keys::session(first)), "the session stays in the sidebar");
+}
+
+#[test]
 fn keyboard_shortcut_creates_a_session() {
     let mut rt = runtime();
     let before = rt.state.sessions.len();
