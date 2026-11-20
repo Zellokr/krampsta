@@ -4,6 +4,7 @@ use krampsta_core::{AgentStatus, Usage};
 use rune::{El, el, row, text};
 use rune_kit::{Kit, Spinner};
 
+use crate::costs::{Cost, format_cost};
 use crate::keys;
 use crate::theme;
 
@@ -29,13 +30,19 @@ pub fn pill(status: &AgentStatus, k: &Kit) -> El {
         .child(text(label).font(k.ty.small_medium).color(k.c.text_muted))
 }
 
-/// The tokens a session has used ("1.2k in · 340 out"), or nothing before the provider counts any.
-pub fn usage(usage: Usage, k: &Kit) -> Option<El> {
+/// The tokens a session has used and, when its prices are known, what they cost ("1.2k in ·
+/// 340 out · $0.02"), or nothing before the provider counts any.
+pub fn usage(usage: Usage, cost: Cost, k: &Kit) -> Option<El> {
     if usage.is_empty() {
         return None;
     }
-    let shown = format!("{} in · {} out", compact(usage.input), compact(usage.output));
-    let spoken = format!("Tokens used: {} input, {} output", usage.input, usage.output);
+    let mut shown = format!("{} in · {} out", compact(usage.input), compact(usage.output));
+    let mut spoken = format!("Tokens used: {} input, {} output", usage.input, usage.output);
+    if let Cost::Known(usd) = cost {
+        let cost = format_cost(usd);
+        shown = format!("{shown} · {cost}");
+        spoken = format!("{spoken}; cost {cost}");
+    }
     Some(text(shown).key(keys::USAGE).role("status").label(spoken).font(k.ty.small).color(k.c.text_faint))
 }
 

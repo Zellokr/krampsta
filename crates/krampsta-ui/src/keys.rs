@@ -146,3 +146,8 @@ pub fn project_group(root: Option<&std::path::Path>) -> String {
 pub fn open_group(root: Option<&std::path::Path>) -> String {
     format!("{}-open", project_group(root))
 }
+
+/// A billed model's price field in settings; `side` is "input" or "output".
+pub fn price(provider: &str, model: &str, side: &str) -> String {
+    format!("krampsta-price-{provider}-{model}-{side}")
+}

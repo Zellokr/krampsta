@@ -5,7 +5,8 @@
 //! running command's output) is never written.
 
 use krampsta_core::{
-    AgentStatus, Message, MessageId, MessageRole, RunId, Session, SessionId, ToolCall, ToolCallId, ToolResult, Usage,
+    AgentStatus, Message, MessageId, MessageRole, ModelUsage, RunId, Session, SessionId, ToolCall, ToolCallId,
+    ToolResult, Usage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +24,18 @@ pub struct SavedSession {
     pub status: SavedStatus,
     #[serde(default)]
     pub usage: SavedUsage,
+    /// The same tokens by model; absent in sessions saved before it was kept.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by_model: Vec<SavedModelUsage>,
     pub messages: Vec<SavedMessage>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SavedModelUsage {
+    pub provider: String,
+    pub model: String,
+    pub input: u64,
+    pub output: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -96,6 +108,16 @@ impl SavedSession {
                 AgentStatus::Cancelled => SavedStatus::Cancelled,
             },
             usage: SavedUsage { input: s.usage.input, output: s.usage.output },
+            by_model: s
+                .by_model
+                .iter()
+                .map(|m| SavedModelUsage {
+                    provider: m.provider.clone(),
+                    model: m.model.clone(),
+                    input: m.usage.input,
+                    output: m.usage.output,
+                })
+                .collect(),
             messages: s.messages.iter().map(SavedMessage::from_message).collect(),
         }
     }
@@ -112,6 +134,15 @@ impl SavedSession {
         let messages = self.messages.into_iter().map(SavedMessage::into_message).collect();
         let mut session = Session::restore(SessionId(self.id), self.title, messages, status, usage);
         session.project = self.project;
+        session.by_model = self
+            .by_model
+            .into_iter()
+            .map(|m| ModelUsage {
+                provider: m.provider,
+                model: m.model,
+                usage: Usage { input: m.input, output: m.output },
+            })
+            .collect();
         session
     }
 }

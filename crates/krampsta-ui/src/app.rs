@@ -86,7 +86,7 @@ pub fn on_key(s: &mut KrampstaApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     if ev.is_command(',') {
-        s.screen = Screen::Settings;
+        s.open_settings();
         return true;
     }
     if ev.key == Key::Escape && s.screen == Screen::Settings {
@@ -121,7 +121,7 @@ fn workspace(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec
     let session = s.current();
     let title = session.map_or(TITLE, |x| x.title.as_str());
     let status = session.map(|x| x.status.clone()).unwrap_or_default();
-    let usage = session.and_then(|x| status::usage(x.usage, k));
+    let usage = session.and_then(|x| status::usage(x.usage, s.cost(x), k));
     let open = s.changes.is_open();
     let toggle = IconButton::new(&shell::INSPECTOR)
         .variant(IconButtonVariant::GhostMuted)
@@ -180,31 +180,31 @@ const SCENES: &[Scene] = &[
     }),
     ("settings", |s| {
         stage_accounts(s, false);
-        s.screen = Screen::Settings;
+        s.open_settings();
     }),
     // A key typed into the masked field, ready to save.
     ("api-key", |s| {
         stage_accounts(s, false);
-        s.screen = Screen::Settings;
+        s.open_settings();
         s.api_key.draft = TextEdit::new("sk-proj-0123456789").secure();
     }),
     ("api-key-saved", |s| {
         stage_saved_key(s);
-        s.screen = Screen::Settings;
+        s.open_settings();
     }),
     ("signed-in", |s| {
         stage_accounts(s, true);
-        s.screen = Screen::Settings;
+        s.open_settings();
     }),
     ("sign-in", |s| {
         stage_accounts(s, false);
-        s.screen = Screen::Settings;
+        s.open_settings();
         let code = DeviceCode { url: "https://github.com/login/device".into(), code: "ABCD-1234".into() };
         s.sign_in = SignIn::Code { provider: "copilot".into(), code };
     }),
     ("sign-in-failed", |s| {
         stage_accounts(s, false);
-        s.screen = Screen::Settings;
+        s.open_settings();
         let error = "The code expired before it was entered. Ask for a new one and enter it within 15 minutes.";
         s.sign_in = SignIn::Failed { provider: "chatgpt".into(), error: error.into() };
     }),
@@ -284,6 +284,8 @@ const SCENES: &[Scene] = &[
         s.engine.open = Some(Picker::ComposerModel);
     }),
     ("projects", scene_projects),
+    ("cost", scene_cost),
+    ("prices", scene_prices),
     // No folder open: the row invites opening one.
     ("no-project", |s| {
         s.project = None;
@@ -440,6 +442,32 @@ fn scene_completed(s: &mut KrampstaApp) {
         s,
         &[started, finished, AgentEvent::TextDelta { run, text: reply.into() }, usage, AgentEvent::Completed { run }],
     );
+}
+
+/// `completed`, run with a priced OpenAI model: the toolbar shows what it cost.
+fn scene_cost(s: &mut KrampstaApp) {
+    stage_saved_key(s);
+    s.engine.selection = Selection { provider: "openai".into(), model: Some("gpt-5.1".into()) };
+    s.engine.problem = None;
+    s.engine.models.insert("openai".into(), Models::Ready(vec!["gpt-5.1".into(), "gpt-5.1-mini".into()]));
+    s.prices.insert(("openai".into(), "gpt-5.1".into()), crate::costs::Price { input: 1.25, output: 10.0 });
+    let run = staged(s, "Find where the configuration is loaded");
+    if let Some(x) = s.sessions.iter_mut().find(|x| x.active_run() == Some(run)) {
+        x.bill_to("openai", "gpt-5.1");
+    }
+    let reply = "It's loaded in `crates/krampsta-app/src/main.rs`, before the first frame.";
+    let usage = AgentEvent::Usage { run, usage: Usage { input: 182_480, output: 6_342 } };
+    apply(s, &[AgentEvent::TextDelta { run, text: reply.into() }, usage, AgentEvent::Completed { run }]);
+}
+
+/// Settings with two billed models: one priced, one not yet.
+fn scene_prices(s: &mut KrampstaApp) {
+    stage_saved_key(s);
+    s.engine.selection = Selection { provider: "openai".into(), model: Some("gpt-5.1-mini".into()) };
+    s.engine.problem = None;
+    s.engine.models.insert("openai".into(), Models::Ready(vec!["gpt-5.1".into(), "gpt-5.1-mini".into()]));
+    s.prices.insert(("openai".into(), "gpt-5.1".into()), crate::costs::Price { input: 1.25, output: 10.0 });
+    s.open_settings();
 }
 
 fn scene_failed(s: &mut KrampstaApp) {

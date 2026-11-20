@@ -31,7 +31,7 @@ pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
         .icon(&icons::GEAR)
         .height(32.0)
         .selected(s.screen == Screen::Settings)
-        .on_select(|s: &mut KrampstaApp, _: &mut Tx| s.screen = Screen::Settings)
+        .on_select(|s: &mut KrampstaApp, _: &mut Tx| s.open_settings())
         .build(k)
         .key(keys::SETTINGS);
     let sidebar = Sidebar::new()

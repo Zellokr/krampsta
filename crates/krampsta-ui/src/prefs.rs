@@ -15,6 +15,7 @@ use krampsta_agent::Selection;
 use rune::Tx;
 use serde::{Deserialize, Serialize};
 
+use crate::costs::Price;
 use crate::state::KrampstaApp;
 use crate::theme::ThemeChoice;
 
@@ -36,6 +37,17 @@ pub struct Prefs {
     pub project: Option<PathBuf>,
     /// Folded project groups (null: "No project").
     pub collapsed: Vec<Option<PathBuf>>,
+    /// What billed models cost.
+    pub prices: Vec<SavedPrice>,
+}
+
+/// A model's price as the settings file keeps it (dollars per million tokens).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedPrice {
+    pub provider: String,
+    pub model: String,
+    pub input: f64,
+    pub output: f64,
 }
 
 impl Prefs {
@@ -84,6 +96,11 @@ impl KrampstaApp {
             self.rebuild_engine();
         }
         self.collapsed_groups = prefs.collapsed.iter().cloned().collect();
+        self.prices = prefs
+            .prices
+            .iter()
+            .map(|p| ((p.provider.clone(), p.model.clone()), Price { input: p.input, output: p.output }))
+            .collect();
         // Only what changes after this is new; what couldn't apply isn't saved over.
         self.prefs = PrefsSync::starting_at(self.prefs_now());
         self
@@ -103,6 +120,16 @@ impl KrampstaApp {
             models: self.engine.remembered_models().iter().map(|(p, m)| (p.clone(), m.clone())).collect(),
             project: self.project.as_ref().map(|p| p.root.clone()),
             collapsed,
+            prices: self
+                .prices
+                .iter()
+                .map(|((provider, model), price)| SavedPrice {
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    input: price.input,
+                    output: price.output,
+                })
+                .collect(),
         }
     }
 
@@ -120,6 +147,14 @@ impl KrampstaApp {
             && p.project.as_deref() == self.project.as_ref().map(|x| x.root.as_path())
             && p.collapsed.len() == self.collapsed_groups.len()
             && p.collapsed.iter().all(|g| self.collapsed_groups.contains(g))
+            // `saved` always comes from `prefs_now`, in the map's (sorted) order.
+            && p.prices.len() == self.prices.len()
+            && p.prices.iter().zip(&self.prices).all(|(saved, ((provider, model), price))| {
+                saved.provider == *provider
+                    && saved.model == *model
+                    && saved.input == price.input
+                    && saved.output == price.output
+            })
     }
 
     /// Saves the settings once they have settled after a change (`poll` calls it with its clock).

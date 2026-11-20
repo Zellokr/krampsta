@@ -28,10 +28,23 @@ pub struct Session {
     pub project: Option<PathBuf>,
     /// Tokens every run in this session has used so far, as the providers counted them.
     pub usage: Usage,
+    /// The same tokens by the model that used them (what a price applies to). Runs that
+    /// weren't billed to a model ([`Session::bill_to`]) count only in `usage`.
+    pub by_model: Vec<ModelUsage>,
     /// The run whose events this session accepts. Events from any other run are stale
     /// (a cancelled run that kept talking, say) and change nothing.
     active_run: Option<RunId>,
+    /// Which model the active run's tokens are counted against.
+    billed: Option<(String, String)>,
     next_message: u64,
+}
+
+/// Tokens one model used in a session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelUsage {
+    pub provider: String,
+    pub model: String,
+    pub usage: Usage,
 }
 
 impl Session {
@@ -46,8 +59,10 @@ impl Session {
             messages: Vec::new(),
             status: AgentStatus::Idle,
             usage: Usage::default(),
+            by_model: Vec::new(),
             project: None,
             active_run: None,
+            billed: None,
             next_message: 1,
         }
     }
@@ -58,11 +73,41 @@ impl Session {
     pub fn restore(id: SessionId, title: String, messages: Vec<Message>, status: AgentStatus, usage: Usage) -> Self {
         let next_message = messages.iter().map(|m| m.id.0).max().map_or(1, |max| max.saturating_add(1));
         let status = if status.is_running() { AgentStatus::Cancelled } else { status };
-        Session { id, title, messages, status, usage, project: None, active_run: None, next_message }
+        Session {
+            id,
+            title,
+            messages,
+            status,
+            usage,
+            by_model: Vec::new(),
+            project: None,
+            active_run: None,
+            billed: None,
+            next_message,
+        }
     }
 
     pub fn active_run(&self) -> Option<RunId> {
         self.active_run
+    }
+
+    /// Counts the active run's tokens against `model` of `provider` (call it right after
+    /// [`submit`](Self::submit)). The run's end forgets it.
+    pub fn bill_to(&mut self, provider: &str, model: &str) {
+        if self.active_run.is_some() {
+            self.billed = Some((provider.to_owned(), model.to_owned()));
+        }
+    }
+
+    fn add_usage(&mut self, usage: Usage) {
+        self.usage += usage;
+        let Some((provider, model)) = &self.billed else { return };
+        match self.by_model.iter_mut().find(|m| m.provider == *provider && m.model == *model) {
+            Some(entry) => entry.usage += usage,
+            None => {
+                self.by_model.push(ModelUsage { provider: provider.clone(), model: model.clone(), usage });
+            }
+        }
     }
 
     fn mint_message_id(&mut self) -> MessageId {
@@ -122,7 +167,7 @@ impl Session {
             AgentEvent::ToolOutputDelta { call, text, .. } => self.assistant_message(run).push_live_output(call, text),
             // The app asks the user; the conversation shows the call as running meanwhile.
             AgentEvent::ApprovalRequested { .. } => return false,
-            AgentEvent::Usage { usage, .. } => self.usage += *usage,
+            AgentEvent::Usage { usage, .. } => self.add_usage(*usage),
             // Changes belong to the project, not the conversation: the app keeps them.
             AgentEvent::ChangeProposed { .. } => return false,
             AgentEvent::Completed { .. } => self.finish(AgentStatus::Completed),
@@ -135,6 +180,7 @@ impl Session {
     fn finish(&mut self, status: AgentStatus) {
         self.status = status;
         self.active_run = None;
+        self.billed = None;
         // A run that ended before writing (or thinking) anything leaves no empty bubble behind.
         self.messages.retain(|m| {
             !(m.role == MessageRole::Assistant
@@ -284,6 +330,34 @@ mod tests {
         s.submit("two", RunId(2)).unwrap();
         s.apply(&AgentEvent::Usage { run: RunId(2), usage: Usage { input: 170, output: 30 } });
         assert_eq!(s.usage, Usage { input: 400, output: 55 });
+    }
+
+    #[test]
+    fn usage_is_also_counted_against_the_model_each_run_was_billed_to() {
+        let mut s = session();
+        s.submit("one", RunId(1)).unwrap();
+        s.bill_to("openai", "gpt-a");
+        s.apply(&AgentEvent::Usage { run: RunId(1), usage: Usage { input: 100, output: 10 } });
+        s.apply(&AgentEvent::Completed { run: RunId(1) });
+        s.submit("two", RunId(2)).unwrap();
+        s.bill_to("openai", "gpt-b");
+        s.apply(&AgentEvent::Usage { run: RunId(2), usage: Usage { input: 50, output: 5 } });
+        s.apply(&AgentEvent::Completed { run: RunId(2) });
+        s.submit("three", RunId(3)).unwrap();
+        s.bill_to("openai", "gpt-a");
+        s.apply(&AgentEvent::Usage { run: RunId(3), usage: Usage { input: 1, output: 1 } });
+        s.apply(&AgentEvent::Cancelled { run: RunId(3) });
+        // Not billed: counts in the total only.
+        s.submit("four", RunId(4)).unwrap();
+        s.apply(&AgentEvent::Usage { run: RunId(4), usage: Usage { input: 7, output: 7 } });
+
+        assert_eq!(s.usage, Usage { input: 158, output: 23 });
+        let by: Vec<(&str, Usage)> = s.by_model.iter().map(|m| (m.model.as_str(), m.usage)).collect();
+        assert_eq!(by, [("gpt-a", Usage { input: 101, output: 11 }), ("gpt-b", Usage { input: 50, output: 5 })]);
+        // Billing outside a run does nothing.
+        s.apply(&AgentEvent::Completed { run: RunId(4) });
+        s.bill_to("openai", "gpt-c");
+        assert!(s.billed.is_none());
     }
 
     #[test]

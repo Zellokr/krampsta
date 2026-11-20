@@ -1,13 +1,14 @@
 //! Settings: a full-window page in the same frame as the chat.
 
 use krampsta_agent::{KeySource, Provider};
-use rune::{Cx, El, Icon, ScrollSpec, Tx, col, icon, row, text};
+use rune::{Cx, El, Icon, ScrollSpec, TextEdit, Tx, col, icon, row, text};
 use rune_kit::shell::Page;
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, SegmentedControl, Switch, TextInput};
 
 use crate::accounts::{KeyState, signed_in_user};
 use crate::components::engine_picker::{self, Place};
 use crate::components::icons;
+use crate::costs::{PriceField, parse_dollars};
 use crate::keys;
 use crate::picker::hidden_hint;
 use crate::state::{KrampstaApp, Screen};
@@ -58,6 +59,14 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec<
     }
     if s.key_providers().next().is_some() {
         column = column.child(section(k, "API keys").mt(12.0)).children(s.key_providers().map(|p| api_key(s, k, p)));
+    }
+    if !s.price_fields.is_empty() {
+        let note = "US dollars per million tokens, as your provider charges them. A session shows its cost \
+                    beside its tokens once every model it used has a price.";
+        column = column
+            .child(section(k, "Prices").mt(12.0))
+            .child(text(note).font(k.ty.small).color(k.c.text_muted).wrap())
+            .children(s.price_fields.iter().enumerate().map(|(i, f)| price(s, k, i, f)));
     }
     if s.account_providers().next().is_some() {
         let cards = row().w_full().gap(CARD_GAP).flex_wrap().children(s.account_providers().map(|p| account(k, p)));
@@ -181,6 +190,37 @@ fn api_key(s: &KrampstaApp, k: &Kit, p: &Provider) -> El {
         row().gap(8.0).items_center().child(input).child(save)
     };
     setting(k, &p.label, &description, control)
+}
+
+/// A billed model's price: what a million tokens in and out cost. A field that isn't a number
+/// shows as invalid and leaves the price as it was.
+fn price(s: &KrampstaApp, k: &Kit, index: usize, f: &PriceField) -> El {
+    let provider = s.engine.providers.iter().find(|p| p.id == f.provider).map_or(f.provider.as_str(), |p| &p.label);
+    let field = |edit: &TextEdit, side: &'static str| {
+        let output = side == "output";
+        TextInput::new(edit)
+            .placeholder("$0.00")
+            .label(format!("{} {side} price per million tokens", f.model))
+            .width(Some(84.0))
+            .invalid(parse_dollars(&edit.text).is_err())
+            .on_edit(move |s: &mut KrampstaApp| s.price_text(index, output))
+            .on_change(move |s: &mut KrampstaApp, _: &mut Tx| s.edit_price(index))
+            .build(k)
+            .key(keys::price(&f.provider, &f.model, side))
+    };
+    let caption = |t: &'static str| text(t).font(k.ty.small).color(k.c.text_muted);
+    let control = row()
+        .gap(8.0)
+        .items_center()
+        .child(caption("In"))
+        .child(field(&f.input, "input"))
+        .child(caption("Out"))
+        .child(field(&f.output, "output"));
+    let description = match s.price(&f.provider, &f.model) {
+        Some(_) => provider.to_owned(),
+        None => format!("{provider} · no price yet"),
+    };
+    setting(k, &f.model, &description, control)
 }
 
 fn setting(k: &Kit, title: &str, description: &str, control: El) -> El {

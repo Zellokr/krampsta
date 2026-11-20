@@ -32,6 +32,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   sesiones por `Session::project`, y una sesión sin proyecto adopta el abierto al enviar),
   `prefs.rs` (ajustes entre arranques: tema, anchos, proveedor y modelo, proyecto, grupos
   plegados; `poll` compara sin asignar y guarda medio segundo después de que paren de cambiar),
+  `costs.rs` (coste por sesión: tokens por modelo, `Session::by_model`, por los precios por
+  millón que pone el usuario; sólo proveedores `Cloud`, sin precios de serie),
   `changes.rs` (revisar los cambios
   propuestos: aceptar o rechazar archivos y bloques), `theme.rs` (único sitio de colores),
   `keys.rs` (claves estables), `sample.rs` (datos

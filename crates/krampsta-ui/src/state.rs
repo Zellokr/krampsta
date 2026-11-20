@@ -3,13 +3,13 @@
 //! Everything a view reads lives in [`KrampstaApp`]. Handlers call its methods; agent events
 //! reach it through [`KrampstaApp::pump`], which `poll` runs when the agent host wakes the window.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use krampsta_agent::{
     AgentError, AgentHost, EngineCatalog, History, MockAgent, MockCatalog, MockConfig, Notifier, ProjectOpener,
-    RunRequest, SessionStore, Toolbox,
+    RunRequest, Selection, SessionStore, Toolbox,
 };
 use krampsta_core::{AgentEvent, IdGen, MessageId, RunId, Session, SessionError, SessionId, ToolCallId};
 use rune::TextEdit;
@@ -19,6 +19,7 @@ use rune_kit::diff::DiffState;
 use crate::accounts::{KeyField, SignIn};
 use crate::approvals::Asking;
 use crate::changes::Changes;
+use crate::costs::{Price, PriceField};
 use crate::menus::OpenMenu;
 use crate::pace::Pace;
 use crate::picker::EngineChoice;
@@ -95,6 +96,12 @@ pub struct KrampstaApp {
     pub collapsed_groups: HashSet<Option<PathBuf>>,
     /// The folder being opened in the background, if one is.
     pub opening_project: Option<PathBuf>,
+    /// What each billed model costs, as the user set it (provider, model).
+    pub prices: BTreeMap<(String, String), Price>,
+    /// The price fields the settings show, prepared as they open.
+    pub price_fields: Vec<PriceField>,
+    /// What a price field edits once it no longer exists (see `price_text`).
+    pub(crate) price_scratch: TextEdit,
     /// The settings saved last, to tell when they change.
     pub(crate) prefs: PrefsSync,
     /// Turns a folder into tools. None: folders can't be opened (tests, scenes).
@@ -207,6 +214,9 @@ impl KrampstaApp {
             project: None,
             collapsed_groups: HashSet::new(),
             opening_project: None,
+            prices: BTreeMap::new(),
+            price_fields: Vec::new(),
+            price_scratch: TextEdit::new(""),
             prefs: PrefsSync::default(),
             opener: None,
             ids,
@@ -303,11 +313,16 @@ impl KrampstaApp {
             return Err(SendError::OtherProject(name));
         }
         let open = self.project.as_ref().map(|p| p.root.clone());
+        let Selection { provider, model } = self.engine.selection.clone();
         let session = self.session_mut(id).ok_or(SessionError::EmptyMessage)?;
         session.submit(&text, run)?;
         // A session not tied to a folder yet works in the open one from now on.
         if session.project.is_none() {
             session.project = open;
+        }
+        // Its tokens are counted against the model it runs with, for what it costs.
+        if let Some(model) = &model {
+            session.bill_to(&provider, model);
         }
         let request =
             RunRequest { session: id, run, history: session.messages.clone(), effort: self.engine.effort.clone() };

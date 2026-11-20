@@ -180,6 +180,42 @@ fn changed_settings_are_saved_once_they_settle() {
     assert_eq!(again.sidebar.width(), 330.0);
 }
 
+#[test]
+fn a_price_typed_in_settings_shows_the_sessions_cost_in_the_toolbar() {
+    let mut state = KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant())));
+    // A session that used a model billed by key ("openai", a Cloud provider).
+    state.engine.providers.push(krampsta_agent::Provider {
+        id: "openai".into(),
+        label: "OpenAI".into(),
+        default_model: None,
+        missing: None,
+        kind: krampsta_agent::ProviderKind::Cloud,
+        reasoning_effort: false,
+        api_key: None,
+    });
+    let id = state.new_session();
+    let session = state.sessions.iter_mut().find(|x| x.id == id).unwrap();
+    session.submit("hi", krampsta_core::RunId(900)).unwrap();
+    session.bill_to("openai", "gpt-x");
+    let usage = krampsta_core::Usage { input: 1_000_000, output: 100_000 };
+    session.apply(&krampsta_core::AgentEvent::Usage { run: krampsta_core::RunId(900), usage });
+    session.apply(&krampsta_core::AgentEvent::Completed { run: krampsta_core::RunId(900) });
+    let mut rt = Runtime::new(state, app::view, SIZE, Env::new(true, 1.0));
+    settle(&mut rt);
+    let usage_text = |rt: &Runtime<KrampstaApp>| element(rt, keys::USAGE).and_then(|e| e.text).unwrap_or_default();
+    assert_eq!(usage_text(&rt), "1M in · 100k out", "no price yet: tokens only");
+
+    click(&mut rt, keys::SETTINGS);
+    click(&mut rt, &keys::price("openai", "gpt-x", "input"));
+    type_text(&mut rt, "2");
+    click(&mut rt, &keys::price("openai", "gpt-x", "output"));
+    type_text(&mut rt, "$8");
+    assert_eq!(rt.state.price("openai", "gpt-x"), Some(krampsta_ui::costs::Price { input: 2.0, output: 8.0 }));
+
+    click(&mut rt, keys::SETTINGS_BACK);
+    assert_eq!(usage_text(&rt), "1M in · 100k out · $2.80", "1M in at $2 + 0.1M out at $8");
+}
+
 /// No tools: these tests only need a folder to become the project.
 struct NoTools;
 

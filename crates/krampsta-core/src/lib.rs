@@ -24,5 +24,6 @@ pub use ids::SessionId;
 pub use ids::ToolCallId;
 pub use message::Message;
 pub use message::MessageRole;
+pub use session::ModelUsage;
 pub use session::Session;
 pub use session::SessionError;

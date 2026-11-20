@@ -321,6 +321,7 @@ mod tests {
         s.project = Some(PathBuf::from("/code/krampsta"));
         let run = RunId(3);
         s.submit("List the files", run).unwrap();
+        s.bill_to("openai", "gpt-test");
         s.apply(&AgentEvent::Started { run });
         s.apply(&AgentEvent::ReasoningDelta { run, text: "Looking".into() });
         let call = ToolCall { id: ToolCallId("c1".into()), name: "list_files".into(), arguments: "{}".into() };
