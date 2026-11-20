@@ -43,6 +43,9 @@ pub enum SendError {
     /// The chosen provider and model can't run (no model yet, missing key…).
     #[error("{0}")]
     Engine(String),
+    /// The session works in a folder other than the one open (the tools are that one's).
+    #[error("This session is from {0}. Open that folder to continue it.")]
+    OtherProject(String),
 }
 
 pub struct KrampstaApp {
@@ -87,6 +90,8 @@ pub struct KrampstaApp {
     pub(crate) store: Option<Arc<dyn SessionStore>>,
     /// The folder the agent's tools work in. None: runs have no tools.
     pub project: Option<ProjectInfo>,
+    /// Projects whose sessions the user folded away in the sidebar (None: "No project").
+    pub collapsed_groups: HashSet<Option<PathBuf>>,
     /// The folder being opened in the background, if one is.
     pub opening_project: Option<PathBuf>,
     /// Turns a folder into tools. None: folders can't be opened (tests, scenes).
@@ -197,6 +202,7 @@ impl KrampstaApp {
             agent,
             store: None,
             project: None,
+            collapsed_groups: HashSet::new(),
             opening_project: None,
             opener: None,
             ids,
@@ -253,7 +259,11 @@ impl KrampstaApp {
     /// Adds an empty session at the top and selects it.
     pub fn new_session(&mut self) -> SessionId {
         let id = SessionId(self.ids.next());
-        self.sessions.insert(0, Session::new(id));
+        let mut session = Session::new(id);
+        session.project = self.project.as_ref().map(|p| p.root.clone());
+        // The new session shows: its project's sessions unfold.
+        self.collapsed_groups.remove(&session.project);
+        self.sessions.insert(0, session);
         self.select(id);
         id
     }
@@ -262,9 +272,17 @@ impl KrampstaApp {
         if self.session(id).is_some() {
             self.selected = id;
             self.screen = Screen::Chat;
-            self.notice = None;
+            // Say up front when it can't go on here, rather than on the next send.
+            self.notice = self.foreign_project(id).map(|name| SendError::OtherProject(name).to_string());
             self.draft.focused = true;
         }
+    }
+
+    /// The name of the project `id` works in, if that isn't the open one.
+    pub(crate) fn foreign_project(&self, id: SessionId) -> Option<String> {
+        let theirs = self.session(id)?.project.as_deref()?;
+        let open = self.project.as_ref().map(|p| p.root.as_path());
+        (open != Some(theirs)).then(|| krampsta_agent::project_name(theirs))
     }
 
     /// Sends the composer's text to the agent in the selected session.
@@ -275,8 +293,16 @@ impl KrampstaApp {
         let run = self.agent.next_run_id();
         let text = self.draft.text.clone();
         let id = self.current().map(|s| s.id).ok_or(SessionError::EmptyMessage)?;
+        if let Some(name) = self.foreign_project(id) {
+            return Err(SendError::OtherProject(name));
+        }
+        let open = self.project.as_ref().map(|p| p.root.clone());
         let session = self.session_mut(id).ok_or(SessionError::EmptyMessage)?;
         session.submit(&text, run)?;
+        // A session not tied to a folder yet works in the open one from now on.
+        if session.project.is_none() {
+            session.project = open;
+        }
         let request =
             RunRequest { session: id, run, history: session.messages.clone(), effort: self.engine.effort.clone() };
         self.draft = TextEdit::new("");

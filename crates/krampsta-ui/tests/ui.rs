@@ -1,10 +1,11 @@
 //! Interaction tests: the real Krampsta view in Rune's headless `Runtime`, driven by pointer and
 //! keyboard input the way a person would, with the mock agent running for real.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use krampsta_agent::{Effort, MemoryStore, MockCatalog, MockConfig};
+use krampsta_agent::{Effort, MemoryStore, MockCatalog, MockConfig, OpenedProject, ProjectOpener};
 use krampsta_core::{AgentStatus, MessageRole, Session, SessionId};
 use krampsta_ui::picker::Picker;
 use krampsta_ui::{KrampstaApp, Screen, app, keys};
@@ -140,6 +141,60 @@ fn saved_sessions_show_up_in_the_sidebar_and_open_with_their_messages() {
         rt.elements().iter().any(|e| e.text.as_deref().is_some_and(|t| t.contains("Where is the parser?"))),
         "the saved conversation shows"
     );
+}
+
+/// No tools: these tests only need a folder to become the project.
+struct NoTools;
+
+impl krampsta_agent::Toolbox for NoTools {
+    fn specs(&self) -> Arc<[krampsta_agent::ToolSpec]> {
+        Arc::from(Vec::new())
+    }
+    fn run(&self, _: &str, _: &str, _: &krampsta_agent::Call<'_>) -> Result<krampsta_agent::ToolOutput, String> {
+        Err("no tools".into())
+    }
+}
+
+struct Opens;
+
+impl ProjectOpener for Opens {
+    fn open(&self, root: &Path) -> Result<OpenedProject, String> {
+        Ok(OpenedProject { root: root.to_owned(), tools: Arc::new(NoTools) })
+    }
+}
+
+#[test]
+fn sessions_sit_under_their_project_which_folds_and_opens_from_its_heading() {
+    let mut state = KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant())))
+        .with_project(OpenedProject { root: PathBuf::from("/code/first"), tools: Arc::new(NoTools) })
+        .with_opener(Arc::new(Opens));
+    let rune = PathBuf::from("/code/rune");
+    let theirs = state.new_session();
+    let session = state.sessions.iter_mut().find(|x| x.id == theirs).unwrap();
+    session.project = Some(rune.clone());
+    session.title = "Rune work".into();
+    let mut rt = Runtime::new(state, app::view, SIZE, Env::new(true, 1.0));
+    settle(&mut rt);
+    let group = element(&rt, &keys::project_group(Some(&rune))).expect("rune's group");
+    let row = element(&rt, &keys::session(theirs)).expect("its session's row");
+    assert!(inside(row.rect, group.rect), "the session sits inside its project's group");
+    assert!(has(&rt, &keys::project_group(Some(Path::new("/code/first")))), "the open project's group");
+
+    // A press on the heading folds the group's sessions away, and another brings them back.
+    let at = (group.rect[0] + 24.0, group.rect[1] + 12.0);
+    rt.pointer_down(at.0, at.1);
+    rt.pointer_up(at.0, at.1);
+    settle(&mut rt);
+    assert!(!has(&rt, &keys::session(theirs)), "folded away");
+    rt.pointer_down(at.0, at.1);
+    rt.pointer_up(at.0, at.1);
+    settle(&mut rt);
+    assert!(has(&rt, &keys::session(theirs)), "shown again");
+
+    // Its folder button opens that project.
+    click(&mut rt, &keys::open_group(Some(&rune)));
+    assert_eq!(rt.state.opening_project.as_deref(), Some(rune.as_path()));
+    assert!(!has(&rt, &keys::open_group(Some(Path::new("/code/first")))), "the open project has no such button");
 }
 
 #[test]

@@ -7,10 +7,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use krampsta_agent::{OpenedProject, ProjectOpened, ProjectOpener};
+use krampsta_agent::{OpenedProject, ProjectOpened, ProjectOpener, project_name};
+use krampsta_core::Session;
 use rune::{FileDialogOptions, Tx};
 
-use crate::state::KrampstaApp;
+use crate::state::{KrampstaApp, SendError};
 
 /// The project open now, as the UI shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +37,54 @@ pub fn display_path(path: &Path) -> String {
     shown.strip_prefix(r"\\?\").map(str::to_owned).unwrap_or(shown)
 }
 
+/// The sessions the sidebar lists under one project's heading.
+#[derive(Debug)]
+pub struct Group<'a> {
+    /// None: no project is open and these sessions aren't tied to one.
+    pub root: Option<&'a Path>,
+    pub name: String,
+    /// Newest first.
+    pub sessions: Vec<&'a Session>,
+}
+
 impl KrampstaApp {
+    /// The sessions by project: the open one first, then the others by their latest session,
+    /// and sessions with no project last. A session not tied to a folder yet counts as the
+    /// open project's (it takes that one when it runs). Empty groups are left out.
+    pub fn groups(&self) -> Vec<Group<'_>> {
+        let open = self.project.as_ref().map(|p| p.root.as_path());
+        let mut groups: Vec<Group<'_>> = Vec::new();
+        if let Some(root) = open {
+            groups.push(Group { root: Some(root), name: project_name(root), sessions: Vec::new() });
+        }
+        for session in &self.sessions {
+            let root = session.project.as_deref().or(open);
+            match groups.iter_mut().find(|g| g.root == root) {
+                Some(group) => group.sessions.push(session),
+                None => groups.push(Group {
+                    root,
+                    name: root.map_or_else(|| "No project".to_owned(), project_name),
+                    sessions: vec![session],
+                }),
+            }
+        }
+        groups.retain(|g| !g.sessions.is_empty());
+        // Stable: the order above stays within each side.
+        groups.sort_by_key(|g| g.root.is_none());
+        groups
+    }
+
+    pub fn is_group_collapsed(&self, root: Option<&Path>) -> bool {
+        self.collapsed_groups.contains(&root.map(Path::to_path_buf))
+    }
+
+    /// Folds a project's sessions away, or shows them again.
+    pub fn toggle_group(&mut self, root: Option<PathBuf>) {
+        if !self.collapsed_groups.remove(&root) {
+            self.collapsed_groups.insert(root);
+        }
+    }
+
     /// Starts with `project` open: runs get its tools.
     pub fn with_project(mut self, project: OpenedProject) -> Self {
         self.project = Some(ProjectInfo::of(&project));
@@ -123,7 +171,9 @@ impl KrampstaApp {
                 Ok(project) => {
                     self.project = Some(ProjectInfo::of(&project));
                     self.agent.set_toolbox(Some(project.tools));
-                    self.notice = None;
+                    // The selected session may belong here now, or no longer.
+                    self.notice =
+                        self.foreign_project(self.selected).map(|name| SendError::OtherProject(name).to_string());
                 }
                 Err(why) => self.notice = Some(why),
             }
@@ -138,6 +188,7 @@ mod tests {
 
     use krampsta_agent::{MockCatalog, MockConfig, Toolbox};
     use krampsta_core::FileChange;
+    use rune::TextEdit;
 
     use super::*;
 
@@ -208,6 +259,79 @@ mod tests {
         app.open_project(PathBuf::from("/code/second"));
         assert_eq!(app.opening_project, None, "nothing is opened");
         assert!(app.notice.as_deref().is_some_and(|n| n.starts_with("Apply or reject")));
+    }
+
+    /// A session from an earlier launch in `root`.
+    fn from(app: &mut KrampstaApp, root: &str, title: &str) -> krampsta_core::SessionId {
+        let id = app.new_session();
+        let s = app.sessions.iter_mut().find(|s| s.id == id).unwrap();
+        s.project = Some(PathBuf::from(root));
+        s.title = title.into();
+        id
+    }
+
+    fn group_names(app: &KrampstaApp) -> Vec<(String, usize)> {
+        app.groups().iter().map(|g| (g.name.clone(), g.sessions.len())).collect()
+    }
+
+    #[test]
+    fn sessions_group_by_project_open_one_first_then_by_their_latest_session() {
+        let mut app = app();
+        // The two samples aren't tied to a folder: they count as the open project's.
+        from(&mut app, "/code/rune", "Older rune work");
+        from(&mut app, "/code/other", "Other work");
+        from(&mut app, "/code/rune", "Newer rune work");
+        app.new_session();
+        assert_eq!(group_names(&app), [("first".into(), 3), ("rune".into(), 2), ("other".into(), 1)]);
+        let rune = &app.groups()[1];
+        assert_eq!(rune.sessions[0].title, "Newer rune work", "newest first inside a group");
+    }
+
+    #[test]
+    fn with_no_project_open_untied_sessions_go_last_under_no_project() {
+        let mut app = app();
+        app.project = None;
+        from(&mut app, "/code/rune", "Rune work");
+        let names = group_names(&app);
+        assert_eq!(names.last(), Some(&("No project".into(), 2)));
+        assert_eq!(names[0], ("rune".into(), 1));
+    }
+
+    #[test]
+    fn a_session_from_another_project_says_so_and_wont_run_here() {
+        let mut app = app();
+        let theirs = from(&mut app, "/code/rune", "Rune work");
+        app.select(theirs);
+        assert_eq!(app.notice.as_deref(), Some("This session is from rune. Open that folder to continue it."));
+        app.draft = TextEdit::new("go on");
+        assert!(matches!(app.send(), Err(SendError::OtherProject(name)) if name == "rune"));
+        assert_eq!(app.session(theirs).map(|s| s.messages.len()), Some(0), "nothing was sent");
+
+        // Once that folder is open, it goes on there.
+        app.open_project(PathBuf::from("/code/rune"));
+        pump_until_opened(&mut app);
+        assert_eq!(app.notice, None, "the session belongs to the open project now");
+        assert!(app.send().is_ok());
+    }
+
+    #[test]
+    fn an_untied_session_takes_the_open_project_when_it_runs() {
+        let mut app = app();
+        let sample = app.sessions.iter().find(|s| s.project.is_none()).map(|s| s.id).unwrap();
+        app.select(sample);
+        app.draft = TextEdit::new("hello");
+        app.send().unwrap();
+        assert_eq!(app.session(sample).and_then(|s| s.project.clone()), Some(PathBuf::from("/code/first")));
+    }
+
+    #[test]
+    fn groups_fold_and_a_new_session_unfolds_its_own() {
+        let mut app = app();
+        let first = Some(PathBuf::from("/code/first"));
+        app.toggle_group(first.clone());
+        assert!(app.is_group_collapsed(first.as_deref()));
+        app.new_session();
+        assert!(!app.is_group_collapsed(first.as_deref()));
     }
 
     #[test]

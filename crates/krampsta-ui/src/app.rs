@@ -3,7 +3,7 @@
 use krampsta_agent::{
     Account, DeviceCode, Effort, EffortLevel, KeySource, MockCatalog, Provider, ProviderKind, Selection,
 };
-use krampsta_core::{AgentEvent, RunId, ToolCall, ToolCallId, ToolResult, Usage};
+use krampsta_core::{AgentEvent, AgentStatus, MessageRole, RunId, ToolCall, ToolCallId, ToolResult, Usage};
 use rune::{AppSpec, Chrome, Cx, El, Key, KeyEvent, PointerPress, TextEdit, Tx, Waker, row, text};
 use rune_kit::shell::{self, SidebarToggle, SplitView, Toolbar};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit};
@@ -281,6 +281,7 @@ const SCENES: &[Scene] = &[
         s.engine.problem = Some("Choose a model for Ollama.".into());
         s.engine.open = Some(Picker::ComposerModel);
     }),
+    ("projects", scene_projects),
     // No folder open: the row invites opening one.
     ("no-project", |s| {
         s.project = None;
@@ -393,6 +394,35 @@ fn scene_efforts() -> Vec<EffortLevel> {
     ]
     .map(|(id, about)| EffortLevel { effort: Effort::new(id), description: Some(about.to_owned()) })
     .into()
+}
+
+/// Sessions from three projects: the open one first, another with two sessions, and a third
+/// folded away.
+fn scene_projects(s: &mut KrampstaApp) {
+    let open = crate::sample::project();
+    s.project = Some(open.clone());
+    for x in &mut s.sessions {
+        x.project = Some(open.root.clone());
+    }
+    let other = |s: &mut KrampstaApp, root: &str, title: &str, reply: &str| {
+        let id = s.new_session();
+        if let Some(x) = s.sessions.iter_mut().find(|x| x.id == id) {
+            x.project = Some(root.into());
+            x.title = title.into();
+            x.push_message(MessageRole::User, title);
+            x.push_message(MessageRole::Assistant, reply);
+            x.status = AgentStatus::Completed;
+        }
+    };
+    other(s, "/Users/you/code/rune", "Fade the scroll bar at rest", "The bar now fades after 800 ms.");
+    other(s, "/Users/you/code/rugents", "Bump the theme crate", "Updated to the new revision.");
+    other(s, "/Users/you/code/rune", "Why does the tab strip jitter?", "Its width rounds every frame.");
+    s.collapsed_groups = std::iter::once(Some("/Users/you/code/rugents".into())).collect();
+    // The first sample stays selected, as at launch.
+    if let Some(first) = s.sessions.iter().find(|x| x.project.as_deref() == Some(open.root.as_path())) {
+        s.selected = first.id;
+    }
+    s.notice = None;
 }
 
 fn scene_completed(s: &mut KrampstaApp) {

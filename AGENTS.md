@@ -28,7 +28,9 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
   (piezas), `accounts.rs` (diálogo de inicio de sesión), `approvals.rs` (permitir comandos),
   `projects.rs` (carpeta del proyecto: diálogo nativo con `tx.open_folder`, se abre con el
-  `ProjectOpener` en el host y sólo entonces cambian las herramientas), `changes.rs` (revisar los cambios
+  `ProjectOpener` en el host y sólo entonces cambian las herramientas; `groups` agrupa las
+  sesiones por `Session::project`, y una sesión sin proyecto adopta el abierto al enviar),
+  `changes.rs` (revisar los cambios
   propuestos: aceptar o rechazar archivos y bloques), `theme.rs` (único sitio de colores),
   `keys.rs` (claves estables), `sample.rs` (datos
   de ejemplo).

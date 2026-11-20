@@ -1,13 +1,16 @@
-//! The left sidebar: brand, project folder, new session, the session list and settings.
+//! The left sidebar: brand, project folder, new session, the sessions by project and settings.
+
+use std::path::Path;
 
 use krampsta_agent::project_name;
 use krampsta_core::{AgentStatus, Session};
 use rune::{El, Tx, col, icon, row, text};
 use rune_kit::shell::RowStatus;
-use rune_kit::{Kit, Sidebar, SidebarRow};
+use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit, Sidebar, SidebarRow, SidebarSection};
 
 use crate::components::{icons, menus};
 use crate::keys;
+use crate::projects::Group;
 use crate::state::{KrampstaApp, Screen};
 use crate::theme;
 
@@ -41,7 +44,32 @@ pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
         .header(project(s, k))
         .header(new)
         .footer(settings);
-    s.sessions.iter().fold(sidebar, |sb, x| sb.child(session_row(s, x, k, layer))).build(k)
+    s.groups().into_iter().fold(sidebar, |sb, g| sb.section(group(s, g, k, layer))).build(k)
+}
+
+/// One project's sessions under its name, folding away on a press. Another project's group
+/// carries a button that opens its folder.
+fn group(s: &KrampstaApp, g: Group<'_>, k: &Kit, layer: &mut Vec<El>) -> SidebarSection {
+    let root = g.root.map(Path::to_path_buf);
+    let is_open = s.project.as_ref().map(|p| p.root.as_path()) == g.root;
+    let toggle_root = root.clone();
+    let mut section = SidebarSection::new(g.name.clone())
+        .key(keys::project_group(g.root))
+        .count(g.sessions.len())
+        .collapsed(s.is_group_collapsed(g.root))
+        .on_toggle(move |s: &mut KrampstaApp, _: &mut Tx| s.toggle_group(toggle_root.clone()));
+    if let Some(folder) = root.filter(|_| !is_open) {
+        let open = IconButton::new(&icons::FOLDER)
+            .variant(IconButtonVariant::GhostMuted)
+            .control_size(ControlSize::Small)
+            .label(format!("Open {}", g.name))
+            .help(format!("Open {}", g.name))
+            .on_press(move |s: &mut KrampstaApp| s.open_project(folder.clone()))
+            .build(k)
+            .key(keys::open_group(g.root));
+        section = section.action(open);
+    }
+    section.rows(g.sessions.into_iter().map(|x| session_row(s, x, k, layer)))
 }
 
 fn brand(k: &Kit) -> El {

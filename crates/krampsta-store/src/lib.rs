@@ -273,6 +273,7 @@ mod tests {
     /// A session that went through a whole run with a tool call, reasoning and usage.
     fn worked_session(id: u64) -> Session {
         let mut s = Session::new(SessionId(id));
+        s.project = Some(PathBuf::from("/code/krampsta"));
         let run = RunId(3);
         s.submit("List the files", run).unwrap();
         s.apply(&AgentEvent::Started { run });
@@ -386,11 +387,15 @@ mod tests {
         save_all(dir.path(), &[worked_session(1)]);
         fs::write(dir.path().join("ses2.json"), "{ not json").unwrap();
         let newer = r#"{"version": 99, "id": 3, "title": "t", "status": {"kind": "idle"}, "messages": []}"#;
+        // Saved before sessions had a project: it loads with none.
+        let older = r#"{"version": 1, "id": 4, "title": "t", "status": {"kind": "idle"}, "messages": []}"#;
+        fs::write(dir.path().join("ses4.json"), older).unwrap();
         fs::write(dir.path().join("ses3.json"), newer).unwrap();
         fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
 
         let loaded = load(dir.path());
-        assert_eq!(loaded.sessions.len(), 1);
+        assert_eq!(loaded.sessions.len(), 2);
+        assert_eq!(loaded.sessions[0].project, None, "the older file");
         assert_eq!(loaded.failures.len(), 2);
         assert!(loaded.failures.iter().any(|e| matches!(e, StoreError::Damaged { .. })));
         assert!(loaded.failures.iter().any(|e| matches!(e, StoreError::Newer { found: 99, .. })));

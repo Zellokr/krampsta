@@ -1,5 +1,7 @@
 //! A conversation with the agent and the state machine that folds run events into it.
 
+use std::path::PathBuf;
+
 use crate::{AgentEvent, AgentStatus, Message, MessageId, MessageRole, RunId, SessionId, Usage};
 
 /// The title a session has until its first message names it.
@@ -21,6 +23,9 @@ pub struct Session {
     pub title: String,
     pub messages: Vec<Message>,
     pub status: AgentStatus,
+    /// The project folder it works in. None: not tied to one yet (it takes the project open
+    /// when it next runs).
+    pub project: Option<PathBuf>,
     /// Tokens every run in this session has used so far, as the providers counted them.
     pub usage: Usage,
     /// The run whose events this session accepts. Events from any other run are stale
@@ -41,6 +46,7 @@ impl Session {
             messages: Vec::new(),
             status: AgentStatus::Idle,
             usage: Usage::default(),
+            project: None,
             active_run: None,
             next_message: 1,
         }
@@ -52,7 +58,7 @@ impl Session {
     pub fn restore(id: SessionId, title: String, messages: Vec<Message>, status: AgentStatus, usage: Usage) -> Self {
         let next_message = messages.iter().map(|m| m.id.0).max().map_or(1, |max| max.saturating_add(1));
         let status = if status.is_running() { AgentStatus::Cancelled } else { status };
-        Session { id, title, messages, status, usage, active_run: None, next_message }
+        Session { id, title, messages, status, usage, project: None, active_run: None, next_message }
     }
 
     pub fn active_run(&self) -> Option<RunId> {

@@ -17,6 +17,9 @@ pub struct SavedSession {
     pub version: u32,
     pub id: u64,
     pub title: String,
+    /// The project folder; absent in sessions saved before projects (they take the open one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<std::path::PathBuf>,
     pub status: SavedStatus,
     #[serde(default)]
     pub usage: SavedUsage,
@@ -84,6 +87,7 @@ impl SavedSession {
             version: VERSION,
             id: s.id.0,
             title: s.title.clone(),
+            project: s.project.clone(),
             status: match &s.status {
                 AgentStatus::Idle => SavedStatus::Idle,
                 AgentStatus::Running => SavedStatus::Running,
@@ -106,7 +110,9 @@ impl SavedSession {
         };
         let usage = Usage { input: self.usage.input, output: self.usage.output };
         let messages = self.messages.into_iter().map(SavedMessage::into_message).collect();
-        Session::restore(SessionId(self.id), self.title, messages, status, usage)
+        let mut session = Session::restore(SessionId(self.id), self.title, messages, status, usage);
+        session.project = self.project;
+        session
     }
 }
 

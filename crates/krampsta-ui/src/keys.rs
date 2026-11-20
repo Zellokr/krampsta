@@ -131,3 +131,18 @@ pub const DELETE_SESSION_CANCEL: &str = "krampsta-delete-session-cancel";
 pub fn reasoning(id: krampsta_core::MessageId) -> String {
     format!("krampsta-reasoning-{id}")
 }
+
+/// A project's group of sessions in the sidebar (None: "No project"). Keyed by the folder's
+/// whole path, so two projects with the same name never share a key.
+pub fn project_group(root: Option<&std::path::Path>) -> String {
+    use std::hash::{Hash, Hasher};
+    let Some(root) = root else { return "krampsta-group-none".to_owned() };
+    let mut hasher = std::hash::DefaultHasher::new();
+    root.hash(&mut hasher);
+    format!("krampsta-group-{:016x}", hasher.finish())
+}
+
+/// The button on another project's group that opens that folder.
+pub fn open_group(root: Option<&std::path::Path>) -> String {
+    format!("{}-open", project_group(root))
+}
