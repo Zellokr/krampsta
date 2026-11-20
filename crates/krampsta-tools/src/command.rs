@@ -133,8 +133,13 @@ fn spawn(project: &Project, command: &str) -> std::io::Result<Box<dyn ChildWrapp
 #[cfg(windows)]
 fn shell(command: &str) -> Command {
     let mut cmd = Command::new("powershell.exe");
-    // Output as UTF-8, not the console's code page, so accents survive the pipe.
-    let script = format!("[Console]::OutputEncoding = [Text.Encoding]::UTF8; {command}");
+    // UTF-8 everywhere, so accents survive: the output down the pipe (not the console's code
+    // page), what is piped to programs, and the files cmdlets read and write — Windows
+    // PowerShell 5.1 reads a UTF-8 file without a BOM as ANSI ("guía" came back as "guÃ­a").
+    let script = format!(
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $OutputEncoding = [Text.Encoding]::UTF8; \
+         $PSDefaultParameterValues['*:Encoding'] = 'utf8'; {command}"
+    );
     cmd.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", &script]);
     cmd
 }
@@ -257,6 +262,20 @@ mod tests {
         let (text, outcome) = run(&project, &Args { command: command.into(), timeout_ms }, &call).unwrap();
         let streamed = streamed.into_inner().unwrap();
         (text, outcome, streamed)
+    }
+
+    #[test]
+    fn a_utf8_file_read_by_a_command_keeps_its_accents() {
+        let dir = tempfile::tempdir().unwrap();
+        // UTF-8 without a BOM, as every source file here: Windows PowerShell read it as ANSI.
+        std::fs::write(dir.path().join("guía.md"), "# Krampsta — guía, ñandú\n").unwrap();
+        let project = Project::open(dir.path()).unwrap();
+        let cancel = CancellationToken::new();
+        let call = Call { cancel: &cancel, approval: &Approval::Once, output: &|_| {} };
+        let read = if cfg!(windows) { "Get-Content guía.md" } else { "cat guía.md" };
+        let (text, outcome) = run(&project, &Args { command: read.into(), timeout_ms: None }, &call).unwrap();
+        assert_eq!(outcome, Outcome::Exited(Some(0)));
+        assert!(text.contains("# Krampsta — guía, ñandú"), "{text}");
     }
 
     #[test]
