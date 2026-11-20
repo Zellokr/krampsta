@@ -93,6 +93,7 @@ impl AgentEngine for ResponsesEngine {
                     () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
                     endpoint = self.access.endpoint() => endpoint?,
                 };
+                trim_history(&mut input);
                 let body = serde_json::to_vec(&Request::new(&self.model, &input, &reasoning, &tools))
                     .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
                 let mut req = self
@@ -247,6 +248,32 @@ fn input(history: &[Message], tools: bool) -> Vec<Value> {
     ];
     input.extend(conversation);
     input
+}
+
+/// Trim only older conversation turns, never the active turn's reasoning, calls or results.
+fn trim_history(input: &mut Vec<Value>) {
+    steps::trim_history(
+        input,
+        steps::HISTORY_BUDGET,
+        |item| match item.get("role").and_then(Value::as_str) {
+            Some("developer") => "system",
+            Some("user") => "user",
+            _ => "",
+        },
+        estimated_item_bytes,
+    );
+}
+
+/// Estimate the JSON size without allocating a second copy of the request.
+fn estimated_item_bytes(value: &Value) -> usize {
+    match value {
+        Value::String(text) => text.len() + 2,
+        Value::Array(items) => 2 + items.iter().map(|item| 1 + estimated_item_bytes(item)).sum::<usize>(),
+        Value::Object(fields) => {
+            2 + fields.iter().map(|(key, value)| key.len() + 4 + estimated_item_bytes(value)).sum::<usize>()
+        }
+        _ => 24,
+    }
 }
 
 /// Text and reasoning deltas go to the UI; finished output items are kept for the next step;
@@ -420,6 +447,28 @@ mod tests {
         assert!(b["input"][0]["content"][0]["text"].as_str().unwrap().ends_with("Reply in Spanish."));
         assert_eq!(b["input"][2]["content"][0]["type"], "output_text");
         assert_eq!(b["reasoning"], json!({"effort": "medium", "summary": "auto"}));
+    }
+
+    #[test]
+    fn history_budget_keeps_the_active_responses_tool_exchange() {
+        let history = [
+            Message::new(MessageId(1), MessageRole::System, "Keep this instruction."),
+            Message::user(MessageId(2), "old"),
+            Message::new(MessageId(3), MessageRole::Assistant, "x".repeat(steps::HISTORY_BUDGET)),
+            Message::user(MessageId(4), "current"),
+        ];
+        let mut items = input(&history, true);
+        let active = [
+            json!({"type": "reasoning", "encrypted_content": "opaque"}),
+            json!({"type": "function_call", "call_id": "c", "name": "search", "arguments": "{}"}),
+            json!({"type": "function_call_output", "call_id": "c", "output": "found"}),
+        ];
+        items.extend(active.clone());
+        trim_history(&mut items);
+        assert_eq!(items.len(), 5);
+        assert!(items[0]["content"][0]["text"].as_str().unwrap().ends_with("Keep this instruction."));
+        assert_eq!(items[1]["content"][0]["text"], "current");
+        assert_eq!(&items[2..], &active);
     }
 
     #[test]

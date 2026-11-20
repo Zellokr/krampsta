@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::access::{Access, StaticAccess};
 use crate::http::{self, Flow, HttpError};
 use crate::sse::SseEvent;
-use crate::steps::{self, MAX_STEPS, Paragraphs};
+use crate::steps::{self, HISTORY_BUDGET, MAX_STEPS, Paragraphs};
 
 pub const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -124,6 +124,7 @@ impl AgentEngine for OpenAiEngine {
             }
             let mut paragraphs = Paragraphs::default();
             for number in 0..MAX_STEPS {
+                trim_history(&mut messages, HISTORY_BUDGET);
                 let endpoint = tokio::select! {
                     biased;
                     () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
@@ -299,6 +300,10 @@ fn wire_messages(history: &[Message]) -> Vec<WireMessage<'_>> {
         .collect()
 }
 
+fn trim_history(messages: &mut Vec<WireMessage<'_>>, budget: usize) {
+    steps::trim_history(messages, budget, |message| message.role, WireMessage::estimated_bytes);
+}
+
 #[derive(Serialize)]
 struct ChatRequest<'a> {
     model: &'a str,
@@ -367,6 +372,17 @@ struct WireMessage<'a> {
 }
 
 impl WireMessage<'_> {
+    fn estimated_bytes(&self) -> usize {
+        // Approximate JSON framing; text lengths are UTF-8 bytes before escaping.
+        48 + self.content.as_deref().map_or(0, str::len)
+            + self.tool_call_id.as_deref().map_or(0, str::len)
+            + self
+                .tool_calls
+                .iter()
+                .map(|call| 80 + call.id.len() + call.function.name.len() + call.function.arguments.len())
+                .sum::<usize>()
+    }
+
     /// The assistant's turn in a step that asked for tools.
     fn assistant(text: String, calls: &[ToolCall]) -> Self {
         let tool_calls = calls
@@ -486,6 +502,83 @@ mod tests {
     fn only_chat_models_survive_the_filter() {
         assert!(is_chat_model("gpt-4o-mini") && is_chat_model("o3") && is_chat_model("qwen3:4b"));
         assert!(!is_chat_model("text-embedding-3-small") && !is_chat_model("gpt-4o-mini-tts"));
+    }
+
+    #[test]
+    fn history_trim_drops_whole_turns_and_preserves_system_messages() {
+        let history = [
+            Message::user(MessageId(1), "x".repeat(512)),
+            Message::new(MessageId(2), MessageRole::System, "instructions"),
+            Message::new(MessageId(3), MessageRole::Assistant, "old answer"),
+            Message::user(MessageId(4), "previous question"),
+            Message::new(MessageId(5), MessageRole::Assistant, "recent answer"),
+            Message::user(MessageId(6), "current task"),
+        ];
+        let original = wire_messages(&history);
+        let mut messages = wire_messages(&history);
+        trim_history(&mut messages, HISTORY_BUDGET);
+        assert_eq!(messages, original);
+
+        // The old answer fits on its own, but its question doesn't.
+        trim_history(&mut messages, 350);
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0], original[1]);
+        assert_eq!(messages[1..], original[3..]);
+    }
+
+    #[test]
+    fn long_history_sends_fewer_bytes_without_splitting_tool_exchanges() {
+        let mut history = vec![Message::new(MessageId(0), MessageRole::System, "instructions")];
+        for id in 1..=64 {
+            history.push(Message::user(MessageId(id), "x".repeat(8192)));
+        }
+        history.push(Message::user(MessageId(65), "current task"));
+        let mut baseline = wire_messages(&history);
+        let mut bounded = wire_messages(&history);
+        let request_bytes = |messages: &[WireMessage<'_>]| {
+            serde_json::to_vec(&ChatRequest {
+                model: "m",
+                stream: true,
+                stream_options: StreamOptions { include_usage: true },
+                messages,
+                tools: &[],
+            })
+            .unwrap()
+            .len()
+        };
+
+        for step in 0..=3 {
+            if step > 0 {
+                let call = ToolCall {
+                    id: ToolCallId(format!("call-{step}")),
+                    name: "read_file".into(),
+                    arguments: "{}".into(),
+                };
+                let exchange = || {
+                    [
+                        WireMessage::assistant(String::new(), std::slice::from_ref(&call)),
+                        WireMessage {
+                            role: "tool",
+                            content: Some(Cow::Owned("y".repeat(48 * 1024))),
+                            tool_call_id: Some(call.id.0.clone()),
+                            ..WireMessage::default()
+                        },
+                    ]
+                };
+                baseline.extend(exchange());
+                bounded.extend(exchange());
+            }
+            trim_history(&mut bounded, HISTORY_BUDGET);
+            let active_len = 1 + step * 2;
+            assert_eq!(bounded[0], baseline[0]);
+            assert_eq!(bounded[bounded.len() - active_len..], baseline[baseline.len() - active_len..]);
+            let before = request_bytes(&baseline);
+            let after = request_bytes(&bounded);
+            eprintln!("step {step}: {before} -> {after} JSON bytes");
+            assert!(after < before / 2);
+        }
+        // The active turn alone is now larger than the budget; don't cut it.
+        assert_eq!(bounded.len(), 8);
     }
 
     #[test]

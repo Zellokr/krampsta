@@ -14,6 +14,41 @@ Paths are relative to the project root. Prefer a few targeted searches over read
 /// otherwise spend tokens forever.
 pub const MAX_STEPS: usize = 50;
 
+/// Soft byte budget, not a tokenizer or a model context limit.
+pub const HISTORY_BUDGET: usize = 128 * 1024;
+
+/// Drop complete older turns first. Keep instructions and the current turn, even over budget.
+/// Providers classify instructions as `system` and user turn boundaries as `user`.
+pub fn trim_history<T>(
+    messages: &mut Vec<T>,
+    budget: usize,
+    role: impl Fn(&T) -> &str,
+    estimated_bytes: impl Fn(&T) -> usize,
+) {
+    let Some(current) = messages.iter().rposition(|message| role(message) == "user") else { return };
+    let mut remaining = budget;
+    for message in messages[..current].iter().filter(|message| role(message) == "system").chain(&messages[current..]) {
+        remaining = remaining.saturating_sub(estimated_bytes(message));
+    }
+    let mut keep_from = current;
+    for (index, message) in messages[..current].iter().enumerate().rev() {
+        if role(message) == "system" {
+            continue;
+        }
+        let Some(left) = remaining.checked_sub(estimated_bytes(message)) else { break };
+        remaining = left;
+        if role(message) == "user" {
+            keep_from = index;
+        }
+    }
+    let mut index = 0;
+    messages.retain(|message| {
+        let keep = index >= keep_from || role(message) == "system";
+        index += 1;
+        keep
+    });
+}
+
 pub fn too_many_steps() -> AgentError {
     AgentError::Provider(format!(
         "the model kept calling tools for {MAX_STEPS} steps without answering, so Krampsta stopped it"
