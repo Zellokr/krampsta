@@ -227,7 +227,7 @@ mod tests {
     fn sending_bills_the_run_to_the_selected_model() {
         let mut app = KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant())));
         let id = app.new_session();
-        app.draft = TextEdit::new("hi");
+        app.set_draft("hi");
         let run: RunId = app.send().unwrap();
         let session = app.sessions.iter_mut().find(|s| s.id == id).unwrap();
         session.apply(&AgentEvent::Usage { run, usage: Usage { input: 3, output: 4 } });

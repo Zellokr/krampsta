@@ -162,8 +162,7 @@ const SCENES: &[Scene] = &[
     }),
     ("draft", |s| {
         s.new_session();
-        s.draft = TextEdit::new("Explain how sessions and runs fit together");
-        s.draft.focused = true;
+        s.set_draft("Explain how sessions and runs fit together");
     }),
     ("running", scene_running),
     ("tools", scene_tools),
@@ -428,8 +427,9 @@ fn scene_projects(s: &mut KrampstaApp) {
     other(s, "/Users/you/code/rune", "Why does the tab strip jitter?", "Its width rounds every frame.");
     s.collapsed_groups = std::iter::once(Some("/Users/you/code/rugents".into())).collect();
     // The first sample stays selected, as at launch.
-    if let Some(first) = s.sessions.iter().find(|x| x.project.as_deref() == Some(open.root.as_path())) {
-        s.selected = first.id;
+    if let Some(first) = s.sessions.iter().find(|x| x.project.as_deref() == Some(open.root.as_path())).map(|x| x.id) {
+        s.selected = first;
+        s.focus_composer(first);
     }
     s.notice = None;
 }

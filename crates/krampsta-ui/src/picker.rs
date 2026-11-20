@@ -320,7 +320,6 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use krampsta_agent::{Account, AgentEngine, BoxFuture, EngineCatalog, MockAgent, MockCatalog, MockConfig};
-    use rune::TextEdit;
 
     use super::*;
     use crate::state::SendError;
@@ -393,7 +392,7 @@ mod tests {
     }
 
     fn send(app: &mut KrampstaApp) -> Result<krampsta_core::RunId, SendError> {
-        app.draft = TextEdit::new("hello");
+        app.set_draft("hello");
         app.send()
     }
 

@@ -71,6 +71,7 @@ impl KrampstaApp {
         if let Some(store) = &self.store {
             store.delete(id);
         }
+        self.views.remove(&id);
         for m in &removed.messages {
             for c in &m.tool_calls {
                 self.open_tools.remove(&c.id);
@@ -90,7 +91,6 @@ mod tests {
     use std::sync::Arc;
 
     use krampsta_agent::{MockCatalog, MockConfig};
-    use rune::TextEdit;
 
     use super::*;
 
@@ -152,7 +152,7 @@ mod tests {
         let slow = MockConfig { think: std::time::Duration::from_secs(30), ..MockConfig::default() };
         let mut app = KrampstaApp::new(Arc::new(MockCatalog::new(slow)));
         app.new_session();
-        app.draft = TextEdit::new("take your time");
+        app.set_draft("take your time");
         app.send().unwrap();
         let id = app.selected;
         app.ask_delete(id);

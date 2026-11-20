@@ -12,7 +12,6 @@ use krampsta_agent::{MockCatalog, MockConfig};
 use krampsta_core::{AgentStatus, SessionId};
 use krampsta_store::FileStore;
 use krampsta_ui::KrampstaApp;
-use rune::TextEdit;
 
 fn launch(dir: &std::path::Path) -> KrampstaApp {
     let catalog = Arc::new(MockCatalog::new(MockConfig::instant()));
@@ -34,7 +33,7 @@ fn a_conversation_saved_in_one_launch_comes_back_in_the_next() {
 
     let mut first = launch(dir.path());
     let id: SessionId = first.new_session();
-    first.draft = TextEdit::new("Explain the borrow checker");
+    first.set_draft("Explain the borrow checker");
     first.send().unwrap();
     pump_until(&mut first, "the reply", |a| a.session(id).is_some_and(|s| s.status == AgentStatus::Completed));
     let said = first.session(id).cloned().unwrap();
@@ -52,7 +51,7 @@ fn a_conversation_saved_in_one_launch_comes_back_in_the_next() {
     assert!(second.notice.is_none(), "nothing failed: {:?}", second.notice);
 
     second.select(id);
-    second.draft = TextEdit::new("And lifetimes?");
+    second.set_draft("And lifetimes?");
     second.send().unwrap();
     pump_until(&mut second, "the second reply", |a| a.session(id).is_some_and(|s| s.status == AgentStatus::Completed));
     assert_eq!(second.session(id).unwrap().messages.len(), 4);

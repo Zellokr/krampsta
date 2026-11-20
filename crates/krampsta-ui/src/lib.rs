@@ -24,6 +24,7 @@ pub mod picker;
 pub mod prefs;
 pub mod projects;
 pub mod sample;
+pub mod session_view;
 pub mod state;
 pub mod theme;
 pub mod views;

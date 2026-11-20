@@ -1,7 +1,7 @@
 //! A message in the transcript: the user's on the right in a bubble, the agent's on the left
 //! as Markdown with its tool calls above.
 
-use krampsta_core::{Message, MessageRole};
+use krampsta_core::{Message, MessageRole, SessionId};
 use rune::{El, col, icon, row, text};
 use rune_kit::{Kit, Markdown, Spinner};
 
@@ -11,10 +11,10 @@ use crate::state::KrampstaApp;
 use crate::theme;
 
 /// `streaming`: the message's run is still writing it.
-pub fn view(s: &KrampstaApp, m: &Message, streaming: bool, k: &Kit) -> El {
+pub fn view(s: &KrampstaApp, session: SessionId, m: &Message, streaming: bool, k: &Kit) -> El {
     let body = match m.role {
         MessageRole::User => user(m, k),
-        MessageRole::Assistant => assistant(s, m, streaming, k),
+        MessageRole::Assistant => assistant(s, session, m, streaming, k),
         MessageRole::System | MessageRole::Tool => {
             text(m.content.clone()).font(k.ty.small).color(k.c.text_faint).wrap().selectable(true)
         }
@@ -35,7 +35,7 @@ fn user(m: &Message, k: &Kit) -> El {
     row().role("group").label("You").w_full().justify_end().child(bubble)
 }
 
-fn assistant(s: &KrampstaApp, m: &Message, streaming: bool, k: &Kit) -> El {
+fn assistant(s: &KrampstaApp, session: SessionId, m: &Message, streaming: bool, k: &Kit) -> El {
     let header = row()
         .gap(8.0)
         .items_center()
@@ -53,7 +53,7 @@ fn assistant(s: &KrampstaApp, m: &Message, streaming: bool, k: &Kit) -> El {
         out = out.child(col().w_full().gap(8.0).children(cards));
     }
     // While it streams, the text comes out at a steady pace (`pace.rs`), not as it arrives.
-    let shown = &m.content[..s.shown_len(m.id, m.content.len())];
+    let shown = &m.content[..s.shown_len(session, m.id, m.content.len())];
     if shown.is_empty() {
         // With reasoning streaming, its "Thinking" header shows the model is at work instead.
         if streaming && m.reasoning.is_empty() {

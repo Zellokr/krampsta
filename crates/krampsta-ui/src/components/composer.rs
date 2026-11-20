@@ -2,6 +2,7 @@
 //! and the provider and model pickers.
 
 use krampsta_agent::MOCK_PROVIDER;
+use krampsta_core::SessionId;
 use rune::{El, Tx, col, row, text};
 use rune_kit::{IconButton, IconButtonVariant, Kit, TextArea};
 
@@ -10,13 +11,14 @@ use crate::components::icons;
 use crate::keys;
 use crate::state::KrampstaApp;
 
-pub fn view(s: &KrampstaApp, running: bool, k: &Kit, layer: &mut Vec<El>) -> El {
-    let field = TextArea::new(&s.draft)
+pub fn view(s: &KrampstaApp, session: SessionId, running: bool, k: &Kit, layer: &mut Vec<El>) -> El {
+    let draft = s.draft_of(session);
+    let field = TextArea::new(draft)
         .placeholder("Ask Krampsta to explore, explain or change your code…")
         .label("Message")
         .auto_grow(2, 10)
         .width(None)
-        .on_edit(|s: &mut KrampstaApp| &mut s.draft)
+        .on_edit(move |s: &mut KrampstaApp| &mut s.view_mut(session).draft)
         .on_change(|s: &mut KrampstaApp, _: &mut Tx| s.notice = None)
         .on_submit(|s: &mut KrampstaApp, _: &mut Tx| s.submit())
         .build(k)
@@ -37,7 +39,7 @@ pub fn view(s: &KrampstaApp, running: bool, k: &Kit, layer: &mut Vec<El>) -> El 
             .variant(IconButtonVariant::Submit)
             .label("Send message")
             .help("Send (Enter)")
-            .disabled(s.draft.text.trim().is_empty())
+            .disabled(draft.text.trim().is_empty())
             .on_press(|s: &mut KrampstaApp| s.submit())
             .build(k)
             .key(keys::SEND)

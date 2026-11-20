@@ -86,77 +86,87 @@ impl Pacer {
     }
 }
 
-/// The message being paced, and how much of it shows.
+/// The message being paced in one session, and how much of it shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Pace {
-    session: SessionId,
     message: MessageId,
     pacer: Pacer,
     shown: usize,
 }
 
 impl KrampstaApp {
-    /// How much of `message` the view shows: all of it, unless it is being paced.
-    pub fn shown_len(&self, message: MessageId, len: usize) -> usize {
-        match self.pace {
-            Some(p) if p.message == message && p.session == self.selected => p.shown.min(len),
+    /// How much of `message` (in `session`) the view shows: all of it, unless it is being paced.
+    pub fn shown_len(&self, session: SessionId, message: MessageId, len: usize) -> usize {
+        match self.pace_of(session) {
+            Some(p) if p.message == message => p.shown.min(len),
             _ => len,
         }
     }
 
-    /// Whether `message` is still coming out (arriving, or paced out after it arrived).
-    pub fn is_pacing(&self, message: MessageId) -> bool {
-        self.pace.is_some_and(|p| p.message == message && p.session == self.selected)
+    /// Whether `message` (in `session`) is still coming out (arriving, or paced out after it
+    /// arrived).
+    pub fn is_pacing(&self, session: SessionId, message: MessageId) -> bool {
+        self.pace_of(session).is_some_and(|p| p.message == message)
     }
 
     /// Shows the current session's streaming reply as far as it has arrived (scenes stage a reply
     /// mid-stream and capture its first frame).
     pub(crate) fn catch_up(&mut self) {
         let Some(session) = self.current() else { return };
+        let id = session.id;
         let writing =
             session.messages.last().filter(|m| m.role == MessageRole::Assistant && session.status.is_running());
-        self.pace = writing.map(|m| Pace {
-            session: session.id,
-            message: m.id,
-            pacer: Pacer::new(m.content.len(), 0.0),
-            shown: m.content.len(),
-        });
+        let pace =
+            writing.map(|m| Pace { message: m.id, pacer: Pacer::new(m.content.len(), 0.0), shown: m.content.len() });
+        self.view_mut(id).pace = pace;
     }
 
-    /// Steps the paced message by one frame at `clock`. True when more of it shows.
+    /// Steps the paced reply of every session on screen by one frame at `clock`; a session no
+    /// longer on screen shows its reply whole when it comes back. True when more text shows.
     pub(crate) fn step_pace(&mut self, clock: f64, tx: &mut Tx) -> bool {
-        // Fields, not methods: the session is read while `pace` changes.
-        let selected = self.selected;
-        let Some(session) = self.sessions.iter().find(|s| s.id == selected) else {
-            self.pace = None;
-            return false;
-        };
-        // The reply the current session's run is writing, if any.
+        let shown = self.visible_sessions();
+        for (id, view) in &mut self.views {
+            if !shown.contains(id) {
+                view.pace = None;
+            }
+        }
+        let mut grew = false;
+        for id in shown {
+            grew |= self.step_pace_of(id, clock, tx);
+        }
+        grew
+    }
+
+    fn step_pace_of(&mut self, id: SessionId, clock: f64, tx: &mut Tx) -> bool {
+        // Fields, not methods: the session is read while its view's pace changes.
+        let Some(session) = self.sessions.iter().find(|s| s.id == id) else { return false };
+        let view = self.views.entry(id).or_default();
+        // The reply the session's run is writing, if any.
         let writing = session.messages.last().filter(|m| {
             m.role == MessageRole::Assistant && session.status.is_running() && m.run == session.active_run()
         });
-        let message = match (self.pace, writing) {
-            // Still pacing this session's reply, and no newer one has started.
-            (Some(p), w) if p.session == session.id && w.is_none_or(|w| w.id == p.message) => {
+        let message = match (view.pace, writing) {
+            // Still pacing this reply, and no newer one has started.
+            (Some(p), w) if w.is_none_or(|w| w.id == p.message) => {
                 session.messages.iter().rev().find(|m| m.id == p.message)
             }
             // A reply to start pacing: from the top, unless it's already long (caught up mid-way).
             (_, Some(m)) => {
                 let start = if m.content.len() > CATCH_UP { m.content.len() } else { 0 };
                 let pacer = Pacer::new(start, clock);
-                self.pace = Some(Pace { session: session.id, message: m.id, pacer, shown: start });
+                view.pace = Some(Pace { message: m.id, pacer, shown: start });
                 Some(m)
             }
             _ => None,
         };
-        let (Some(message), Some(pace)) = (message, self.pace.as_mut()) else {
-            self.pace = None;
+        let (Some(message), Some(pace)) = (message, view.pace.as_mut()) else {
+            view.pace = None;
             return false;
         };
         let (text, arriving) = (&message.content, writing.is_some_and(|w| w.id == message.id));
         let at = pace.pacer.step(clock, text.len(), arriving);
         if at >= text.len() && !arriving {
-            self.pace = None; // Arrived and shown: done.
+            view.pace = None; // Arrived and shown: done.
             return true;
         }
         let shown = words_up_to(text, at, arriving).max(pace.shown);
@@ -228,7 +238,7 @@ mod tests {
         *clock += FRAME;
         app.step_pace(*clock, &mut Tx::default());
         let (id, len) = reply(app);
-        app.shown_len(id, len)
+        app.shown_len(app.selected, id, len)
     }
 
     fn frames(app: &mut KrampstaApp, clock: &mut f64, n: usize) -> Vec<usize> {
@@ -287,9 +297,9 @@ mod tests {
         let shown = frames(&mut app, &mut clock, 1);
         assert!(shown[0] >= before && shown[0] < reply(&app).1, "no replay, no jump to the end");
         frames(&mut app, &mut clock, 60);
-        assert_eq!(app.pace, None, "done once all of it showed, within a second of the end");
+        assert_eq!(app.pace_of(app.selected), None, "done once all of it showed, within a second of the end");
         let (id, len) = reply(&app);
-        assert_eq!(app.shown_len(id, len), len);
+        assert_eq!(app.shown_len(app.selected, id, len), len);
     }
 
     #[test]
@@ -305,7 +315,7 @@ mod tests {
     fn nothing_is_paced_without_a_reply_streaming() {
         let mut app = KrampstaApp::new(Arc::new(MockCatalog::default()));
         assert!(!app.step_pace(1.0, &mut Tx::default()));
-        assert_eq!(app.pace, None);
+        assert_eq!(app.pace_of(app.selected), None);
     }
 
     #[test]

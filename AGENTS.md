@@ -84,6 +84,8 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   una tira de fotogramas: `krampsta --scene streaming --frames 16 --start 0.05 --out DIR --strip
   tira.png --crop 280,140,470,200 --every 1 --cols 2`; una captura suelta no enseña animaciones.
   `KRAMPSTA_TRACE_PACE=1` registra métricas de ritmo por fotograma en stderr, sin contenido.
+- Lo que la ventana guarda por sesión (borrador, ritmo del streaming) va en `SessionView`
+  (`session_view.rs`), indexado por `SessionId`: nunca un campo suelto en `KrampstaApp`.
 - Estado con modos = `enum` cuyas variantes llevan sólo sus datos (ver `AgentStatus`), no
   grupos de booleanos.
 - Parches: `[patch.crates-io]` del `Cargo.toml` raíz replica los de Rune, todos al mismo SHA que

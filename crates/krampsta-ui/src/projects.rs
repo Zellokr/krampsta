@@ -188,7 +188,6 @@ mod tests {
 
     use krampsta_agent::{MockCatalog, MockConfig, Toolbox};
     use krampsta_core::FileChange;
-    use rune::TextEdit;
 
     use super::*;
 
@@ -304,7 +303,7 @@ mod tests {
         let theirs = from(&mut app, "/code/rune", "Rune work");
         app.select(theirs);
         assert_eq!(app.notice.as_deref(), Some("This session is from rune. Open that folder to continue it."));
-        app.draft = TextEdit::new("go on");
+        app.set_draft("go on");
         assert!(matches!(app.send(), Err(SendError::OtherProject(name)) if name == "rune"));
         assert_eq!(app.session(theirs).map(|s| s.messages.len()), Some(0), "nothing was sent");
 
@@ -320,7 +319,7 @@ mod tests {
         let mut app = app();
         let sample = app.sessions.iter().find(|s| s.project.is_none()).map(|s| s.id).unwrap();
         app.select(sample);
-        app.draft = TextEdit::new("hello");
+        app.set_draft("hello");
         app.send().unwrap();
         assert_eq!(app.session(sample).and_then(|s| s.project.clone()), Some(PathBuf::from("/code/first")));
     }

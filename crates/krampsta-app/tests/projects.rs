@@ -15,7 +15,7 @@ use krampsta_agent::{
 use krampsta_core::{AgentStatus, ToolCall, ToolCallId};
 use krampsta_tools::Workspace;
 use krampsta_ui::{KrampstaApp, app, keys};
-use rune::{Env, FileDialogKind, Runtime, TextEdit};
+use rune::{Env, FileDialogKind, Runtime};
 
 /// Reads `here.txt` from the project and says what it holds.
 struct ReadsHere;
@@ -118,7 +118,7 @@ fn a_folder_picked_in_the_dialog_becomes_the_project_the_agent_reads() {
 
     rt.update(|s, _| {
         s.new_session();
-        s.draft = TextEdit::new("what does here.txt say?");
+        s.set_draft("what does here.txt say?");
         s.send().unwrap();
     });
     pump_until(&mut rt, "the reply", |s| s.current().is_some_and(|x| x.status == AgentStatus::Completed));

@@ -29,7 +29,8 @@ pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
         .scroll(ScrollSpec { stick_bottom: true })
         .scroll_edge_fade(12.0)
         .child(col().w_full().items_center().px(28.0).pt(24.0).pb(16.0).child(content));
-    let composer = col().w_full().items_center().px(28.0).pt(8.0).pb(18.0).child(composer::view(s, running, k, layer));
+    let composer =
+        col().w_full().items_center().px(28.0).pt(8.0).pb(18.0).child(composer::view(s, s.selected, running, k, layer));
     col().w_full().h_full().min_h(0.0).child(scroll).child(composer)
 }
 
@@ -40,7 +41,8 @@ fn transcript(s: &KrampstaApp, session: &Session, k: &Kit, layer: &mut Vec<El>) 
         .messages
         .last()
         .filter(|m| {
-            m.role == MessageRole::Assistant && ((running && m.run == session.active_run()) || s.is_pacing(m.id))
+            m.role == MessageRole::Assistant
+                && ((running && m.run == session.active_run()) || s.is_pacing(session.id, m.id))
         })
         .map(|m| m.id);
     // A growth stack: a message that grows (streaming) eases to its new height instead of
@@ -57,7 +59,7 @@ fn transcript(s: &KrampstaApp, session: &Session, k: &Kit, layer: &mut Vec<El>) 
         .growth(GrowthSpec { spring: rune::GROWTH, edge: rune::edge::WORD_FADE })
         .children(session.messages.iter().map(|m| {
             let streaming = Some(m.id) == streaming_id;
-            let view = message::view(s, m, streaming, k);
+            let view = message::view(s, session.id, m, streaming, k);
             let row = menus::message(s, m, view, k, layer);
             if streaming { row.streaming(true) } else { row.arrives_whole() }
         }));

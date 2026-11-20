@@ -3,7 +3,7 @@
 //! Everything a view reads lives in [`KrampstaApp`]. Handlers call its methods; agent events
 //! reach it through [`KrampstaApp::pump`], which `poll` runs when the agent host wakes the window.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -21,11 +21,11 @@ use crate::approvals::Asking;
 use crate::changes::Changes;
 use crate::costs::{Price, PriceField};
 use crate::menus::OpenMenu;
-use crate::pace::Pace;
 use crate::picker::EngineChoice;
 use crate::prefs::PrefsSync;
 use crate::projects::ProjectInfo;
 use crate::sample;
+use crate::session_view::SessionView;
 use crate::theme::ThemeChoice;
 
 /// Which full-window screen shows.
@@ -54,8 +54,10 @@ pub struct KrampstaApp {
     /// Newest first, as the sidebar lists them. Never empty.
     pub sessions: Vec<Session>,
     pub selected: SessionId,
-    /// The composer's text.
-    pub draft: TextEdit,
+    /// What the window keeps per session: the unsent draft, the reply being paced out.
+    pub(crate) views: HashMap<SessionId, SessionView>,
+    /// What a session with nothing typed yet shows in its composer.
+    pub(crate) blank_draft: TextEdit,
     /// A one-line message under the composer (why a send didn't go through).
     pub notice: Option<String>,
     pub screen: Screen,
@@ -68,8 +70,6 @@ pub struct KrampstaApp {
     pub review: Changes,
     /// Commands waiting for the user to allow them, the first one in the dialog.
     pub approvals: VecDeque<Asking>,
-    /// The reply being shown at a steady pace, if one is streaming.
-    pub pace: Option<Pace>,
     /// The provider and model pickers.
     pub engine: EngineChoice,
     /// The account sign-in dialog.
@@ -126,6 +126,8 @@ impl KrampstaApp {
         if let Some(first) = self.sessions.first() {
             self.selected = first.id;
         }
+        self.views.clear();
+        self.focus_composer(self.selected);
         self
     }
 
@@ -134,10 +136,15 @@ impl KrampstaApp {
     /// so they never repeat a saved one; the sessions already here are renumbered.
     pub fn with_store(mut self, store: Arc<dyn SessionStore>) -> Self {
         self.ids = IdGen::from_clock();
+        let mut views = std::mem::take(&mut self.views);
         for session in &mut self.sessions {
             let id = SessionId(self.ids.next());
             if self.selected == session.id {
                 self.selected = id;
+            }
+            // Its draft and focus follow it to the new id.
+            if let Some(view) = views.remove(&session.id) {
+                self.views.insert(id, view);
             }
             session.id = id;
         }
@@ -191,8 +198,10 @@ impl KrampstaApp {
         let ids = IdGen::new();
         let sessions = vec![Session::new(SessionId(ids.next()))];
         let selected = sessions[0].id;
-        let mut draft = TextEdit::new("");
-        draft.focused = true;
+        let mut views = HashMap::new();
+        let mut first = SessionView::default();
+        first.draft.focused = true;
+        views.insert(selected, first);
         let engine = EngineChoice::new(catalog.providers(), catalog.initial());
         // A stand-in until `rebuild_engine` below. With no usable selection sends are refused,
         // so it never runs.
@@ -200,7 +209,8 @@ impl KrampstaApp {
         let mut app = KrampstaApp {
             sessions,
             selected,
-            draft,
+            views,
+            blank_draft: TextEdit::new(""),
             notice: None,
             screen: Screen::Chat,
             theme: ThemeChoice::Dark,
@@ -209,7 +219,6 @@ impl KrampstaApp {
             diff: empty_diff(),
             review: Changes::default(),
             approvals: VecDeque::new(),
-            pace: None,
             engine,
             sign_in: SignIn::Closed,
             api_key: KeyField::default(),
@@ -300,7 +309,7 @@ impl KrampstaApp {
             self.screen = Screen::Chat;
             // Say up front when it can't go on here, rather than on the next send.
             self.notice = self.foreign_project(id).map(|name| SendError::OtherProject(name).to_string());
-            self.draft.focused = true;
+            self.focus_composer(id);
         }
     }
 
@@ -317,8 +326,8 @@ impl KrampstaApp {
             return Err(SendError::Engine(problem.clone()));
         }
         let run = self.agent.next_run_id();
-        let text = self.draft.text.clone();
         let id = self.current().map(|s| s.id).ok_or(SessionError::EmptyMessage)?;
+        let text = self.draft_of(id).text.clone();
         if let Some(name) = self.foreign_project(id) {
             return Err(SendError::OtherProject(name));
         }
@@ -336,8 +345,8 @@ impl KrampstaApp {
         }
         let request =
             RunRequest { session: id, run, history: session.messages.clone(), effort: self.engine.effort.clone() };
-        self.draft = TextEdit::new("");
-        self.draft.focused = true;
+        self.view_mut(id).draft = TextEdit::new("");
+        self.focus_composer(id);
         self.notice = None;
         let started = self.agent.start(request);
         if let Err(e) = &started
@@ -556,9 +565,9 @@ mod tests {
     fn sending_runs_the_agent_and_its_reply_lands() {
         let mut app = app();
         app.new_session();
-        app.draft = TextEdit::new("Refactor the parser");
+        app.set_draft("Refactor the parser");
         app.send().unwrap();
-        assert!(app.draft.text.is_empty(), "the composer clears");
+        assert!(app.draft().text.is_empty(), "the composer clears");
         assert_eq!(app.current().map(|s| s.status.clone()), Some(AgentStatus::Running));
         pump_until_idle(&mut app);
         let s = app.current().unwrap();
@@ -575,10 +584,11 @@ mod tests {
         let mut app = app().with_store(store.clone());
         assert!(app.sessions.iter().all(|s| s.id.0 > 1_600_000_000_000), "clock ids, not 1, 2…");
         assert_eq!(app.current().map(|s| s.id), Some(app.selected), "the selection follows the new ids");
+        assert!(app.draft().focused, "and so does the composer's caret");
 
         let id = app.new_session();
         assert!(store.sessions().is_empty(), "an empty session isn't saved");
-        app.draft = TextEdit::new("Refactor the parser");
+        app.set_draft("Refactor the parser");
         app.send().unwrap();
         assert_eq!(store.sessions()[0].status, AgentStatus::Running, "saved as soon as it was sent");
         pump_until_idle(&mut app);
@@ -619,7 +629,7 @@ mod tests {
 
         // A saved conversation goes on where it left off.
         app.select(newer.id);
-        app.draft = TextEdit::new("And the lexer?");
+        app.set_draft("And the lexer?");
         app.send().unwrap();
         pump_until_idle(&mut app);
         let s = app.session(newer.id).unwrap();
@@ -641,7 +651,7 @@ mod tests {
     #[test]
     fn blank_drafts_are_not_sent() {
         let mut app = app();
-        app.draft = TextEdit::new("   ");
+        app.set_draft("   ");
         assert!(matches!(app.send(), Err(SendError::Session(SessionError::EmptyMessage))));
         app.submit();
         assert_eq!(app.notice, None, "an empty send is silently ignored");
@@ -650,7 +660,7 @@ mod tests {
     #[test]
     fn fail_command_shows_the_failed_state() {
         let mut app = app();
-        app.draft = TextEdit::new("/fail now");
+        app.set_draft("/fail now");
         app.send().unwrap();
         pump_until_idle(&mut app);
         assert!(matches!(app.current().map(|s| &s.status), Some(AgentStatus::Failed { .. })));
@@ -683,7 +693,7 @@ mod tests {
     fn cancel_stops_a_slow_run() {
         let slow = MockConfig { think: Duration::from_secs(30), ..MockConfig::default() };
         let mut app = KrampstaApp::new(Arc::new(MockCatalog::new(slow)));
-        app.draft = TextEdit::new("take your time");
+        app.set_draft("take your time");
         app.send().unwrap();
         assert!(app.cancel());
         pump_until_idle(&mut app);

@@ -155,7 +155,6 @@ mod tests {
         Selection, ToolOutput, ToolSpec, Toolbox,
     };
     use krampsta_core::{AgentStatus, ToolCall};
-    use rune::TextEdit;
 
     use super::*;
 
@@ -213,7 +212,7 @@ mod tests {
 
     fn send(app: &mut KrampstaApp) {
         app.new_session();
-        app.draft = TextEdit::new("list the files");
+        app.set_draft("list the files");
         app.send().unwrap();
     }
 

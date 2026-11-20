@@ -15,7 +15,7 @@ use krampsta_agent::{
 use krampsta_core::{AgentStatus, ToolCall, ToolCallId};
 use krampsta_tools::Workspace;
 use krampsta_ui::{KrampstaApp, app, keys};
-use rune::{Env, Runtime, TextEdit};
+use rune::{Env, Runtime};
 
 /// The command the agent runs: print the file the change touches.
 const READ: &str = if cfg!(windows) { "Get-Content -Raw greeting.txt" } else { "cat greeting.txt" };
@@ -70,7 +70,7 @@ fn setup(dir: &Path, config: &Path) -> Runtime<KrampstaApp> {
     rt.update(|s, _| {
         s.propose(change);
         s.new_session();
-        s.draft = TextEdit::new("show me the greeting");
+        s.set_draft("show me the greeting");
         s.send().unwrap();
     });
     rt

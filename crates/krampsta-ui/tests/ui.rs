@@ -286,13 +286,13 @@ fn typing_and_pressing_enter_runs_the_agent_and_shows_the_reply() {
     click(&mut rt, keys::NEW_SESSION);
     click(&mut rt, keys::COMPOSER);
     type_text(&mut rt, "Summarise the workspace");
-    assert_eq!(rt.state.draft.text, "Summarise the workspace", "the composer accepts text");
+    assert_eq!(rt.state.draft().text, "Summarise the workspace", "the composer accepts text");
 
     press(&mut rt, Key::Enter, Mods::default());
     settle(&mut rt);
     let session = rt.state.current().cloned().expect("a session");
     assert_eq!(session.status, AgentStatus::Running);
-    assert!(rt.state.draft.text.is_empty(), "the composer clears after sending");
+    assert!(rt.state.draft().text.is_empty(), "the composer clears after sending");
     let user = &session.messages[0];
     assert!(has(&rt, &keys::message(user.id)), "the user's message is in the transcript");
     assert_eq!(status_label(&rt), "Agent running");
