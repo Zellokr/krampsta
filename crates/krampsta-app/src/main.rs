@@ -88,7 +88,7 @@ fn main() {
             if rune::is_headless() {
                 // Stills show the same folder and defaults on every machine, and neither read nor
                 // add to this one's history or settings; the simulated agent needs no tools.
-                return app.with_sample_project();
+                return app.with_sample_project().with_sample_sessions();
             }
             let settings = krampsta_store::default_settings_file();
             let (prefs, problem) = match prefs(settings.as_deref()) {

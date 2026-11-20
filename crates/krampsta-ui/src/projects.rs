@@ -218,6 +218,7 @@ mod tests {
 
     fn app() -> KrampstaApp {
         KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant())))
+            .with_sample_sessions()
             .with_project(OpenedProject { root: PathBuf::from("/code/first"), tools: Arc::new(NoTools) })
             .with_opener(Arc::new(Opens))
     }

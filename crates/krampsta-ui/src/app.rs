@@ -284,6 +284,11 @@ const SCENES: &[Scene] = &[
         s.engine.open = Some(Picker::ComposerModel);
     }),
     ("projects", scene_projects),
+    // A first launch: no history yet, so one new, empty session and no examples.
+    ("fresh", |s| {
+        s.sessions.clear();
+        s.new_session();
+    }),
     ("cost", scene_cost),
     ("prices", scene_prices),
     // No folder open: the row invites opening one.

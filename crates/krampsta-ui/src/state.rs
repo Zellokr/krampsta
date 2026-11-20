@@ -119,6 +119,16 @@ impl KrampstaApp {
         self
     }
 
+    /// Replaces the sessions with the example ones, the first selected (stills and tests: the
+    /// real app starts from the user's own history).
+    pub fn with_sample_sessions(mut self) -> Self {
+        self.sessions = sample::sessions(&self.ids);
+        if let Some(first) = self.sessions.first() {
+            self.selected = first.id;
+        }
+        self
+    }
+
     /// Saves sessions to `store` from now on: each one once it has a message, again as its
     /// runs make progress, and removes it when deleted. Session ids then come from the clock,
     /// so they never repeat a saved one; the sessions already here are renumbered.
@@ -175,12 +185,12 @@ impl KrampstaApp {
         }
     }
 
-    /// A fresh app running what `catalog` offers, starting from its initial selection, with
-    /// the sample sessions.
+    /// A fresh app running what `catalog` offers, starting from its initial selection, on one
+    /// new, empty session (the saved history lands below it once read).
     pub fn new(catalog: Arc<dyn EngineCatalog>) -> Self {
         let ids = IdGen::new();
-        let sessions = sample::sessions(&ids);
-        let selected = sessions.first().map_or(SessionId(0), |s| s.id);
+        let sessions = vec![Session::new(SessionId(ids.next()))];
+        let selected = sessions[0].id;
         let mut draft = TextEdit::new("");
         draft.focused = true;
         let engine = EngineChoice::new(catalog.providers(), catalog.initial());
@@ -512,10 +522,15 @@ mod tests {
     }
 
     #[test]
-    fn starts_with_a_selected_sample_session() {
+    fn starts_on_one_new_empty_session_with_no_examples() {
         let app = app();
-        assert!(!app.sessions.is_empty());
+        assert_eq!(app.sessions.len(), 1);
+        assert!(app.sessions[0].messages.is_empty());
         assert_eq!(app.current().map(|s| s.id), Some(app.selected));
+
+        let samples = app.with_sample_sessions();
+        assert!(samples.sessions.len() > 1, "stills and tests ask for the examples");
+        assert_eq!(samples.current().map(|s| s.id), Some(samples.selected), "the first is selected");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Example content: seeded sessions (until history is saved) and proposed changes for the
+//! Example content for stills and tests: sessions, a project folder and proposed changes for the
 //! headless scenes of the changes panel.
 
 use krampsta_core::{FileChange, IdGen, MessageRole, Session, SessionId};
@@ -11,7 +11,7 @@ This first version runs a *simulated* agent, so you can try the whole flow:\n\n\
 - Start a message with `/fail` to see a failed run, or press **Stop** while it runs.\n\n\
 The panel on the right previews file changes; toggle it from the toolbar.";
 
-/// The sessions a fresh install opens with. The first is selected.
+/// The sessions stills show (`KrampstaApp::with_sample_sessions`). The first is selected.
 pub fn sessions(ids: &IdGen) -> Vec<Session> {
     let mut welcome = Session::with_title(SessionId(ids.next()), "Welcome to Krampsta");
     welcome.push_message(MessageRole::Assistant, WELCOME);

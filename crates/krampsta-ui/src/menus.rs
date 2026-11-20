@@ -95,7 +95,7 @@ mod tests {
     use super::*;
 
     fn app() -> KrampstaApp {
-        KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant())))
+        KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant()))).with_sample_sessions()
     }
 
     const AT: PointerPress = PointerPress { x: 10.0, y: 20.0 };

@@ -36,10 +36,11 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   millón que pone el usuario; sólo proveedores `Cloud`, sin precios de serie),
   `changes.rs` (revisar los cambios
   propuestos: aceptar o rechazar archivos y bloques), `theme.rs` (único sitio de colores),
-  `keys.rs` (claves estables), `sample.rs` (datos
-  de ejemplo).
+  `keys.rs` (claves estables), `sample.rs` (ejemplos sólo para capturas y tests:
+  `with_sample_sessions`; la app real arranca con una sesión vacía y el historial).
 - `crates/krampsta-app` — binario `krampsta`; construye el catálogo, abre el proyecto inicial
-  (`krampsta <carpeta>` o la carpeta actual; en headless, el de ejemplo) y arranca.
+  (`krampsta <carpeta>`, el último abierto o la carpeta actual; en headless, el proyecto y
+  las sesiones de ejemplo) y arranca.
 - Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
   `providers → core`, `app → tools → agent`, `app → store → agent`, `store → core`. Sin ciclos;
   la UI nunca depende de `krampsta-providers`, `krampsta-tools` ni `krampsta-store`.

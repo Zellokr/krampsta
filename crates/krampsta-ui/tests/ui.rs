@@ -16,7 +16,7 @@ use rune::{Env, Ime, Key, KeyEvent, Mods, Runtime};
 const SIZE: (f32, f32) = (1200.0, 800.0);
 
 fn runtime_with(config: MockConfig, size: (f32, f32)) -> Runtime<KrampstaApp> {
-    let state = KrampstaApp::new(Arc::new(MockCatalog::new(config)));
+    let state = KrampstaApp::new(Arc::new(MockCatalog::new(config))).with_sample_sessions();
     let mut rt = Runtime::new(state, app::view, size, Env::new(true, 1.0));
     settle(&mut rt);
     rt
