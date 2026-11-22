@@ -109,6 +109,11 @@ impl EngineChoice {
         self.provider().is_some_and(|p| p.reasoning_effort)
     }
 
+    /// Whether the selected provider reads the images a message carries.
+    pub fn takes_images(&self) -> bool {
+        self.provider().is_some_and(|p| p.images)
+    }
+
     /// The efforts to offer: the model's own, or low/medium/high while it has said none.
     pub fn effort_levels(&self) -> Vec<EffortLevel> {
         if self.efforts.is_empty() { EffortLevel::defaults() } else { self.efforts.clone() }
@@ -336,6 +341,7 @@ mod tests {
             missing: missing.map(Into::into),
             kind: ProviderKind::Local,
             reasoning_effort: false,
+            images: false,
             api_key: None,
         }
     }

@@ -41,6 +41,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `tabs.rs` (sesiones abiertas en pestañas sobre el chat, `TabStrip` de rune-kit; la activa es
   la seleccionada; la última no se cierra; Ctrl+W), `costs.rs` (coste por sesión: tokens por modelo, `Session::by_model`, por los precios por
   millón que pone el usuario; sólo proveedores `Cloud`, sin precios de serie),
+  `images.rs` (imágenes pegadas y de los mensajes: se decodifican en un hilo propio y llegan por
+  `pump` a `SessionView`; nunca en `view`; sólo se envían si `Provider::images`),
   `changes.rs` (revisar los cambios
   propuestos: aceptar o rechazar archivos y bloques), `theme.rs` (único sitio de colores),
   `keys.rs` (claves estables), `sample.rs` (ejemplos sólo para capturas y tests:

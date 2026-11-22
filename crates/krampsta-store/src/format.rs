@@ -68,6 +68,8 @@ pub struct SavedMessage {
     pub id: u64,
     pub role: SavedRole,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_png: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reasoning: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -158,6 +160,7 @@ impl SavedMessage {
                 MessageRole::Tool => SavedRole::Tool,
             },
             content: m.content.clone(),
+            image_png: m.image_png.as_deref().map(str::to_owned),
             reasoning: m.reasoning.clone(),
             run: m.run.map(|r| r.0),
             tool_calls: m
@@ -181,6 +184,7 @@ impl SavedMessage {
             SavedRole::Tool => MessageRole::Tool,
         };
         let mut message = Message::new(MessageId(self.id), role, self.content);
+        message.image_png = self.image_png.map(Into::into);
         message.reasoning = self.reasoning;
         message.run = self.run.map(RunId);
         message.tool_calls = self

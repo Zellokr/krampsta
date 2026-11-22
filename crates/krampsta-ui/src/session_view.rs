@@ -2,9 +2,12 @@
 //! composer's unsent text and the reply being paced out. Kept per session, a draft survives
 //! switching to another session and back, and sessions shown side by side stream on their own.
 
-use krampsta_core::SessionId;
+use std::collections::HashMap;
+
+use krampsta_core::{MessageId, SessionId};
 use rune::TextEdit;
 
+use crate::images::{DraftImage, MessageImage, SentImage};
 use crate::pace::Pace;
 use crate::state::KrampstaApp;
 
@@ -13,13 +16,28 @@ use crate::state::KrampstaApp;
 pub struct SessionView {
     /// The composer's text.
     pub draft: TextEdit,
+    /// The image attached to the draft, once read.
+    pub(crate) attachment: Option<DraftImage>,
+    /// A pasted image is being read.
+    pub(crate) attaching: bool,
+    /// The last draft sent with an image, until its run ends.
+    pub(crate) sent: Option<SentImage>,
+    /// Its messages' images, decoded off the UI thread (`images.rs`).
+    pub(crate) images: HashMap<MessageId, MessageImage>,
     /// Its streaming reply, while it comes out at a steady pace.
     pub(crate) pace: Option<Pace>,
 }
 
 impl Default for SessionView {
     fn default() -> Self {
-        SessionView { draft: TextEdit::new(""), pace: None }
+        SessionView {
+            draft: TextEdit::new(""),
+            attachment: None,
+            attaching: false,
+            sent: None,
+            images: HashMap::new(),
+            pace: None,
+        }
     }
 }
 

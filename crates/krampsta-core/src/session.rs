@@ -127,18 +127,27 @@ impl Session {
     ///
     /// Fails if the text is blank or a run is already in progress; on failure nothing changes.
     pub fn submit(&mut self, text: &str, run: RunId) -> Result<MessageId, SessionError> {
+        self.submit_with_image(text, None, run)
+    }
+
+    pub fn submit_with_image(
+        &mut self,
+        text: &str,
+        image_png: Option<std::sync::Arc<str>>,
+        run: RunId,
+    ) -> Result<MessageId, SessionError> {
         let text = text.trim();
-        if text.is_empty() {
+        if text.is_empty() && image_png.is_none() {
             return Err(SessionError::EmptyMessage);
         }
         if self.status.is_running() {
             return Err(SessionError::AlreadyRunning);
         }
         if self.title == UNTITLED {
-            self.title = title_from(text);
+            self.title = title_from(if text.is_empty() { "Image" } else { text });
         }
         let id = self.mint_message_id();
-        self.messages.push(Message::user(id, text));
+        self.messages.push(Message { image_png, ..Message::user(id, text) });
         self.active_run = Some(run);
         self.status = AgentStatus::Running;
         Ok(id)

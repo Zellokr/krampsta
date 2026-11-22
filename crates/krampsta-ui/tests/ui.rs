@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 //! Interaction tests: the real Krampsta view in Rune's headless `Runtime`, driven by pointer and
 //! keyboard input the way a person would, with the mock agent running for real.
 
@@ -69,6 +71,26 @@ fn pump_until_finished(rt: &mut Runtime<KrampstaApp>) {
     settle(rt);
 }
 
+/// Runs `poll` until `done` holds: for work that lands from another thread (images).
+fn pump_until(rt: &mut Runtime<KrampstaApp>, what: &str, done: impl Fn(&Runtime<KrampstaApp>) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !done(rt) {
+        assert!(Instant::now() < deadline, "{what} never happened");
+        rt.update_if(|s, _| s.pump());
+        rt.frame(1.0 / 60.0);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// A small PNG, as a screenshot pasted from the clipboard would be.
+fn png(width: u32, height: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    image::RgbaImage::from_pixel(width, height, image::Rgba([200, 40, 160, 255]))
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .unwrap();
+    out
+}
+
 fn status_label(rt: &Runtime<KrampstaApp>) -> String {
     element(rt, keys::STATUS).and_then(|e| e.label).unwrap_or_default()
 }
@@ -121,8 +143,11 @@ fn new_session_adds_a_selected_row_with_an_empty_conversation() {
 
 #[test]
 fn saved_sessions_show_up_in_the_sidebar_and_open_with_their_messages() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
     let mut saved = Session::with_title(SessionId(1_700_000_000_000), "Saved yesterday");
-    saved.push_message(MessageRole::User, "Where is the parser?");
+    let message = saved.push_message(MessageRole::User, "Where is the parser?");
+    saved.messages.last_mut().unwrap().image_png = Some(STANDARD.encode(png(40, 30)).into());
     saved.push_message(MessageRole::Assistant, "In `src/parse.rs`.");
     let store = Arc::new(MemoryStore::with_sessions(vec![saved.clone()]));
     let state = KrampstaApp::new(Arc::new(MockCatalog::new(MockConfig::instant()))).with_store(store);
@@ -142,6 +167,9 @@ fn saved_sessions_show_up_in_the_sidebar_and_open_with_their_messages() {
         rt.elements().iter().any(|e| e.text.as_deref().is_some_and(|t| t.contains("Where is the parser?"))),
         "the saved conversation shows"
     );
+    // Its image is read off the UI thread and shows once that lands.
+    let image = keys::message_image(message);
+    pump_until(&mut rt, "the saved image showing", |rt| has(rt, &image));
 }
 
 #[test]
@@ -191,6 +219,7 @@ fn a_price_typed_in_settings_shows_the_sessions_cost_in_the_toolbar() {
         missing: None,
         kind: krampsta_agent::ProviderKind::Cloud,
         reasoning_effort: false,
+        images: false,
         api_key: None,
     });
     let id = state.new_session();
@@ -385,6 +414,37 @@ fn a_session_is_deleted_from_its_context_menu_after_confirming() {
     assert!(rt.state.session(first).is_none());
     assert!(!has(&rt, &keys::session(first)));
     assert_eq!(rt.state.selected, second, "the next session is selected");
+}
+
+#[test]
+fn a_pasted_image_attaches_to_the_draft_and_goes_with_the_message() {
+    let mut rt = runtime();
+    rt.update(|s, _| {
+        s.new_session();
+    });
+    settle(&mut rt);
+    click(&mut rt, keys::COMPOSER);
+    let image = rune::ClipboardImage::from_png(png(400, 300)).unwrap();
+    let clipboard = rune::clipboard::memory();
+    clipboard.set_content(rune::ClipboardContent::new("").with_image(image));
+    rt.use_clipboard(&clipboard);
+    rt.update(|_, tx| tx.request_paste());
+    pump_until(&mut rt, "the attachment showing", |rt| has(rt, keys::COMPOSER_IMAGE));
+    let preview = element(&rt, keys::COMPOSER_IMAGE).unwrap().rect;
+    assert!(preview[2] <= 96.5 && preview[3] <= 96.5, "the preview is small: {preview:?}");
+    assert_eq!(rt.state.draft().text, "", "an image-only paste types nothing");
+
+    // Removing it and pasting again, then sending with no text: the image is the message.
+    click(&mut rt, keys::COMPOSER_IMAGE_REMOVE);
+    assert!(!has(&rt, keys::COMPOSER_IMAGE));
+    rt.update(|_, tx| tx.request_paste());
+    pump_until(&mut rt, "the attachment showing again", |rt| has(rt, keys::COMPOSER_IMAGE));
+    click(&mut rt, keys::SEND);
+    let sent = rt.state.current().unwrap().messages.first().unwrap();
+    assert!(sent.image_png.is_some(), "the message carries the image");
+    assert!(has(&rt, &keys::message_image(sent.id)), "and the transcript shows it at once");
+    assert!(!has(&rt, keys::COMPOSER_IMAGE), "the draft is empty again");
+    pump_until_finished(&mut rt);
 }
 
 #[test]

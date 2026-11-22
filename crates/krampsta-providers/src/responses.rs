@@ -234,9 +234,16 @@ fn input(history: &[Message], tools: bool) -> Vec<Value> {
                 instructions.push_str("\n\n");
                 instructions.push_str(&m.content);
             }
-            MessageRole::User => conversation.push(
-                json!({"type": "message", "role": "user", "content": [{"type": "input_text", "text": m.content}]}),
-            ),
+            MessageRole::User => {
+                let mut content = Vec::new();
+                if !m.content.is_empty() || m.image_png.is_none() {
+                    content.push(json!({"type": "input_text", "text": m.content}));
+                }
+                if let Some(png) = &m.image_png {
+                    content.push(json!({"type": "input_image", "image_url": format!("data:image/png;base64,{png}")}));
+                }
+                conversation.push(json!({"type": "message", "role": "user", "content": content}));
+            }
             MessageRole::Assistant if !m.content.is_empty() => conversation.push(
                 json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": m.content}]}),
             ),

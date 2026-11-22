@@ -115,6 +115,8 @@ pub struct KrampstaApp {
     pub(crate) prefs: PrefsSync,
     /// Turns a folder into tools. None: folders can't be opened (tests, scenes).
     pub(crate) opener: Option<Arc<dyn ProjectOpener>>,
+    /// Reads pasted and saved images off the UI thread.
+    pub(crate) images: crate::images::Images,
     ids: IdGen,
     window_width: Option<f32>,
     auto_hidden: AutoHidden,
@@ -181,6 +183,7 @@ impl KrampstaApp {
         let before = self.sessions.len();
         for session in history.sessions {
             if self.session(session.id).is_none() {
+                self.read_images(&session);
                 self.sessions.push(session);
             }
         }
@@ -257,6 +260,7 @@ impl KrampstaApp {
             price_scratch: TextEdit::new(""),
             prefs: PrefsSync::default(),
             opener: None,
+            images: crate::images::Images::default(),
             ids,
             window_width: None,
             auto_hidden: AutoHidden::default(),
@@ -276,6 +280,7 @@ impl KrampstaApp {
 
     /// Wakes the window when agent events arrive.
     pub fn set_notifier(&mut self, notify: Notifier) {
+        self.set_images_notifier(notify.clone());
         self.agent.set_notifier(notify);
     }
 
@@ -354,8 +359,9 @@ impl KrampstaApp {
         }
         let open = self.project.as_ref().map(|p| p.root.clone());
         let Selection { provider, model } = self.engine.selection.clone();
+        let image = self.check_attachment(id).map_err(SendError::Engine)?;
         let session = self.session_mut(id).ok_or(SessionError::EmptyMessage)?;
-        session.submit(&text, run)?;
+        let message = session.submit_with_image(&text, image, run)?;
         // A session not tied to a folder yet works in the open one from now on.
         if session.project.is_none() {
             session.project = open;
@@ -366,14 +372,16 @@ impl KrampstaApp {
         }
         let request =
             RunRequest { session: id, run, history: session.messages.clone(), effort: self.engine.effort.clone() };
+        self.sent_attachment(id, run, message, text);
         self.view_mut(id).draft = TextEdit::new("");
         self.focus_composer(id);
         self.notice = None;
         let started = self.agent.start(request);
-        if let Err(e) = &started
-            && let Some(s) = self.session_mut(id)
-        {
-            s.apply(&AgentEvent::Failed { run, error: e.to_string() });
+        if let Err(e) = &started {
+            if let Some(s) = self.session_mut(id) {
+                s.apply(&AgentEvent::Failed { run, error: e.to_string() });
+            }
+            self.finish_image_send(id, run, true);
         }
         self.persist(id);
         started.map_err(SendError::from)
@@ -406,6 +414,7 @@ impl KrampstaApp {
         changed |= self.land_models(lists);
         let (writes_changed, mut panel_dirty) = self.land_writes(writes);
         changed |= writes_changed;
+        changed |= self.land_images();
         for e in self.agent.drain() {
             match e.event {
                 // A proposal outlives its run: the tools already build on it.
@@ -431,6 +440,9 @@ impl KrampstaApp {
                     }
                     let applied = self.session_mut(e.session).is_some_and(|s| s.apply(&event));
                     changed |= applied;
+                    if applied && event.is_terminal() {
+                        self.finish_image_send(e.session, event.run(), matches!(event, AgentEvent::Failed { .. }));
+                    }
                     // Saved at each step's end, not per word: a crash mid-run keeps the
                     // finished steps, and no frame writes.
                     let step_ended = matches!(event, AgentEvent::ToolCallFinished { .. }) || event.is_terminal();

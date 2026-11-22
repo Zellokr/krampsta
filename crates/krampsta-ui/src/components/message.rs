@@ -2,10 +2,11 @@
 //! as Markdown with its tool calls above.
 
 use krampsta_core::{Message, MessageRole, SessionId};
-use rune::{El, col, icon, row, text};
+use rune::{El, col, el, icon, row, text};
 use rune_kit::{Kit, Markdown, Spinner};
 
 use crate::components::{icons, reasoning, shimmer, tool_card};
+use crate::images::MessageImage;
 use crate::keys;
 use crate::state::KrampstaApp;
 use crate::theme;
@@ -13,7 +14,7 @@ use crate::theme;
 /// `streaming`: the message's run is still writing it.
 pub fn view(s: &KrampstaApp, session: SessionId, m: &Message, streaming: bool, k: &Kit) -> El {
     let body = match m.role {
-        MessageRole::User => user(m, k),
+        MessageRole::User => user(s, session, m, k),
         MessageRole::Assistant => assistant(s, session, m, streaming, k),
         MessageRole::System | MessageRole::Tool => {
             text(m.content.clone()).font(k.ty.small).color(k.c.text_faint).wrap().selectable(true)
@@ -22,16 +23,39 @@ pub fn view(s: &KrampstaApp, session: SessionId, m: &Message, streaming: bool, k
     body.key(keys::message(m.id))
 }
 
-fn user(m: &Message, k: &Kit) -> El {
-    let bubble = col()
+fn user(s: &KrampstaApp, session: SessionId, m: &Message, k: &Kit) -> El {
+    let mut bubble = col()
         .max_w(600.0)
         .min_w(0.0)
+        .gap(8.0)
         .px(14.0)
         .py(10.0)
         .radius(k.radius.lg)
         .fill(k.c.layer_02)
-        .border(1.0, k.c.border_weak)
-        .child(text(m.content.clone()).font(k.ty.body).color(k.c.text_base).wrap().selectable(true));
+        .border(1.0, k.c.border_weak);
+    if !m.content.is_empty() {
+        bubble = bubble.child(text(m.content.clone()).font(k.ty.body).color(k.c.text_base).wrap().selectable(true));
+    }
+    if m.image_png.is_some() {
+        // Decoded off the UI thread (`images.rs`); until then, a line says so.
+        let image = match s.message_image(session, m.id) {
+            Some(MessageImage::Ready(pixels)) => {
+                let (width, height) = pixels.size();
+                el().key(keys::message_image(m.id))
+                    .role("img")
+                    .label("Attached image")
+                    .size(width as f32, height as f32)
+                    .radius(k.radius.md)
+                    .clip_rounded(k.radius.md)
+                    .pixels(pixels)
+            }
+            Some(MessageImage::Unreadable) => {
+                text("The attached image can't be shown.").font(k.ty.small).color(k.c.text_faint)
+            }
+            Some(MessageImage::Loading) | None => text("Loading the image…").font(k.ty.small).color(k.c.text_faint),
+        };
+        bubble = bubble.child(image);
+    }
     row().role("group").label("You").w_full().justify_end().child(bubble)
 }
 

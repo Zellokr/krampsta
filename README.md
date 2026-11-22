@@ -21,6 +21,8 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
 - **Panel principal**: título de la sesión, historial (usuario a la derecha, Krampsta a la
   izquierda con Markdown y bloques de código coloreados), indicador de estado del agente
   (`Idle`, `Running`, `Completed`, `Failed`, `Cancelled`) y *composer* que crece con el texto.
+  Una imagen pegada (`Ctrl+V`, PNG de hasta 5 MiB y 24 megapíxeles) se adjunta al mensaje;
+  sólo la envían los proveedores que leen imágenes (hoy, ChatGPT) y se guarda con el historial.
 - **Panel derecho**: los cambios que propone el agente, como diff (`rune-kit` `DiffView`): cada
   archivo se acepta o rechaza entero desde su cabecera, y cada bloque desde debajo;
   se oculta/muestra desde la barra (`Ctrl+J` / `⌘J`).

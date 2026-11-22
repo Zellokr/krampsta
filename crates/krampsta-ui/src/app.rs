@@ -299,6 +299,8 @@ const SCENES: &[Scene] = &[
     }),
     ("projects", scene_projects),
     ("edit", scene_edit),
+    // A message that carries a screenshot, and another attached to the draft.
+    ("image", crate::images::scene),
     // Two sessions side by side: a finished conversation (active) and the welcome beside it.
     ("split", |s| {
         scene_completed(s);
@@ -545,6 +547,7 @@ fn stage_accounts(s: &mut KrampstaApp, signed_in: bool) {
         missing: missing.map(str::to_owned),
         kind,
         reasoning_effort: false,
+        images: false,
         api_key: None,
     };
     let local = |id: &str, label: &str| provider(id, label, None, ProviderKind::Local);

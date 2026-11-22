@@ -22,6 +22,8 @@ pub struct Provider {
     pub kind: ProviderKind,
     /// Whether runs can choose how hard its models think ([`crate::Effort`]).
     pub reasoning_effort: bool,
+    /// Whether its engine sends the images a message carries to the model.
+    pub images: bool,
     /// Where its API key comes from, for providers whose key can be saved in the app
     /// ([`EngineCatalog::set_api_key`]); `None` for the others.
     pub api_key: Option<KeySource>,
@@ -157,6 +159,8 @@ impl MockCatalog {
             missing: None,
             kind: ProviderKind::Simulated,
             reasoning_effort: false,
+            // It ignores what a message carries, so scenes and tests can send images.
+            images: true,
             api_key: None,
         }
     }

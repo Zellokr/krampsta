@@ -240,6 +240,7 @@ mod tests {
                         Account::SignedOut
                     }),
                     reasoning_effort: false,
+                    images: false,
                     api_key: None,
                 },
                 MockCatalog::provider(),
@@ -360,6 +361,7 @@ mod tests {
                     missing: (!saved).then(|| "needs an API key".into()),
                     kind: ProviderKind::Cloud,
                     reasoning_effort: false,
+                    images: false,
                     api_key: Some(if saved { KeySource::Saved } else { KeySource::Missing }),
                 },
                 MockCatalog::provider(),

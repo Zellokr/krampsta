@@ -171,6 +171,7 @@ mod tests {
             missing: None,
             kind,
             reasoning_effort: false,
+            images: false,
             api_key: None,
         }
     }

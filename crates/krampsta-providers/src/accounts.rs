@@ -115,6 +115,8 @@ impl Accounts {
             }),
             // Its Responses engine takes a reasoning effort; Copilot's chat API may reject one.
             reasoning_effort: id == CHATGPT,
+            // Only the Responses engine sends images; Copilot's chat API gets text.
+            images: id == CHATGPT,
             api_key: None,
         };
         vec![

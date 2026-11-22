@@ -30,6 +30,8 @@ pub struct Message {
     pub id: MessageId,
     pub role: MessageRole,
     pub content: String,
+    /// Optional PNG attachment, encoded as standard base64.
+    pub image_png: Option<std::sync::Arc<str>>,
     /// What the model wrote while thinking, before (or between) its reply. Shown folded;
     /// never sent back to the provider.
     pub reasoning: String,
@@ -53,6 +55,7 @@ impl Message {
             id,
             role,
             content: content.into(),
+            image_png: None,
             reasoning: String::new(),
             run: None,
             tool_calls: Vec::new(),

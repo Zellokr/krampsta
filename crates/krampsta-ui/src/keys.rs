@@ -13,6 +13,9 @@ pub const TRANSCRIPT_SCROLL: &str = "krampsta-transcript-scroll";
 pub const EMPTY_STATE: &str = "krampsta-empty-state";
 pub const COMPOSER: &str = "krampsta-composer";
 pub const COMPOSER_HINT: &str = "krampsta-composer-hint";
+/// The image attached to the draft, and its remove button.
+pub const COMPOSER_IMAGE: &str = "krampsta-composer-image";
+pub const COMPOSER_IMAGE_REMOVE: &str = "krampsta-composer-image-remove";
 pub const SEND: &str = "krampsta-send";
 pub const STOP: &str = "krampsta-stop";
 pub const STATUS: &str = "krampsta-agent-status";
@@ -46,6 +49,11 @@ pub fn tool(id: &krampsta_core::ToolCallId) -> String {
 
 /// A running call's live output (a command's last lines).
 /// The change a call proposed, shown in its card.
+/// The image a user message carries.
+pub fn message_image(id: krampsta_core::MessageId) -> String {
+    format!("krampsta-message-image-{id}")
+}
+
 pub fn tool_diff(id: &krampsta_core::ToolCallId) -> String {
     format!("krampsta-tool-diff-{id}")
 }

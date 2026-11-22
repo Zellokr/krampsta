@@ -17,6 +17,7 @@ pub mod approvals;
 pub mod changes;
 pub mod components;
 pub mod costs;
+pub mod images;
 pub mod keys;
 pub mod menus;
 pub mod pace;
