@@ -171,6 +171,7 @@ impl KrampstaApp {
                 Ok(project) => {
                     self.project = Some(ProjectInfo::of(&project));
                     self.agent.set_toolbox(Some(project.tools));
+                    self.files_changed();
                     // The selected session may belong here now, or no longer.
                     self.notice =
                         self.foreign_project(self.selected).map(|name| SendError::OtherProject(name).to_string());

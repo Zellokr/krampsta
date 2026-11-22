@@ -69,6 +69,9 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   para añadir y la confirmación de quitar; la vista en `views/mcp.rs`),
   `images.rs` (imágenes pegadas y de los mensajes: se decodifican en un hilo propio y llegan por
   `pump` a `SessionView`; nunca en `view`; sólo se envían si `Provider::images`),
+  `files.rs` (el árbol de archivos de la vista «Files»: la lista sale de `Toolbox::files` por
+  `AgentHost::list_files`, numerada, y llega por `pump`; caduca al cambiar de proyecto o escribir un
+  cambio; el panel con su selector es `views/inspector.rs`),
   `changes.rs` (revisar los cambios
   propuestos: aceptar o rechazar archivos y bloques), `theme.rs` (único sitio de colores),
   `keys.rs` (claves estables), `sample.rs` (ejemplos sólo para capturas y tests:

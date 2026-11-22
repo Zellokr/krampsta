@@ -21,7 +21,9 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use krampsta_agent::{Access, Approval, Call, OpenedProject, ProjectOpener, ToolOutput, ToolSpec, Toolbox};
+use krampsta_agent::{
+    Access, Approval, Call, OpenedProject, ProjectFiles, ProjectOpener, ToolOutput, ToolSpec, Toolbox,
+};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
@@ -215,6 +217,10 @@ impl Toolbox for Workspace {
 
     fn set_pending(&self, path: &str, content: Option<Arc<str>>) {
         self.pending.set(path, content);
+    }
+
+    fn files(&self) -> Result<ProjectFiles, String> {
+        Ok(list::all_files(&self.project, &self.pending))
     }
 }
 

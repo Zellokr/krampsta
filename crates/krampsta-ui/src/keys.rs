@@ -226,3 +226,10 @@ pub const MCP_ADD_TARGET: &str = "krampsta-mcp-add-target";
 pub const MCP_ADD_EXTRA: &str = "krampsta-mcp-add-extra";
 pub const MCP_ADD_SAVE: &str = "krampsta-mcp-add-save";
 pub const MCP_ADD_ERROR: &str = "krampsta-mcp-add-error";
+
+/// The right panel's switch between "Changes" and "Files", and the "Files" view.
+pub const INSPECTOR_TABS: &str = "krampsta-inspector-tabs";
+pub const FILES_TREE: &str = "krampsta-files-tree";
+pub const FILES_FILTER: &str = "krampsta-files-filter";
+pub const FILES_REFRESH: &str = "krampsta-files-refresh";
+pub const FILES_EMPTY: &str = "krampsta-files-empty";

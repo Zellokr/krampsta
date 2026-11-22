@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::catalog::{DeviceCode, LoginPrompt};
 use crate::engine::{AgentEngine, AgentError, Approvals, BoxFuture, RunContext, RunRequest, lock};
 use crate::projects::{ProjectOpened, ProjectOpener};
-use crate::tools::{Decision, Toolbox};
+use crate::tools::{Decision, ProjectFiles, Toolbox};
 
 /// Called from a worker thread after each event is queued, to wake the UI so it drains them.
 /// Rune's `Waker` (`Arc<dyn Fn() + Send + Sync>`) is one.
@@ -39,6 +39,8 @@ pub struct AgentHost {
     writes_rx: Receiver<Written>,
     projects_tx: Sender<ProjectOpened>,
     projects_rx: Receiver<ProjectOpened>,
+    files_tx: Sender<FileList>,
+    files_rx: Receiver<FileList>,
     /// Calls waiting for the user to allow them, shared with every run's context.
     approvals: Approvals,
     /// The sign-in in progress, if any (one at a time).
@@ -51,6 +53,15 @@ pub struct Written {
     pub path: String,
     pub content: Arc<str>,
     pub result: Result<(), String>,
+}
+
+/// The answer to [`AgentHost::list_files`]: which request it answers, and the files.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileList {
+    /// The number the caller gave the request, to tell a stale answer (from a project
+    /// that was open before) from the current one.
+    pub ask: u64,
+    pub result: Result<ProjectFiles, String>,
 }
 
 /// The answer to [`AgentHost::fetch_models`].
@@ -91,11 +102,14 @@ impl AgentHost {
         let (accounts_tx, accounts_rx) = channel();
         let (writes_tx, writes_rx) = channel();
         let (projects_tx, projects_rx) = channel();
+        let (files_tx, files_rx) = channel();
         AgentHost {
             writes_tx,
             writes_rx,
             projects_tx,
             projects_rx,
+            files_tx,
+            files_rx,
             approvals: Approvals::default(),
             engine,
             tools: None,
@@ -169,6 +183,32 @@ impl AgentHost {
             }
         });
         Ok(())
+    }
+
+    /// Lists the project's files through the tools, off the UI thread; the answer, tagged
+    /// `ask`, arrives through [`drain_files`](Self::drain_files).
+    pub fn list_files(&mut self, ask: u64) -> Result<(), AgentError> {
+        let (tx, notify, tools) = (self.files_tx.clone(), self.notify.clone(), self.tools.clone());
+        let Some(tools) = tools else {
+            // Nothing to wait for: the answer is already known.
+            if tx.send(FileList { ask, result: Err("no project folder is open".into()) }).is_ok() {
+                notify();
+            }
+            return Ok(());
+        };
+        self.runtime()?.spawn(async move {
+            let job = tokio::task::spawn_blocking(move || tools.files());
+            let result = job.await.unwrap_or_else(|e| Err(format!("listing the files stopped abnormally: {e}")));
+            if tx.send(FileList { ask, result }).is_ok() {
+                notify();
+            }
+        });
+        Ok(())
+    }
+
+    /// Takes every answer to [`list_files`](Self::list_files), without blocking.
+    pub fn drain_files(&mut self) -> Vec<FileList> {
+        self.files_rx.try_iter().collect()
     }
 
     /// Takes every answer to [`open_project`](Self::open_project), without blocking.

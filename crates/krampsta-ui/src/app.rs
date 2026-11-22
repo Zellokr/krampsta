@@ -15,7 +15,7 @@ use crate::menus::MenuTarget;
 use crate::picker::{Models, Picker};
 use crate::state::{KrampstaApp, Screen};
 use crate::theme::{self, ThemeChoice};
-use crate::views::{changes, settings, sidebar};
+use crate::views::{inspector, settings, sidebar};
 
 pub const TITLE: &str = "Krampsta";
 pub const SIZE: (f32, f32) = (1200.0, 800.0);
@@ -153,7 +153,7 @@ fn workspace(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec
         .trailing(row().gap(8.0).items_center().child(status::pill(&status, k)).child(split_toggle).child(toggle));
     SplitView::new(crate::panes::view(s, k, layer))
         .sidebar(&s.sidebar, |s: &mut KrampstaApp| &mut s.sidebar, sidebar::view(s, k, layer))
-        .inspector(&s.changes, |s: &mut KrampstaApp| &mut s.changes, changes::view(s, k))
+        .inspector(&s.changes, |s: &mut KrampstaApp| &mut s.changes, inspector::view(s, k))
         .toolbar(toolbar)
         .titlebar_inset(cx.titlebar_inset())
         .frame_inset(8.0)
@@ -316,6 +316,8 @@ const SCENES: &[Scene] = &[
     ("cost", scene_cost),
     ("prices", scene_prices),
     // Settings with an MCP server in each state: connected with its tools, connecting, failed, off.
+    // The right panel's "Files" view: the project's tree, filtered by nothing, with proposed files marked.
+    ("files", crate::files::scene),
     ("mcp-servers", |s| {
         // Settings shows the providers too: the stills assign them, never the machine's own.
         stage_accounts(s, false);

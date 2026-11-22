@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use ignore::WalkBuilder;
-use krampsta_agent::CancellationToken;
+use krampsta_agent::{CancellationToken, ProjectFiles};
 use serde::Deserialize;
 
 use crate::edit::Pending;
@@ -113,6 +113,30 @@ fn virtual_entries<'a>(
     Ok(entries)
 }
 
+/// The most files the file tree lists.
+pub const MAX_FILES: usize = 50_000;
+
+/// Every file in the project as `list_files` would show it (`.gitignore` honoured, `.git`
+/// skipped), plus the new files the agent proposed that aren't on disk yet, up to [`MAX_FILES`].
+pub fn all_files(project: &Project, pending: &Pending) -> ProjectFiles {
+    let mut paths: Vec<String> = Vec::new();
+    let mut truncated = false;
+    for entry in walker(project.root()).build().filter_map(Result::ok) {
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            continue;
+        }
+        if paths.len() == MAX_FILES {
+            truncated = true;
+            break;
+        }
+        paths.push(project.show(entry.path()));
+    }
+    let on_disk: std::collections::HashSet<&str> = paths.iter().map(String::as_str).collect();
+    let proposed: Vec<String> = pending.snapshot().into_keys().filter(|p| !on_disk.contains(p.as_str())).collect();
+    paths.extend(proposed);
+    ProjectFiles { paths, truncated }
+}
+
 /// A walk that honours `.gitignore` (also outside a git repository), `.ignore` and the global
 /// git excludes, shows dotfiles, and never enters `.git`.
 pub fn walker(dir: &std::path::Path) -> WalkBuilder {
@@ -149,5 +173,27 @@ mod tests {
         assert_eq!(list(&p, Some("src"), Some(1)).unwrap(), "src/bin/\nsrc/main.rs\n");
         assert!(list(&p, Some("README.md"), None).unwrap_err().contains("is a file"));
         assert!(list(&p, Some("src/bin/../../.."), None).unwrap_err().contains("outside"));
+    }
+
+    #[test]
+    fn the_file_tree_gets_every_file_and_the_proposed_new_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for d in ["src", "target", ".git"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        for f in ["src/main.rs", "target/app", ".git/HEAD", "README.md"] {
+            std::fs::write(root.join(f), "").unwrap();
+        }
+        std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+        let p = Project::open(root).unwrap();
+        let pending = Pending::default();
+        pending.set("src/new.rs", Some("fn new() {}".into()));
+        pending.set("README.md", Some("changed".into()));
+
+        let mut files = all_files(&p, &pending);
+        files.paths.sort();
+        assert_eq!(files.paths, [".gitignore", "README.md", "src/main.rs", "src/new.rs"]);
+        assert!(!files.truncated);
     }
 }

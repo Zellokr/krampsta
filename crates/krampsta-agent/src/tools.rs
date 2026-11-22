@@ -31,6 +31,14 @@ impl From<String> for ToolOutput {
     }
 }
 
+/// The project's files, as [`Toolbox::files`] lists them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProjectFiles {
+    pub paths: Vec<String>,
+    /// The list stopped at its cap: there are more.
+    pub truncated: bool,
+}
+
 /// Whether a call may run, as the permission rules say.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Access {
@@ -113,5 +121,12 @@ pub trait Toolbox: Send + Sync + 'static {
     /// it, or the file on disk (`None`) once the change is accepted or rejected.
     fn set_pending(&self, path: &str, content: Option<Arc<str>>) {
         let _ = (path, content);
+    }
+
+    /// Every file in the project, as the file tree shows it (relative paths with `/`, what
+    /// `.gitignore` leaves out left out, new files still only proposed included). Blocking:
+    /// the host calls it on a blocking thread.
+    fn files(&self) -> Result<ProjectFiles, String> {
+        Err("no project folder is open".into())
     }
 }
