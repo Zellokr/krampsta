@@ -8,23 +8,26 @@
 //! project's `Workspace`, or `Permissions` when no folder is open): without a rule, they ask.
 
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
-use krampsta_agent::{Access, Approval, Call, ToolOutput, ToolSpec, Toolbox};
+use krampsta_agent::{
+    Access, Approval, Call, Notifier, ServerState, ServerStatus, ToolOutput, ToolServers, ToolSpec, Toolbox,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::ServerConfig;
-use crate::{McpClient, McpError, McpTool};
+use crate::{McpClient, McpError, McpTool, Transport};
 
 /// What a tool's name starts with when a server offers it.
 pub const PREFIX: &str = "mcp__";
 /// The longest tool name providers accept.
 const MAX_NAME: usize = 64;
 
-/// Where a server is.
+/// Where a server's connection is (what the UI sees is [`ServerState`], without the client).
 #[derive(Clone, Debug)]
-pub enum ServerState {
+enum Connection {
     Connecting,
     Ready { client: Arc<McpClient>, tools: Vec<McpTool> },
     Failed(String),
@@ -34,16 +37,23 @@ pub enum ServerState {
 #[derive(Debug)]
 struct Server {
     name: String,
-    state: ServerState,
+    /// How it is reached, as the UI shows it.
+    reached: String,
+    state: Connection,
 }
+
+/// Who to wake when a server's state changes (set once the window exists).
+type Wake = Arc<Mutex<Option<Notifier>>>;
 
 /// The configured servers and their connections. Dropping it closes them (and stops the stdio
 /// servers' processes).
 pub struct McpServers {
     runtime: Option<tokio::runtime::Runtime>,
     servers: Arc<RwLock<Vec<Server>>>,
-    /// Grows whenever a server's state changes, so the registry knows to rebuild.
+    /// Grows whenever a server's state changes, so the registry and the UI know to look again.
     version: Arc<AtomicU64>,
+    wake: Wake,
+    file: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for McpServers {
@@ -53,9 +63,9 @@ impl std::fmt::Debug for McpServers {
 }
 
 impl McpServers {
-    /// Starts connecting every enabled server in `configs`, in the background. `changed` is
-    /// called whenever one is ready or fails.
-    pub fn start(configs: Vec<ServerConfig>, changed: Arc<dyn Fn() + Send + Sync>) -> std::io::Result<Arc<Self>> {
+    /// Starts connecting every enabled server in `configs` (read from `file`), in the
+    /// background.
+    pub fn start(configs: Vec<ServerConfig>, file: Option<PathBuf>) -> std::io::Result<Arc<Self>> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("krampsta-mcp")
@@ -65,17 +75,19 @@ impl McpServers {
             .iter()
             .map(|c| Server {
                 name: c.name.clone(),
-                state: if c.disabled { ServerState::Disabled } else { ServerState::Connecting },
+                reached: reached(&c.transport),
+                state: if c.disabled { Connection::Disabled } else { Connection::Connecting },
             })
             .collect();
         let servers = Arc::new(RwLock::new(servers));
         let version = Arc::new(AtomicU64::new(0));
+        let wake = Wake::default();
         for config in configs.into_iter().filter(|c| !c.disabled) {
-            let (servers, version, changed) = (servers.clone(), version.clone(), changed.clone());
+            let (servers, version, wake) = (servers.clone(), version.clone(), wake.clone());
             runtime.spawn(async move {
                 let state = match connect(&config).await {
-                    Ok((client, tools)) => ServerState::Ready { client: Arc::new(client), tools },
-                    Err(e) => ServerState::Failed(e.to_string()),
+                    Ok((client, tools)) => Connection::Ready { client: Arc::new(client), tools },
+                    Err(e) => Connection::Failed(e.to_string()),
                 };
                 let mut servers = servers.write().unwrap_or_else(PoisonError::into_inner);
                 if let Some(server) = servers.iter_mut().find(|s| s.name == config.name) {
@@ -83,25 +95,18 @@ impl McpServers {
                 }
                 drop(servers);
                 version.fetch_add(1, Ordering::Release);
-                changed();
+                let notify = wake.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                if let Some(notify) = notify {
+                    notify();
+                }
             });
         }
-        Ok(Arc::new(McpServers { runtime: Some(runtime), servers, version }))
+        Ok(Arc::new(McpServers { runtime: Some(runtime), servers, version, wake, file }))
     }
 
-    /// No servers (headless runs, tests).
+    /// No servers (tests).
     pub fn none() -> std::io::Result<Arc<Self>> {
-        Self::start(Vec::new(), Arc::new(|| {}))
-    }
-
-    /// Every server and where it is, in the order configured.
-    pub fn statuses(&self) -> Vec<(String, ServerState)> {
-        let servers = self.servers.read().unwrap_or_else(PoisonError::into_inner);
-        servers.iter().map(|s| (s.name.clone(), s.state.clone())).collect()
-    }
-
-    fn version(&self) -> u64 {
-        self.version.load(Ordering::Acquire)
+        Self::start(Vec::new(), None)
     }
 
     /// The ready servers' tools, named as the model calls them.
@@ -110,7 +115,7 @@ impl McpServers {
         let mut seen = HashSet::new();
         let mut specs = Vec::new();
         for server in servers.iter() {
-            let ServerState::Ready { tools, .. } = &server.state else { continue };
+            let Connection::Ready { tools, .. } = &server.state else { continue };
             for tool in tools {
                 let name = tool_name(&server.name, &tool.name);
                 // Two tools whose names only differ past the cut, or by what was replaced:
@@ -128,7 +133,7 @@ impl McpServers {
     fn find(&self, name: &str) -> Option<(String, Arc<McpClient>, String)> {
         let servers = self.servers.read().unwrap_or_else(PoisonError::into_inner);
         servers.iter().find_map(|server| {
-            let ServerState::Ready { client, tools } = &server.state else { return None };
+            let Connection::Ready { client, tools } = &server.state else { return None };
             let tool = tools.iter().find(|t| tool_name(&server.name, &t.name) == name)?;
             Some((server.name.clone(), client.clone(), tool.name.clone()))
         })
@@ -165,6 +170,50 @@ impl McpServers {
             .and_then(|v| serde_json::to_string_pretty(&v).ok())
             .unwrap_or_else(|| arguments.to_owned());
         Access::Ask { what: format!("{shown}\n{arguments}") }
+    }
+}
+
+impl ToolServers for McpServers {
+    fn version(&self) -> u64 {
+        self.version.load(Ordering::Acquire)
+    }
+
+    fn statuses(&self) -> Vec<ServerStatus> {
+        let servers = self.servers.read().unwrap_or_else(PoisonError::into_inner);
+        servers
+            .iter()
+            .map(|s| ServerStatus {
+                name: s.name.clone(),
+                reached: s.reached.clone(),
+                state: match &s.state {
+                    Connection::Connecting => ServerState::Connecting,
+                    Connection::Ready { tools, .. } => {
+                        ServerState::Ready { tools: tools.iter().map(|t| t.name.clone()).collect() }
+                    }
+                    Connection::Failed(why) => ServerState::Failed(why.clone()),
+                    Connection::Disabled => ServerState::Disabled,
+                },
+            })
+            .collect()
+    }
+
+    fn config_file(&self) -> Option<&Path> {
+        self.file.as_deref()
+    }
+
+    fn set_notifier(&self, notify: Notifier) {
+        *self.wake.lock().unwrap_or_else(PoisonError::into_inner) = Some(notify);
+    }
+}
+
+/// How a server is reached, in a line: its command and arguments, or its URL. Never its env
+/// values or headers (they hold tokens).
+fn reached(transport: &Transport) -> String {
+    match transport {
+        Transport::Stdio { command, args, .. } => {
+            std::iter::once(command.as_str()).chain(args.iter().map(String::as_str)).collect::<Vec<_>>().join(" ")
+        }
+        Transport::Http { url, .. } => url.clone(),
     }
 }
 

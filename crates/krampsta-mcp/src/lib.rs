@@ -32,7 +32,7 @@ pub mod config;
 mod servers;
 
 pub use config::{ConfigError, ServerConfig};
-pub use servers::{McpServers, PREFIX, ServerState, ToolSet, tool_name};
+pub use servers::{McpServers, PREFIX, ToolSet, tool_name};
 
 #[doc(hidden)]
 pub mod fake;

@@ -115,6 +115,8 @@ pub struct KrampstaApp {
     pub(crate) prefs: PrefsSync,
     /// Turns a folder into tools. None: folders can't be opened (tests, scenes).
     pub(crate) opener: Option<Arc<dyn ProjectOpener>>,
+    /// The MCP servers, as Settings shows them.
+    pub servers: crate::servers::ServerList,
     /// Reads pasted and saved images off the UI thread.
     pub(crate) images: crate::images::Images,
     ids: IdGen,
@@ -260,6 +262,7 @@ impl KrampstaApp {
             price_scratch: TextEdit::new(""),
             prefs: PrefsSync::default(),
             opener: None,
+            servers: crate::servers::ServerList::default(),
             images: crate::images::Images::default(),
             ids,
             window_width: None,
@@ -281,6 +284,7 @@ impl KrampstaApp {
     /// Wakes the window when agent events arrive.
     pub fn set_notifier(&mut self, notify: Notifier) {
         self.set_images_notifier(notify.clone());
+        self.set_servers_notifier(notify.clone());
         self.agent.set_notifier(notify);
     }
 
@@ -415,6 +419,7 @@ impl KrampstaApp {
         let (writes_changed, mut panel_dirty) = self.land_writes(writes);
         changed |= writes_changed;
         changed |= self.land_images();
+        changed |= self.land_servers();
         for e in self.agent.drain() {
             match e.event {
                 // A proposal outlives its run: the tools already build on it.

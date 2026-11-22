@@ -41,13 +41,14 @@ impl ProjectOpener for Opener {
 /// The MCP servers in `mcp.json`, connecting in the background, and why they couldn't be, if
 /// so (Krampsta then runs without them and says so).
 fn mcp() -> (Option<Arc<McpServers>>, Option<String>) {
-    let (configs, problem) = match krampsta_mcp::config::default_file().map(|f| krampsta_mcp::config::load(&f)) {
+    let file = krampsta_mcp::config::default_file();
+    let (configs, problem) = match file.as_deref().map(krampsta_mcp::config::load) {
         Some(Ok(configs)) => (configs, None),
         Some(Err(e)) => (Vec::new(), Some(e.to_string())),
         None => (Vec::new(), None),
     };
-    // Their tools join the runs that start after they are ready: nothing to redraw yet.
-    match McpServers::start(configs, Arc::new(|| {})) {
+    // Their tools join the runs that start after they are ready; Settings shows where each is.
+    match McpServers::start(configs, file) {
         Ok(servers) => (Some(servers), problem),
         Err(e) => (None, Some(format!("the MCP servers can't start: {e}"))),
     }
@@ -126,6 +127,9 @@ fn main() {
                 return app.with_opener(Arc::new(WorkspaceOpener)).with_sample_project().with_sample_sessions();
             }
             let (mcp, mcp_problem) = mcp();
+            if let Some(servers) = &mcp {
+                app = app.with_servers(servers.clone());
+            }
             let opener = mcp.map(|mcp| Arc::new(Opener { mcp }));
             app = match &opener {
                 Some(opener) => app.with_opener(opener.clone()),

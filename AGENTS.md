@@ -9,7 +9,9 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `Session::apply` es la única forma de cambiar una sesión a partir de eventos.
 - `crates/krampsta-agent` — `AgentEngine` (contrato), `RunContext`, `AgentHost` (tokio, canal +
   notificador, cambio de motor, listas de modelos en segundo plano), `EngineCatalog` (qué
-  proveedores y modelos hay, cómo construir un motor), `MockAgent`, `MockCatalog`. No depende de Rune.
+  proveedores y modelos hay, cómo construir un motor), `MockAgent`, `MockCatalog`, `ToolServers`
+  (cómo ve la UI los servidores MCP: estado por servidor y versión; `FixedServers` para escenas y
+  tests). No depende de Rune.
 - `crates/krampsta-providers` — motores reales: `sse` (parser), `http` (cliente `reqwest`, petición
   SSE cancelable, `HttpError`), `access` (URL + cabeceras por petición: clave fija o token de
   cuenta), `OpenAiEngine`, `responses` (motor de la API Responses), `list_models`, `copilot`
@@ -56,6 +58,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `tabs.rs` (sesiones abiertas en pestañas sobre el chat, `TabStrip` de rune-kit; la activa es
   la seleccionada; la última no se cierra; Ctrl+W), `costs.rs` (coste por sesión: tokens por modelo, `Session::by_model`, por los precios por
   millón que pone el usuario; sólo proveedores `Cloud`, sin precios de serie),
+  `servers.rs` (los servidores MCP en Ajustes, desde `ToolServers`: la lista se copia en `pump`
+  sólo cuando cambia su versión; un servidor que falla lo avisa en el composer),
   `images.rs` (imágenes pegadas y de los mensajes: se decodifican en un hilo propio y llegan por
   `pump` a `SessionView`; nunca en `view`; sólo se envían si `Provider::images`),
   `changes.rs` (revisar los cambios

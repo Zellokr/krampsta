@@ -192,3 +192,14 @@ pub fn pane_close(index: usize) -> String {
 }
 /// The toolbar button that opens or closes the split.
 pub const SPLIT_TOGGLE: &str = "krampsta-split-toggle";
+
+/// The MCP servers in Settings: one card each, its state, and the card shown when there are none.
+pub const MCP_SERVERS_EMPTY: &str = "krampsta-mcp-servers-empty";
+
+pub fn mcp_server(name: &str) -> String {
+    format!("krampsta-mcp-server-{name}")
+}
+
+pub fn mcp_server_state(name: &str) -> String {
+    format!("krampsta-mcp-server-state-{name}")
+}

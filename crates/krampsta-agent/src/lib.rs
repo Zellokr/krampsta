@@ -9,6 +9,7 @@
 //!   [`Notifier`] (Rune's `Waker` fits it), so the UI thread never blocks.
 //! - [`SessionStore`] is where sessions outlive the window (`krampsta-store` writes them to
 //!   disk); like the host, it never blocks the UI thread.
+//! - [`ToolServers`] is how the UI sees the MCP servers (`krampsta-mcp` connects them).
 //!
 //! This crate knows nothing about the UI framework.
 
@@ -17,6 +18,7 @@ mod engine;
 mod host;
 mod mock;
 mod projects;
+mod servers;
 mod store;
 mod tools;
 
@@ -36,6 +38,7 @@ pub use host::{AccountEvent, ModelList, Written};
 pub use mock::MockAgent;
 pub use mock::MockConfig;
 pub use projects::{OpenedProject, ProjectOpened, ProjectOpener, project_name};
+pub use servers::{FixedServers, ServerState, ServerStatus, ToolServers};
 pub use store::{History, MemoryStore, SessionStore};
 pub use tokio_util::sync::CancellationToken;
 pub use tools::{Access, Approval, Call, Decision, ToolOutput, ToolSpec, Toolbox};

@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use krampsta_agent::{Access, Approval, Call, ToolOutput, ToolSpec, Toolbox};
-use krampsta_mcp::{McpServers, ServerConfig, ServerState, ToolSet, Transport};
+use krampsta_agent::{Access, Approval, Call, ServerState, ToolOutput, ToolServers, ToolSpec, Toolbox};
+use krampsta_mcp::{McpServers, ServerConfig, ToolSet, Transport};
 use krampsta_tools::Permissions;
 use tokio_util::sync::CancellationToken;
 
@@ -45,9 +45,11 @@ fn started() -> (Arc<McpServers>, Arc<AtomicUsize>) {
     let changes = Arc::new(AtomicUsize::new(0));
     let counter = changes.clone();
     let configs = vec![server("fake", &[], false), server("broken", &["--crash"], false), server("off", &[], true)];
-    let servers = McpServers::start(configs, Arc::new(move || _ = counter.fetch_add(1, Ordering::SeqCst))).unwrap();
+    let servers = McpServers::start(configs, Some("mcp.json".into())).unwrap();
+    // As the window does in `setup`: a process takes longer to start than this takes.
+    servers.set_notifier(Arc::new(move || _ = counter.fetch_add(1, Ordering::SeqCst)));
     let deadline = Instant::now() + Duration::from_secs(20);
-    while servers.statuses().iter().any(|(_, s)| matches!(s, ServerState::Connecting)) {
+    while servers.statuses().iter().any(|s| s.state == ServerState::Connecting) {
         assert!(Instant::now() < deadline, "the servers never finished connecting");
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -62,15 +64,22 @@ fn call(tools: &ToolSet, name: &str, arguments: &str) -> Result<ToolOutput, Stri
 #[test]
 fn a_servers_tools_join_the_projects_and_ask_before_running() {
     let (servers, changes) = started();
-    assert_eq!(changes.load(Ordering::SeqCst), 2, "one wake per server that finished connecting");
+    assert_eq!(servers.version(), 2, "one change per server that finished connecting");
+    assert_eq!(changes.load(Ordering::SeqCst), 2, "and a wake for each");
+    assert_eq!(servers.config_file(), Some(std::path::Path::new("mcp.json")));
     let statuses = servers.statuses();
-    assert!(matches!(&statuses[0], (name, ServerState::Ready { tools, .. }) if name == "fake" && tools.len() == 5));
+    assert_eq!(statuses[0].name, "fake");
     assert!(
-        matches!(&statuses[1], (name, ServerState::Failed(why)) if name == "broken" && why.contains("missing FAKE_TOKEN")),
+        statuses[0].reached.ends_with("krampsta-fake-mcp.exe") || statuses[0].reached.ends_with("krampsta-fake-mcp")
+    );
+    assert!(matches!(&statuses[0].state, ServerState::Ready { tools } if tools.len() == 5 && tools[0] == "echo"));
+    assert!(statuses[1].reached.ends_with(" --crash"), "its arguments too: {}", statuses[1].reached);
+    assert!(
+        matches!(&statuses[1].state, ServerState::Failed(why) if why.contains("missing FAKE_TOKEN")),
         "{:?}",
         statuses[1]
     );
-    assert!(matches!(&statuses[2], (_, ServerState::Disabled)));
+    assert_eq!(statuses[2].state, ServerState::Disabled);
 
     let tools = ToolSet::new(Some(Arc::new(Local)), servers);
     let specs = tools.specs();
