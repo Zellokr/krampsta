@@ -18,7 +18,7 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
 - `crates/krampsta-tools` — las herramientas del agente sobre la carpeta del proyecto
   (`Workspace`, un `Toolbox`): `project` (ninguna ruta sale de la carpeta), `read_file`,
   `list_files`, `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
-  propone, y la escritura al aceptar), `command` (`run_command`), `policy` (reglas de permisos),
+  propone, y la escritura al aceptar), `command` (`run_command`), `policy` y `permissions` (reglas de permisos: comandos y herramientas),
   `snapshot` (copia desechable con las ediciones pendientes para `run_command` con `pending: true`;
   Cargo compila en la caché del usuario, `check-target`; no es un sandbox).
   No depende de Rune.
@@ -32,7 +32,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   Claude Desktop), `McpServers` (conecta en segundo plano en su propio runtime tokio; las
   herramientas de un servidor listo entran en las ejecuciones siguientes como
   `mcp__<servidor>__<herramienta>`) y `ToolSet` (el `Toolbox` que recibe el agente: el del
-  proyecto más los servidores; una herramienta MCP siempre pregunta). La app envuelve con
+  proyecto más los servidores; una herramienta MCP sigue las reglas `tools` y, sin regla, pregunta).
+  La app envuelve con
   `ToolSet` cada proyecto que abre. No depende
   de Rune; sólo de `krampsta-agent`.
 - `crates/krampsta-store` — historial en disco: `FileStore` (implementa `SessionStore` de
@@ -135,7 +136,12 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   `AgentHost::answer`; «siempre» guarda la regla con `Toolbox::remember`. Las reglas viven en
   `permissions.json` (carpeta de configuración del usuario); `deny` gana y mira cada parte de un
   comando encadenado; una regla `*` de `allow` sólo cubre comandos simples. Cada comando deja una
-  línea en `commands.log` (qué, dónde, quién lo permitió, cómo acabó).
+  línea en `commands.log` (qué, dónde, quién lo permitió, cómo acabó). Las herramientas que no
+  son comandos ni del `Workspace` (las de un servidor MCP) siguen `tools` (`allow`/`deny` por
+  nombre o prefijo `*`): las aplica el `Workspace` o, sin carpeta, `Permissions` (un `Toolbox`
+  sin herramientas). Para un nombre `mcp__…`, la `ToolSet` toma un `NotNeeded` como `Ask`: un
+  toolbox que no conoce la herramienta nunca la deja pasar sin preguntar. Si `permissions.json`
+  no se puede leer, todo pregunta y nada se guarda encima.
 - `run_command` corre como árbol de procesos que se mata entero (Job Object / grupo de procesos,
   con `process-wrap`) al vencer el tiempo, al cancelar o al salir su shell. La salida va a la UI
   por lotes (`Call::output`, cada 50 ms o 16 KB) y al modelo como cabeza + cola acotadas.

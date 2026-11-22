@@ -142,8 +142,9 @@ fn main() {
                 (Err(why), opener) => {
                     eprintln!("krampsta: {why}; the agent runs without the project's tools until a folder is opened");
                     if let Some(opener) = opener {
-                        // The MCP servers' tools work without a folder.
-                        app = app.with_tools(Arc::new(ToolSet::new(None, opener.mcp.clone())));
+                        // The MCP servers' tools work without a folder, under the same rules.
+                        let rules = Arc::new(krampsta_tools::Permissions::open());
+                        app = app.with_tools(Arc::new(ToolSet::new(Some(rules), opener.mcp.clone())));
                     }
                     app.notice = Some(why);
                 }

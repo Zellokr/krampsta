@@ -31,6 +31,8 @@ thiserror.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["process", "io-util", "rt-multi-thread", "macros", "net"] }
 tempfile = "3"
+# The real permission rules, for the registry's tests.
+krampsta-tools.workspace = true
 
 # CREATE_NO_WINDOW: no console flashes up behind the app; the same version process-wrap uses.
 [target.'cfg(windows)'.dependencies]

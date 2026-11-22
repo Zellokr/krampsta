@@ -4,7 +4,8 @@
 //! runtime of its own; each server's tools join the registry once it is ready, as
 //! `mcp__<server>__<tool>`, for the runs that start after. [`ToolSet`] is the [`Toolbox`] the
 //! agent gets: the project's own tools and the servers' together. Calls to a server's tools
-//! always ask first (an "always" lasts until Krampsta closes).
+//! follow the user's tool rules in `permissions.json`, through the local toolbox (the
+//! project's `Workspace`, or `Permissions` when no folder is open): without a rule, they ask.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -43,8 +44,6 @@ pub struct McpServers {
     servers: Arc<RwLock<Vec<Server>>>,
     /// Grows whenever a server's state changes, so the registry knows to rebuild.
     version: Arc<AtomicU64>,
-    /// Tools the user allowed "always", until Krampsta closes.
-    allowed: Mutex<HashSet<String>>,
 }
 
 impl std::fmt::Debug for McpServers {
@@ -87,7 +86,7 @@ impl McpServers {
                 changed();
             });
         }
-        Ok(Arc::new(McpServers { runtime: Some(runtime), servers, version, allowed: Mutex::default() }))
+        Ok(Arc::new(McpServers { runtime: Some(runtime), servers, version }))
     }
 
     /// No servers (headless runs, tests).
@@ -157,9 +156,6 @@ impl McpServers {
 
     /// What the user is asked about a call: the server, the tool and its arguments.
     fn ask(&self, name: &str, arguments: &str) -> Access {
-        if self.allowed.lock().unwrap_or_else(PoisonError::into_inner).contains(name) {
-            return Access::Allow(Approval::Always);
-        }
         let shown = match self.find(name) {
             Some((server, _, tool)) => format!("{tool} on the MCP server `{server}`"),
             None => name.to_owned(),
@@ -235,19 +231,29 @@ impl Toolbox for ToolSet {
         }
     }
 
+    /// The user's rules decide (the local toolbox holds them); a call that asks shows its
+    /// server, tool and arguments. Without rules, every MCP call asks.
     fn check(&self, name: &str, arguments: &str) -> Access {
-        if name.starts_with(PREFIX) {
-            return self.mcp.ask(name, arguments);
+        let access = match &self.local {
+            Some(local) => local.check(name, arguments),
+            None if name.starts_with(PREFIX) => Access::Ask { what: name.to_owned() },
+            None => Access::Allow(Approval::NotNeeded),
+        };
+        match access {
+            // A server's tool always needs permission: a toolbox that doesn't know it (the
+            // trait's default) never lets it through unasked.
+            Access::Ask { .. } | Access::Allow(Approval::NotNeeded) if name.starts_with(PREFIX) => {
+                self.mcp.ask(name, arguments)
+            }
+            access => access,
         }
-        self.local.as_ref().map_or(Access::Allow(Approval::NotNeeded), |l| l.check(name, arguments))
     }
 
     fn remember(&self, name: &str, arguments: &str) -> Result<(), String> {
-        if name.starts_with(PREFIX) {
-            self.mcp.allowed.lock().unwrap_or_else(PoisonError::into_inner).insert(name.to_owned());
-            return Ok(());
+        match &self.local {
+            Some(local) => local.remember(name, arguments),
+            None => Err("there are no rules to keep it in".into()),
         }
-        self.local.as_ref().map_or(Ok(()), |l| l.remember(name, arguments))
     }
 
     fn write(&self, path: &str, expected: Option<&str>, content: &str) -> Result<(), String> {

@@ -2067,6 +2067,7 @@ dependencies = [
  "dirs",
  "http",
  "krampsta-agent",
+ "krampsta-tools",
  "process-wrap",
  "rmcp",
  "serde",

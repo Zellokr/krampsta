@@ -9,6 +9,7 @@ mod command;
 mod edit;
 mod list;
 mod overlay;
+mod permissions;
 mod policy;
 mod project;
 mod read;
@@ -17,13 +18,14 @@ mod snapshot;
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::Arc;
 
 use krampsta_agent::{Access, Approval, Call, OpenedProject, ProjectOpener, ToolOutput, ToolSpec, Toolbox};
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
-pub use policy::Policy;
+pub use permissions::Permissions;
+pub use policy::{Policy, ToolRules};
 pub use project::Project;
 
 /// Opens projects as [`Workspace`]s, with the user's rules from their config folder.
@@ -51,10 +53,8 @@ pub struct Workspace {
     project: Project,
     specs: Arc<[ToolSpec]>,
     pending: edit::Pending,
-    policy: RwLock<Policy>,
-    /// Krampsta's config folder: `permissions.json` and `commands.log`. None: rules can't be
-    /// saved and nothing is logged.
-    config: Option<PathBuf>,
+    /// The user's rules; their config folder also holds `commands.log` (None: nothing logged).
+    rules: Permissions,
     /// Where Cargo builds when a command checks the pending edits (`pending: true`), kept
     /// between checks. None: in the throwaway copy.
     check_target: Option<PathBuf>,
@@ -80,21 +80,11 @@ impl Workspace {
 
     /// Tools over `root` whose rules and log live in `config` (tests pass a temporary folder).
     pub fn open_with(root: impl AsRef<Path>, config: Option<PathBuf>) -> std::io::Result<Self> {
-        let policy = match config.as_deref().map(|c| Policy::load(&c.join("permissions.json"))) {
-            Some(Ok(policy)) => policy,
-            Some(Err(e)) => {
-                // With no rules every command asks: safe, if tedious, until the file is fixed.
-                eprintln!("krampsta: {e}");
-                Policy::default()
-            }
-            None => Policy::default(),
-        };
         Ok(Workspace {
             project: Project::open(root)?,
             specs: specs(),
             pending: edit::Pending::default(),
-            policy: RwLock::new(policy),
-            config,
+            rules: Permissions::open_with(config),
             check_target: None,
         })
     }
@@ -142,7 +132,7 @@ impl Workspace {
 
     /// Appends one line to `commands.log`: when, where, what ran, who allowed it, how it ended.
     fn log(&self, command: &str, pending: bool, approval: &Approval, outcome: &command::Outcome) {
-        let Some(config) = &self.config else { return };
+        let Some(config) = self.rules.config() else { return };
         let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let entry = json!({
             "at": at,
@@ -179,28 +169,34 @@ impl Toolbox for Workspace {
         }
     }
 
+    /// Commands follow the command rules; the other tools here only read or propose. A tool
+    /// that isn't one of these (an MCP server's, through a `ToolSet`) follows the tool rules.
     fn check(&self, name: &str, arguments: &str) -> Access {
-        match (name, parse::<command::Args>(arguments)) {
-            ("run_command", Ok(args)) => {
-                match self.policy.read().unwrap_or_else(PoisonError::into_inner).check(&args.command) {
+        if name == "run_command" {
+            return match parse::<command::Args>(arguments) {
+                Ok(args) => match self.rules.check_command(&args.command) {
                     Access::Ask { what } if args.pending => Access::Ask { what: format!("{what} (pending edits)") },
                     access => access,
-                }
-            }
-            // Bad arguments fail in `run`, before anything runs.
-            _ => Access::Allow(Approval::NotNeeded),
+                },
+                // Bad arguments fail in `run`, before anything runs.
+                Err(_) => Access::Allow(Approval::NotNeeded),
+            };
         }
+        if self.specs.iter().any(|s| s.name == name) {
+            return Access::Allow(Approval::NotNeeded);
+        }
+        self.rules.check_tool(name)
     }
 
     fn remember(&self, name: &str, arguments: &str) -> Result<(), String> {
-        let ("run_command", Ok(args)) = (name, parse::<command::Args>(arguments)) else { return Ok(()) };
-        let rules = {
-            let mut policy = self.policy.write().unwrap_or_else(PoisonError::into_inner);
-            policy.allow(&args.command);
-            policy.clone()
-        };
-        let config = self.config.as_ref().ok_or("there is no config folder to keep the rule in")?;
-        rules.save(&config.join("permissions.json"))
+        if name == "run_command" {
+            let Ok(args) = parse::<command::Args>(arguments) else { return Ok(()) };
+            return self.rules.allow_command(&args.command);
+        }
+        if self.specs.iter().any(|s| s.name == name) {
+            return Ok(());
+        }
+        self.rules.allow_tool(name)
     }
 
     fn write(&self, path: &str, expected: Option<&str>, content: &str) -> Result<(), String> {
@@ -490,6 +486,21 @@ mod tests {
         tools.set_pending("src/lib.rs", None);
         let refused = tools.run("run_command", &proposed, &call).unwrap_err();
         assert!(refused.contains("no pending edits"), "{refused}");
+    }
+
+    #[test]
+    fn its_own_tools_never_ask_and_anyone_elses_follow_the_tool_rules() {
+        let (_d, config, tools) = workspace(&[]);
+        for own in ["read_file", "list_files", "search", "edit_file"] {
+            assert_eq!(tools.check(own, "{}"), Access::Allow(Approval::NotNeeded), "{own}");
+        }
+        let mcp = "mcp__github__create_issue";
+        assert_eq!(tools.check(mcp, "{}"), Access::Ask { what: mcp.into() });
+        tools.remember(mcp, "{}").unwrap();
+        assert_eq!(tools.check(mcp, "{}"), Access::Allow(Approval::Rule(mcp.into())));
+        let saved = Policy::load(&config.path().join("permissions.json")).unwrap();
+        assert_eq!(saved.tools.allow, [mcp]);
+        assert!(saved.allow.is_empty(), "not a command rule");
     }
 
     #[test]

@@ -49,8 +49,10 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   de cualquiera de ellos sirve tal cual. Por stdio (`command`, `args`, `env`) o por HTTP
   (`"type": "http"`, `url`, `headers`); `"disabled": true` lo deja sin arrancar. Conectan en
   segundo plano al abrir Krampsta y sus herramientas, `mcp__<servidor>__<herramienta>`, entran en
-  las ejecuciones siguientes, también sin carpeta abierta. Cada llamada pide permiso; «Allow
-  until Krampsta closes» dura hasta cerrar la app. Un servidor por stdio sólo hereda las
+  las ejecuciones siguientes, también sin carpeta abierta. Cada llamada sigue las reglas de
+  herramientas de `permissions.json` (`"tools": {"allow": ["mcp__github__get_*"], "deny": […]}`:
+  un nombre o un prefijo con `*`; `deny` gana) y, sin regla, pide permiso; «Always allow» guarda
+  la regla para esa herramienta. Un servidor por stdio sólo hereda las
   variables básicas del sistema más las suyas, nunca las claves de Krampsta.
   ```json
   {"mcpServers": {

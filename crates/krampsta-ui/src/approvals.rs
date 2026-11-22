@@ -118,13 +118,7 @@ pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
     ));
     if !applying {
         actions = actions
-            // An MCP tool's "always" isn't saved between launches yet.
-            .child(button(
-                if command { "Always allow" } else { "Allow until Krampsta closes" },
-                ButtonVariant::Outline,
-                Decision::Always,
-                keys::APPROVAL_ALWAYS,
-            ))
+            .child(button("Always allow", ButtonVariant::Outline, Decision::Always, keys::APPROVAL_ALWAYS))
             .child(button("Allow once", ButtonVariant::Contrast, Decision::Once, keys::APPROVAL_ONCE));
     }
     if show_apply {

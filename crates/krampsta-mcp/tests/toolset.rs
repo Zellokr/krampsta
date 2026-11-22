@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use krampsta_agent::{Access, Approval, Call, ToolOutput, ToolSpec, Toolbox};
 use krampsta_mcp::{McpServers, ServerConfig, ServerState, ToolSet, Transport};
+use krampsta_tools::Permissions;
 use tokio_util::sync::CancellationToken;
 
 /// The project's own tools, as far as this test cares: one that answers "local".
@@ -88,10 +89,31 @@ fn a_servers_tools_join_the_projects_and_ask_before_running() {
     assert_eq!(call(&tools, "mcp__fake__echo", r#"{"text": "hi"}"#).unwrap().text, "hi");
     assert_eq!(call(&tools, "mcp__fake__fail", "{}"), Err("it failed on purpose".into()));
     assert_eq!(call(&tools, "read_file", "{}").unwrap().text, "local");
+    // `Local` says nothing about MCP tools (the trait's default allows): they still ask.
+    assert!(matches!(tools.check("mcp__fake__fail", "{}"), Access::Ask { .. }));
+}
 
-    tools.remember("mcp__fake__echo", "{}").unwrap();
-    assert_eq!(tools.check("mcp__fake__echo", "{}"), Access::Allow(Approval::Always));
-    assert!(matches!(tools.check("mcp__fake__fail", "{}"), Access::Ask { .. }), "only the tool allowed");
+#[test]
+fn the_users_rules_decide_and_always_is_saved() {
+    let (servers, _) = started();
+    let config = tempfile::tempdir().unwrap();
+    std::fs::write(
+        config.path().join("permissions.json"),
+        r#"{"tools": {"allow": ["mcp__fake__e*"], "deny": ["mcp__fake__fail"]}}"#,
+    )
+    .unwrap();
+    let rules = || Arc::new(Permissions::open_with(Some(config.path().to_owned())));
+    let tools = ToolSet::new(Some(rules()), servers.clone());
+    assert_eq!(tools.check("mcp__fake__echo", "{}"), Access::Allow(Approval::Rule("mcp__fake__e*".into())));
+    assert!(matches!(tools.check("mcp__fake__fail", "{}"), Access::Deny(why) if why.contains("mcp__fake__fail")));
+    assert!(
+        matches!(tools.check("mcp__fake__big", "{}"), Access::Ask { what } if what.starts_with("big on the MCP server"))
+    );
+
+    tools.remember("mcp__fake__big", "{}").unwrap();
+    assert_eq!(tools.check("mcp__fake__big", "{}"), Access::Allow(Approval::Rule("mcp__fake__big".into())));
+    let reopened = ToolSet::new(Some(rules()), servers);
+    assert!(matches!(reopened.check("mcp__fake__big", "{}"), Access::Allow(_)), "kept between launches");
 }
 
 #[test]

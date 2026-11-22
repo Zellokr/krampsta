@@ -10,6 +10,13 @@
 //! another. A `*` rule in `allow` only covers a plain command: one with chaining, pipes,
 //! redirections or substitutions asks, so `cargo test*` never lets `cargo test && rm -rf ~` through.
 //! An exact rule covers exactly its line, chained or not ("Always allow" saves those).
+//!
+//! `tools` holds the rules for tools that aren't commands (an MCP server's): a tool's name, or
+//! a prefix ending in `*`. `deny` wins; a tool no rule covers asks.
+//!
+//! ```json
+//! { "tools": { "allow": ["mcp__github__get_*"], "deny": ["mcp__github__delete_repo"] } }
+//! ```
 
 use std::path::{Path, PathBuf};
 
@@ -25,6 +32,24 @@ pub struct Policy {
     pub allow: Vec<String>,
     #[serde(default)]
     pub deny: Vec<String>,
+    /// The rules for tools that aren't commands.
+    #[serde(default, skip_serializing_if = "ToolRules::is_empty")]
+    pub tools: ToolRules,
+}
+
+/// Which tools (by name) run without asking, and which never run.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolRules {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny: Vec<String>,
+}
+
+impl ToolRules {
+    fn is_empty(&self) -> bool {
+        self.allow.is_empty() && self.deny.is_empty()
+    }
 }
 
 impl Policy {
@@ -70,12 +95,39 @@ impl Policy {
         Access::Ask { what: command.to_owned() }
     }
 
+    /// Whether the tool `name` (not a command) runs, asks or is refused.
+    pub fn check_tool(&self, name: &str) -> Access {
+        if let Some(rule) = self.tools.deny.iter().find(|rule| tool_matches(rule, name)) {
+            return Access::Deny(format!("a rule in permissions.json forbids it (`{rule}`)"));
+        }
+        match self.tools.allow.iter().find(|rule| tool_matches(rule, name)) {
+            Some(rule) => Access::Allow(Approval::Rule(rule.clone())),
+            None => Access::Ask { what: name.to_owned() },
+        }
+    }
+
+    /// Allows the tool `name` from now on (an exact rule).
+    pub fn allow_tool(&mut self, name: &str) {
+        if !self.tools.allow.iter().any(|r| r == name) {
+            self.tools.allow.push(name.to_owned());
+        }
+    }
+
     /// Allows `command` from now on, as written (an exact rule).
     pub fn allow(&mut self, command: &str) {
         let command = command.trim();
         if !self.allow.iter().any(|r| r == command) {
             self.allow.push(command.to_owned());
         }
+    }
+}
+
+/// Whether `rule` covers the tool `name`: the same name, or one starting with a `*` rule's prefix.
+fn tool_matches(rule: &str, name: &str) -> bool {
+    let rule = rule.trim();
+    match rule.strip_suffix('*') {
+        Some(prefix) => name.starts_with(prefix),
+        None => name == rule,
     }
 }
 
@@ -102,7 +154,43 @@ mod tests {
         Policy {
             allow: vec!["cargo test*".into(), "git status".into()],
             deny: vec!["rm -rf*".into(), "git push*".into()],
+            tools: ToolRules {
+                allow: vec!["mcp__github__get_*".into(), "mcp__docs__search".into()],
+                deny: vec!["mcp__github__get_secret".into()],
+            },
         }
+    }
+
+    #[test]
+    fn tool_rules_allow_by_name_or_prefix_and_deny_wins() {
+        let p = policy();
+        let rule = |r: &str| Access::Allow(Approval::Rule(r.into()));
+        assert_eq!(p.check_tool("mcp__github__get_issue"), rule("mcp__github__get_*"));
+        assert_eq!(p.check_tool("mcp__docs__search"), rule("mcp__docs__search"));
+        assert!(matches!(p.check_tool("mcp__github__get_secret"), Access::Deny(why) if why.contains("get_secret")));
+        assert_eq!(p.check_tool("mcp__github__create_issue"), Access::Ask { what: "mcp__github__create_issue".into() });
+        assert!(
+            matches!(p.check_tool("mcp__docs__search_all"), Access::Ask { .. }),
+            "an exact rule covers itself only"
+        );
+        // Command rules and tool rules never cover each other.
+        assert!(matches!(p.check_tool("git status"), Access::Ask { .. }));
+        assert!(matches!(p.check("mcp__docs__search"), Access::Ask { .. }));
+    }
+
+    #[test]
+    fn allowing_a_tool_is_saved_beside_the_commands_and_old_files_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("permissions.json");
+        std::fs::write(&path, r#"{"allow": ["git status"]}"#).unwrap();
+        let mut p = Policy::load(&path).unwrap();
+        assert!(p.tools.allow.is_empty(), "a file from before tool rules reads as none");
+        p.allow_tool("mcp__docs__search");
+        p.allow_tool("mcp__docs__search");
+        p.save(&path).unwrap();
+        let back = Policy::load(&path).unwrap();
+        assert_eq!(back.allow, ["git status"]);
+        assert_eq!(back.tools.allow, ["mcp__docs__search"]);
     }
 
     #[test]
