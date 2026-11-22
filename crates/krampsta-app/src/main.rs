@@ -14,10 +14,44 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use krampsta_agent::{EngineCatalog, MockCatalog, MockConfig, OpenedProject, SessionStore};
+use krampsta_agent::{EngineCatalog, MockCatalog, MockConfig, OpenedProject, ProjectOpener, SessionStore};
+use krampsta_mcp::{McpServers, ToolSet};
 use krampsta_tools::WorkspaceOpener;
 use krampsta_ui::KrampstaApp;
 use krampsta_ui::prefs::Prefs;
+
+/// Opens a folder as the project, its tools joined by the MCP servers'.
+struct Opener {
+    mcp: Arc<McpServers>,
+}
+
+impl Opener {
+    fn wrap(&self, project: OpenedProject) -> OpenedProject {
+        let tools = Arc::new(ToolSet::new(Some(project.tools), self.mcp.clone()));
+        OpenedProject { root: project.root, tools }
+    }
+}
+
+impl ProjectOpener for Opener {
+    fn open(&self, root: &Path) -> Result<OpenedProject, String> {
+        WorkspaceOpener.open(root).map(|project| self.wrap(project))
+    }
+}
+
+/// The MCP servers in `mcp.json`, connecting in the background, and why they couldn't be, if
+/// so (Krampsta then runs without them and says so).
+fn mcp() -> (Option<Arc<McpServers>>, Option<String>) {
+    let (configs, problem) = match krampsta_mcp::config::default_file().map(|f| krampsta_mcp::config::load(&f)) {
+        Some(Ok(configs)) => (configs, None),
+        Some(Err(e)) => (Vec::new(), Some(e.to_string())),
+        None => (Vec::new(), None),
+    };
+    // Their tools join the runs that start after they are ready: nothing to redraw yet.
+    match McpServers::start(configs, Arc::new(|| {})) {
+        Ok(servers) => (Some(servers), problem),
+        Err(e) => (None, Some(format!("the MCP servers can't start: {e}"))),
+    }
+}
 
 fn catalog() -> Arc<dyn EngineCatalog> {
     match krampsta_providers::Catalog::from_env() {
@@ -84,23 +118,39 @@ fn main() {
     rune::App::new(krampsta_ui::spec())
         .chrome(krampsta_ui::chrome())
         .init(|| {
-            let mut app = KrampstaApp::new(catalog()).with_opener(Arc::new(WorkspaceOpener));
+            let mut app = KrampstaApp::new(catalog());
             if rune::is_headless() {
                 // Stills show the same folder and defaults on every machine, and neither read nor
-                // add to this one's history or settings; the simulated agent needs no tools.
-                return app.with_sample_project().with_sample_sessions();
+                // add to this one's history, settings or MCP servers; the simulated agent needs no
+                // tools.
+                return app.with_opener(Arc::new(WorkspaceOpener)).with_sample_project().with_sample_sessions();
             }
+            let (mcp, mcp_problem) = mcp();
+            let opener = mcp.map(|mcp| Arc::new(Opener { mcp }));
+            app = match &opener {
+                Some(opener) => app.with_opener(opener.clone()),
+                None => app.with_opener(Arc::new(WorkspaceOpener)),
+            };
             let settings = krampsta_store::default_settings_file();
             let (prefs, problem) = match prefs(settings.as_deref()) {
                 Ok(prefs) => (prefs, None),
                 Err(why) => (Prefs::default(), Some(why)),
             };
-            match project(prefs.project.as_deref()) {
-                Ok(project) => app = app.with_project(project),
-                Err(why) => {
-                    eprintln!("krampsta: {why}; the agent runs without tools until a folder is opened");
+            match (project(prefs.project.as_deref()), &opener) {
+                (Ok(project), Some(opener)) => app = app.with_project(opener.wrap(project)),
+                (Ok(project), None) => app = app.with_project(project),
+                (Err(why), opener) => {
+                    eprintln!("krampsta: {why}; the agent runs without the project's tools until a folder is opened");
+                    if let Some(opener) = opener {
+                        // The MCP servers' tools work without a folder.
+                        app = app.with_tools(Arc::new(ToolSet::new(None, opener.mcp.clone())));
+                    }
                     app.notice = Some(why);
                 }
+            }
+            if let Some(why) = mcp_problem {
+                eprintln!("krampsta: {why}");
+                app.notice = Some(why);
             }
             if let Some(store) = store(settings.as_deref()) {
                 app = app.with_store(store);

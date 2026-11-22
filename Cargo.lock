@@ -2043,6 +2043,7 @@ version = "0.1.0"
 dependencies = [
  "krampsta-agent",
  "krampsta-core",
+ "krampsta-mcp",
  "krampsta-providers",
  "krampsta-store",
  "krampsta-tools",
@@ -2063,11 +2064,14 @@ dependencies = [
 name = "krampsta-mcp"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "http",
+ "krampsta-agent",
  "process-wrap",
  "rmcp",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",

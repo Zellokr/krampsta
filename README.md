@@ -44,6 +44,20 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   (`krampsta/check-target`), así que la siguiente comprobación no recompila las dependencias.
   Se aplican los mismos permisos: la copia temporal cambia la carpeta de trabajo del comando,
   pero **no** lo aísla del sistema.
+- **Servidores MCP**: los de `mcp.json`, en la carpeta de configuración (`%APPDATA%\krampsta`
+  en Windows), con el formato `mcpServers` de Claude Desktop, Claude Code o Cursor: un archivo
+  de cualquiera de ellos sirve tal cual. Por stdio (`command`, `args`, `env`) o por HTTP
+  (`"type": "http"`, `url`, `headers`); `"disabled": true` lo deja sin arrancar. Conectan en
+  segundo plano al abrir Krampsta y sus herramientas, `mcp__<servidor>__<herramienta>`, entran en
+  las ejecuciones siguientes, también sin carpeta abierta. Cada llamada pide permiso; «Allow
+  until Krampsta closes» dura hasta cerrar la app. Un servidor por stdio sólo hereda las
+  variables básicas del sistema más las suyas, nunca las claves de Krampsta.
+  ```json
+  {"mcpServers": {
+    "everything": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything"]},
+    "docs": {"type": "http", "url": "https://example.com/mcp", "headers": {"Authorization": "Bearer …"}}
+  }}
+  ```
 - **Responsive**: al estrechar la ventana se pliegan los paneles laterales (primero el de
   cambios, después la sidebar) y vuelven a abrirse al ensancharla.
 - Atajos: `Ctrl+N`/`⌘N` nueva sesión, `Ctrl+Shift+B`/`⇧⌘B` sidebar, `Ctrl+J`/`⌘J` cambios,
@@ -115,7 +129,8 @@ krampsta-app ──▶ krampsta-store ──────▶ krampsta-agent
   servidor como proceso (stdio; árbol que se mata entero, sin consola, y el final de su stderr
   explica por qué no arrancó) o lo alcanza por Streamable HTTP (cabeceras y token Bearer);
   `tools` lista sus herramientas y `call` las llama, cancelable y con la respuesta recortada.
-  Aún no está conectado a la app (Hito 5).
+  `config` lee `mcp.json`; `McpServers` los conecta en segundo plano y `ToolSet` junta sus
+  herramientas con las del proyecto en el registro del agente.
 - **krampsta-store**: `FileStore` implementa el `SessionStore` de `krampsta-agent`. Guarda cada
   sesión en `<carpeta de datos>/krampsta/sessions/<id>.json` (en Windows, `%APPDATA%`). La UI
   sólo encola; un hilo escribe, junta los guardados repetidos de una sesión y renombra un

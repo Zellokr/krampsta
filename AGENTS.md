@@ -28,8 +28,13 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   guarda el final de
   su stderr para explicar por qué no arrancó; `Transport::Http`, Streamable HTTP con cabeceras
   y token), `tools` y `call` (cancelable, respuesta en texto con tope `MAX_REPLY`). `fake` y el
-  binario `krampsta-fake-mcp` son sólo para tests. Async, en el runtime del host. No depende
-  de Rune ni de otros crates de Krampsta.
+  binario `krampsta-fake-mcp` son sólo para tests. `config` (`mcp.json`, formato `mcpServers` de
+  Claude Desktop), `McpServers` (conecta en segundo plano en su propio runtime tokio; las
+  herramientas de un servidor listo entran en las ejecuciones siguientes como
+  `mcp__<servidor>__<herramienta>`) y `ToolSet` (el `Toolbox` que recibe el agente: el del
+  proyecto más los servidores; una herramienta MCP siempre pregunta). La app envuelve con
+  `ToolSet` cada proyecto que abre. No depende
+  de Rune; sólo de `krampsta-agent`.
 - `crates/krampsta-store` — historial en disco: `FileStore` (implementa `SessionStore` de
   `krampsta-agent`; un JSON por sesión, escrito por un hilo propio, de forma atómica; las imágenes
   de los mensajes, en `images/<sesión>-<mensaje>.png`, escritas una vez), `load`
@@ -60,7 +65,7 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   (`krampsta <carpeta>`, el último abierto o la carpeta actual; en headless, el proyecto y
   las sesiones de ejemplo) y arranca.
 - Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
-  `providers → core`, `app → tools → agent`, `app → store → agent`, `store → core`, `app → mcp`. Sin ciclos;
+  `providers → core`, `app → tools → agent`, `app → store → agent`, `store → core`, `app → mcp → agent`. Sin ciclos;
   la UI nunca depende de `krampsta-providers`, `krampsta-tools`, `krampsta-store` ni `krampsta-mcp`.
 - Historial: se lee una vez, en `setup` (`load_history`), y llega por `poll` (`take_history`).
   La UI guarda con `SessionStore` (sólo encola), en momentos discretos (enviar, fin de

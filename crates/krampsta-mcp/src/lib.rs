@@ -8,7 +8,9 @@
 //! stderr is kept (the last few KB) to say why it failed to start. Every call is cancellable
 //! and its reply is capped, so a server can neither stall a run nor flood the model's context.
 //!
-//! Async: run it on the agent host's tokio runtime. This crate knows nothing about the UI.
+//! [`config`] reads the servers the user set up (`mcp.json`); [`McpServers`] keeps them
+//! connected while Krampsta runs, and [`ToolSet`] puts their tools in the agent's registry
+//! beside the project's own. This crate knows nothing about the UI.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
@@ -25,6 +27,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
+
+pub mod config;
+mod servers;
+
+pub use config::{ConfigError, ServerConfig};
+pub use servers::{McpServers, PREFIX, ServerState, ToolSet, tool_name};
 
 #[doc(hidden)]
 pub mod fake;

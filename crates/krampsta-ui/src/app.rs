@@ -252,6 +252,8 @@ const SCENES: &[Scene] = &[
     ("approval", scene_approval),
     ("approval-long", scene_approval_long),
     ("approval-apply", scene_approval_apply),
+    // A tool from an MCP server asks too, worded for a call rather than a command.
+    ("approval-mcp", scene_approval_mcp),
     ("approval-applying", scene_approval_applying),
     ("streaming", scene_streaming),
     ("change-failed", |s| {
@@ -633,6 +635,24 @@ fn scene_approval(s: &mut KrampstaApp) {
         tool: call.name,
         what: "cargo clean && cargo test --workspace".into(),
     });
+}
+
+fn scene_approval_mcp(s: &mut KrampstaApp) {
+    let run = staged(s, "Open an issue for the flaky retry test");
+    let arguments = r#"{"repo": "you/krampsta", "title": "Retry test fails one run in twenty"}"#;
+    let call = ToolCall {
+        id: ToolCallId("scene-approval-mcp".into()),
+        name: "mcp__github__create_issue".into(),
+        arguments: arguments.into(),
+    };
+    apply(s, &[AgentEvent::ToolCallStarted { run, call: call.clone() }]);
+    // As `ToolSet::check` words it: the tool, its server and the arguments, pretty.
+    let what = "create_issue on the MCP server `github`
+{
+  \"repo\": \"you/krampsta\",
+  \"title\": \"Retry test fails one run in twenty\"
+}";
+    s.ask(crate::approvals::Asking { run, call: call.id, tool: call.name, what: what.into() });
 }
 
 fn scene_approval_apply(s: &mut KrampstaApp) {

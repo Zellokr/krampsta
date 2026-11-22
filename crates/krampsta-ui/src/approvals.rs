@@ -47,6 +47,8 @@ const COMMAND_MAX_H: f32 = 240.0;
 /// The dialog for the first call waiting, if any. Closing it denies, as Escape would.
 pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
     let Some(a) = s.approvals.front() else { return };
+    // Commands run in the project folder; any other tool that asks (an MCP server's) is a call.
+    let command = a.tool == "run_command";
     let button = |label: &str, variant, decision, key: &str| {
         Button::new(label)
             .variant(variant)
@@ -57,7 +59,7 @@ pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
     };
     // A command can be a whole script: it scrolls in a block of bounded height, so the dialog
     // never outgrows the window and its buttons stay on screen.
-    let command = col()
+    let block = col()
         .key(keys::APPROVAL_COMMAND)
         .w_full()
         .max_h(COMMAND_MAX_H)
@@ -86,13 +88,17 @@ pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
         .px(16.0)
         .pb(18.0)
         .child(
-            text(format!("Krampsta wants to run this in the project folder{more}:"))
-                .font(k.ty.ui)
-                .color(k.c.text_muted)
-                .wrap(),
+            text(if command {
+                format!("Krampsta wants to run this in the project folder{more}:")
+            } else {
+                format!("Krampsta wants to use this tool{more}:")
+            })
+            .font(k.ty.ui)
+            .color(k.c.text_muted)
+            .wrap(),
         )
-        .child(command);
-    let body = if s.review.proposals().is_empty() {
+        .child(block);
+    let body = if !command || s.review.proposals().is_empty() {
         body
     } else {
         body.child(
@@ -103,7 +109,7 @@ pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
         )
     };
     let applying = s.validating_changes();
-    let show_apply = !applying && a.tool == "run_command" && s.can_apply_and_validate();
+    let show_apply = !applying && command && s.can_apply_and_validate();
     let mut actions = row().w_full().gap(8.0).justify_end().child(button(
         "Deny",
         ButtonVariant::Neutral,
@@ -112,7 +118,13 @@ pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
     ));
     if !applying {
         actions = actions
-            .child(button("Always allow", ButtonVariant::Outline, Decision::Always, keys::APPROVAL_ALWAYS))
+            // An MCP tool's "always" isn't saved between launches yet.
+            .child(button(
+                if command { "Always allow" } else { "Allow until Krampsta closes" },
+                ButtonVariant::Outline,
+                Decision::Always,
+                keys::APPROVAL_ALWAYS,
+            ))
             .child(button("Allow once", ButtonVariant::Contrast, Decision::Once, keys::APPROVAL_ONCE));
     }
     if show_apply {
@@ -136,7 +148,7 @@ pub fn dialog(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) {
     } else {
         body
     };
-    Dialog::new(keys::APPROVAL, "Run this command?")
+    Dialog::new(keys::APPROVAL, if command { "Run this command?" } else { "Use this tool?" })
         .open(true)
         .fit()
         .width(if show_apply { 620.0 } else { 520.0 })
