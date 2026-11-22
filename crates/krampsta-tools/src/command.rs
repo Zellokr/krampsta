@@ -10,6 +10,7 @@
 
 use std::collections::VecDeque;
 use std::io::Read;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
@@ -34,6 +35,8 @@ pub struct Args {
     pub command: String,
     #[serde(default)]
     timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub pending: bool,
 }
 
 /// How a command ended.
@@ -58,12 +61,22 @@ impl Outcome {
 /// The shell commands run in, as the tool's description tells the model.
 pub const SHELL: &str = if cfg!(windows) { "PowerShell" } else { "sh" };
 
-/// Runs `args.command` to its end; returns the output for the model and how it ended.
-pub fn run(project: &Project, args: &Args, call: &Call<'_>) -> Result<(String, Outcome), String> {
+/// Runs `args.command` to its end; returns the output for the model and how it ended. With
+/// `cargo_target`, Cargo builds there (checks of pending edits, run in a copy of the project).
+pub fn run(
+    project: &Project,
+    args: &Args,
+    cargo_target: Option<&Path>,
+    call: &Call<'_>,
+) -> Result<(String, Outcome), String> {
     let timeout = args
         .timeout_ms
         .map_or(DEFAULT_TIMEOUT, |ms| Duration::from_millis(ms).clamp(Duration::from_secs(1), MAX_TIMEOUT));
-    let mut child = spawn(project, &args.command).map_err(|e| format!("the command could not start: {e}"))?;
+    if call.cancel.is_cancelled() {
+        return Ok((String::new(), Outcome::Stopped));
+    }
+    let mut child =
+        spawn(project, &args.command, cargo_target).map_err(|e| format!("the command could not start: {e}"))?;
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(64);
     let readers = [child.stdout().take().map(|p| reader(p, tx.clone())), child.stderr().take().map(|p| reader(p, tx))];
 
@@ -114,8 +127,11 @@ pub fn run(project: &Project, args: &Args, call: &Call<'_>) -> Result<(String, O
     Ok((capture.into_text(), outcome))
 }
 
-fn spawn(project: &Project, command: &str) -> std::io::Result<Box<dyn ChildWrapper>> {
+fn spawn(project: &Project, command: &str, cargo_target: Option<&Path>) -> std::io::Result<Box<dyn ChildWrapper>> {
     let mut cmd = shell(command);
+    if let Some(target) = cargo_target {
+        cmd.env("CARGO_TARGET_DIR", target);
+    }
     cmd.current_dir(project.root()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut wrapped = CommandWrap::from(cmd);
     #[cfg(windows)]
@@ -259,7 +275,8 @@ mod tests {
         let streamed = Mutex::new(String::new());
         let output = |text: &str| streamed.lock().unwrap().push_str(text);
         let call = Call { cancel, approval: &Approval::Once, output: &output };
-        let (text, outcome) = run(&project, &Args { command: command.into(), timeout_ms }, &call).unwrap();
+        let (text, outcome) =
+            run(&project, &Args { command: command.into(), timeout_ms, pending: false }, None, &call).unwrap();
         let streamed = streamed.into_inner().unwrap();
         (text, outcome, streamed)
     }
@@ -273,7 +290,8 @@ mod tests {
         let cancel = CancellationToken::new();
         let call = Call { cancel: &cancel, approval: &Approval::Once, output: &|_| {} };
         let read = if cfg!(windows) { "Get-Content guía.md" } else { "cat guía.md" };
-        let (text, outcome) = run(&project, &Args { command: read.into(), timeout_ms: None }, &call).unwrap();
+        let (text, outcome) =
+            run(&project, &Args { command: read.into(), timeout_ms: None, pending: false }, None, &call).unwrap();
         assert_eq!(outcome, Outcome::Exited(Some(0)));
         assert!(text.contains("# Krampsta — guía, ñandú"), "{text}");
     }

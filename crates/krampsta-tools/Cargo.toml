@@ -22,7 +22,6 @@ process-wrap = { version = "10", default-features = false, features = ["std", "j
 # Where the permission rules and the command log live (the user's config folder).
 dirs = "7"
 
-[dev-dependencies]
 tempfile = "3"
 
 [lints]

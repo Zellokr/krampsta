@@ -18,7 +18,9 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
 - `crates/krampsta-tools` — las herramientas del agente sobre la carpeta del proyecto
   (`Workspace`, un `Toolbox`): `project` (ninguna ruta sale de la carpeta), `read_file`,
   `list_files`, `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
-  propone, y la escritura al aceptar), `command` (`run_command`), `policy` (reglas de permisos).
+  propone, y la escritura al aceptar), `command` (`run_command`), `policy` (reglas de permisos),
+  `snapshot` (copia desechable con las ediciones pendientes para `run_command` con `pending: true`;
+  Cargo compila en la caché del usuario, `check-target`; no es un sandbox).
   No depende de Rune.
 - `crates/krampsta-store` — historial en disco: `FileStore` (implementa `SessionStore` de
   `krampsta-agent`; un JSON por sesión, escrito por un hilo propio, de forma atómica), `load`

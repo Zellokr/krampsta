@@ -34,7 +34,13 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   carpeta (PowerShell en Windows, `sh` en el resto): la salida se ve en directo en la tarjeta, y
   cada comando pide permiso (una vez, siempre o denegar) salvo que lo cubra una regla de
   `permissions.json`, en la carpeta de configuración (`%APPDATA%\krampsta` en Windows). Lo que se
-  ejecuta queda en `commands.log`. Nada sale de esa carpeta.
+  ejecuta queda en `commands.log`. Con `pending: true`, el agente puede ejecutar, por ejemplo,
+  `cargo check` en una copia temporal con los cambios pendientes, sin aplicarlos. La copia incluye
+  los archivos locales no ignorados y excluye `.git` y el `target` de la raíz. La copia se descarta
+  al acabar, pero Cargo compila en una carpeta propia de la caché del usuario
+  (`krampsta/check-target`), así que la siguiente comprobación no recompila las dependencias.
+  Se aplican los mismos permisos: la copia temporal cambia la carpeta de trabajo del comando,
+  pero **no** lo aísla del sistema.
 - **Responsive**: al estrechar la ventana se pliegan los paneles laterales (primero el de
   cambios, después la sidebar) y vuelven a abrirse al ensancharla.
 - Atajos: `Ctrl+N`/`⌘N` nueva sesión, `Ctrl+Shift+B`/`⇧⌘B` sidebar, `Ctrl+J`/`⌘J` cambios,

@@ -13,6 +13,7 @@ mod policy;
 mod project;
 mod read;
 mod search;
+mod snapshot;
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -54,13 +55,27 @@ pub struct Workspace {
     /// Krampsta's config folder: `permissions.json` and `commands.log`. None: rules can't be
     /// saved and nothing is logged.
     config: Option<PathBuf>,
+    /// Where Cargo builds when a command checks the pending edits (`pending: true`), kept
+    /// between checks. None: in the throwaway copy.
+    check_target: Option<PathBuf>,
 }
 
 impl Workspace {
     /// Tools over the folder at `root` (which must exist), with the user's rules from their
-    /// config folder.
+    /// config folder, and checks of pending edits building in the user's cache folder.
     pub fn open(root: impl AsRef<Path>) -> std::io::Result<Self> {
-        Self::open_with(root, dirs::config_dir().map(|d| d.join("krampsta")))
+        let workspace = Self::open_with(root, dirs::config_dir().map(|d| d.join("krampsta")))?;
+        Ok(match dirs::cache_dir() {
+            Some(cache) => workspace.with_check_target(cache.join("krampsta").join("check-target")),
+            None => workspace,
+        })
+    }
+
+    /// Checks of pending edits build in `target`, which outlives them (tests pass a temporary
+    /// folder).
+    pub fn with_check_target(mut self, target: PathBuf) -> Self {
+        self.check_target = Some(target);
+        self
     }
 
     /// Tools over `root` whose rules and log live in `config` (tests pass a temporary folder).
@@ -80,6 +95,7 @@ impl Workspace {
             pending: edit::Pending::default(),
             policy: RwLock::new(policy),
             config,
+            check_target: None,
         })
     }
 
@@ -98,9 +114,26 @@ impl Workspace {
     }
 
     fn run_command(&self, args: &command::Args, call: &Call<'_>) -> Result<ToolOutput, String> {
-        let (output, outcome) = command::run(&self.project, args, call)?;
-        self.log(&args.command, call.approval, &outcome);
-        let text = format!("{output}\n\n(Command {}.)", outcome.describe());
+        let snapshot = if args.pending {
+            Some(snapshot::Snapshot::create(&self.project, &self.pending, call.cancel)?)
+        } else {
+            None
+        };
+        let project = snapshot.as_ref().map_or(&self.project, |s| &s.project);
+        // The copy is thrown away, but its build isn't: Cargo keeps it in a folder of its own
+        // (outside the project), so the next check doesn't rebuild the dependencies. Without one, it
+        // builds inside the copy, from scratch.
+        let target =
+            snapshot.as_ref().map(|s| self.check_target.clone().unwrap_or_else(|| s.project.root().join("target")));
+        let context = snapshot.as_ref().map_or_else(String::new, |s| {
+            format!("Running on a temporary copy with {} pending file(s), not the project on disk.\n", s.edits)
+        });
+        if !context.is_empty() {
+            (call.output)(&context);
+        }
+        let (output, outcome) = command::run(project, args, target.as_deref(), call)?;
+        self.log(&args.command, args.pending, call.approval, &outcome);
+        let text = format!("{context}{output}\n\n(Command {}.)", outcome.describe());
         match outcome {
             command::Outcome::Exited(Some(0)) => Ok(text.into()),
             _ => Err(text),
@@ -108,13 +141,14 @@ impl Workspace {
     }
 
     /// Appends one line to `commands.log`: when, where, what ran, who allowed it, how it ended.
-    fn log(&self, command: &str, approval: &Approval, outcome: &command::Outcome) {
+    fn log(&self, command: &str, pending: bool, approval: &Approval, outcome: &command::Outcome) {
         let Some(config) = &self.config else { return };
         let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let entry = json!({
             "at": at,
             "folder": self.project.root().display().to_string(),
             "command": command,
+            "pending": pending,
             "allowed_by": command::approval_text(approval),
             "outcome": outcome.describe(),
         });
@@ -148,7 +182,10 @@ impl Toolbox for Workspace {
     fn check(&self, name: &str, arguments: &str) -> Access {
         match (name, parse::<command::Args>(arguments)) {
             ("run_command", Ok(args)) => {
-                self.policy.read().unwrap_or_else(PoisonError::into_inner).check(&args.command)
+                match self.policy.read().unwrap_or_else(PoisonError::into_inner).check(&args.command) {
+                    Access::Ask { what } if args.pending => Access::Ask { what: format!("{what} (pending edits)") },
+                    access => access,
+                }
             }
             // Bad arguments fail in `run`, before anything runs.
             _ => Access::Allow(Approval::NotNeeded),
@@ -196,13 +233,15 @@ fn specs() -> Arc<[ToolSpec]> {
              is stopped at its timeout, with everything it started, so never start servers or \
              watchers that don't exit. Prefer read_file, list_files and search for looking at files, \
              and never change files with a command (scripts, sed, Set-Content, `>`): use edit_file, \
-             which shows the user each change to review.",
+             which shows the user each change to review. Set pending to true to check proposed \
+             edits in a disposable copy instead of running against the project on disk.",
             shell = command::SHELL
         ),
         json!({
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": format!("The {} command line.", command::SHELL)},
+                "pending": {"type": "boolean", "description": "Default: false. Run against a temporary copy containing the pending edits. The copy excludes ignored files and the root target directory; this is not a sandbox."},
                 "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 600000, "description": "Default: 120000 (2 minutes)."}
             },
             "required": ["command"]
@@ -298,7 +337,9 @@ mod tests {
     fn workspace(files: &[(&str, &str)]) -> (tempfile::TempDir, tempfile::TempDir, Workspace) {
         let (dir, config) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         for (name, body) in files {
-            std::fs::write(dir.path().join(name), body).unwrap();
+            let path = dir.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
         }
         let tools = Workspace::open_with(dir.path(), Some(config.path().to_owned())).unwrap();
         (dir, config, tools)
@@ -419,6 +460,36 @@ mod tests {
         let cancel = CancellationToken::new();
         cancel.cancel();
         assert_eq!(run(&tools, "list_files", "{}", &cancel), Err("stopped".to_owned()));
+    }
+
+    #[test]
+    fn a_pending_check_runs_in_a_copy_with_the_edits_and_builds_outside_it() {
+        let (dir, config, tools) = workspace(&[("src/lib.rs", "pub fn original() {}\n"), ("README.md", "hi\n")]);
+        let target = tempfile::tempdir().unwrap();
+        let tools = tools.with_check_target(target.path().to_owned());
+        tools.set_pending("src/lib.rs", Some("pub fn proposed() {}\n".into()));
+        let cancel = CancellationToken::new();
+        let call = Call { cancel: &cancel, approval: &Approval::Once, output: &|_| {} };
+        // What a check sees: the pending source, the untouched files, and where Cargo builds.
+        let command = if cfg!(windows) {
+            "Get-Content src/lib.rs, README.md; $env:CARGO_TARGET_DIR"
+        } else {
+            "cat src/lib.rs README.md; echo \"$CARGO_TARGET_DIR\""
+        };
+        let proposed = json!({ "command": command, "pending": true }).to_string();
+        assert_eq!(tools.check("run_command", &proposed), Access::Ask { what: format!("{command} (pending edits)") });
+        let output = tools.run("run_command", &proposed, &call).unwrap().text;
+        assert!(output.contains("temporary copy with 1 pending file"), "{output}");
+        assert!(output.contains("pub fn proposed()") && output.contains("hi"), "{output}");
+        assert!(output.contains(&target.path().display().to_string()), "Cargo builds outside the copy: {output}");
+        assert_eq!(std::fs::read_to_string(dir.path().join("src/lib.rs")).unwrap(), "pub fn original() {}\n");
+        let log = std::fs::read_to_string(config.path().join("commands.log")).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(log.trim()).unwrap()["pending"], true);
+
+        // Without pending edits there is nothing to check.
+        tools.set_pending("src/lib.rs", None);
+        let refused = tools.run("run_command", &proposed, &call).unwrap_err();
+        assert!(refused.contains("no pending edits"), "{refused}");
     }
 
     #[test]
