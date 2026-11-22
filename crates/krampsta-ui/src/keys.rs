@@ -252,3 +252,8 @@ pub const PALETTE_EMPTY: &str = "krampsta-palette-empty";
 pub fn palette_item(index: usize) -> String {
     format!("krampsta-palette-item-{index}")
 }
+
+/// A code block's Copy button, in a message.
+pub fn code_copy(message: krampsta_core::MessageId, index: usize) -> String {
+    format!("krampsta-code-copy-{message}-{index}")
+}

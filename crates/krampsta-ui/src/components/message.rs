@@ -5,7 +5,7 @@ use krampsta_core::{Message, MessageRole, SessionId};
 use rune::{El, col, el, icon, row, text};
 use rune_kit::{Kit, Markdown, Spinner};
 
-use crate::components::{icons, reasoning, shimmer, tool_card};
+use crate::components::{code_copy, icons, reasoning, shimmer, tool_card};
 use crate::images::MessageImage;
 use crate::keys;
 use crate::state::KrampstaApp;
@@ -86,7 +86,13 @@ fn assistant(s: &KrampstaApp, session: SessionId, m: &Message, streaming: bool, 
         }
     } else {
         // Each word fades in as it comes out; a finished message mounts whole.
-        let body = Markdown::new(shown.to_owned()).streaming(streaming).reveal(theme::WORD_FADE).selectable(true);
+        let mut body = Markdown::new(shown.to_owned()).streaming(streaming).reveal(theme::WORD_FADE).selectable(true);
+        // A Copy button on each code block; only replies that have one pay for the kit's copy.
+        if shown.contains("```") {
+            let (id, kit) = (m.id, std::rc::Rc::new(k.clone()));
+            let copied = s.copied_code.filter(|(message, _)| *message == id).map(|(_, index)| index);
+            body = body.code_frame(move |card, c| code_copy::frame(card, c, id, copied, &kit));
+        }
         out = out.child(body.build(k));
     }
     out

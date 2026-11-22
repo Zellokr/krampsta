@@ -121,6 +121,8 @@ pub struct KrampstaApp {
     pub repo: crate::git::RepoView,
     /// The project's files, as the "Files" view shows them.
     pub files: crate::files::ProjectTree,
+    /// The code block copied last (its message and place), whose button says "Copied".
+    pub copied_code: Option<(MessageId, usize)>,
     /// The command palette (Ctrl+K).
     pub palette: crate::palette::Palette,
     /// The sidebar's search: its query and the sessions it matches.
@@ -278,6 +280,7 @@ impl KrampstaApp {
             inspector: crate::files::Inspector::default(),
             files: crate::files::ProjectTree::default(),
             repo: crate::git::RepoView::default(),
+            copied_code: None,
             palette: crate::palette::Palette::default(),
             search: crate::search::SessionSearch::default(),
             renaming: crate::rename::Renaming::default(),
@@ -403,6 +406,7 @@ impl KrampstaApp {
         let request =
             RunRequest { session: id, run, history: session.messages.clone(), effort: self.engine.effort.clone() };
         self.sent_attachment(id, run, message, text);
+        self.copied_code = None;
         self.view_mut(id).draft = TextEdit::new("");
         self.focus_composer(id);
         self.notice = None;

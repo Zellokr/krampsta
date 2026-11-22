@@ -339,6 +339,15 @@ const SCENES: &[Scene] = &[
     ("search", crate::search::scene),
     // The command palette (Ctrl+K), a letter typed.
     ("palette", crate::palette::scene),
+    // A reply's code block just copied: its button says so.
+    ("code-copied", |s| {
+        scene_completed(s);
+        let reply = s
+            .sessions
+            .first()
+            .and_then(|x| x.messages.iter().rev().find(|m| m.role == krampsta_core::MessageRole::Assistant));
+        s.copied_code = reply.map(|m| (m.id, 0));
+    }),
     ("files", crate::files::scene),
     // The "Git" view: the example changes, written and not committed yet, and a binary file.
     ("git", crate::git::scene),

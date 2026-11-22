@@ -1,6 +1,7 @@
 //! Small reusable pieces of Krampsta's interface.
 
 pub mod alert;
+pub mod code_copy;
 pub mod composer;
 pub mod empty;
 pub mod engine_picker;

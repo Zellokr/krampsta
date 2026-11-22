@@ -57,6 +57,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   sesiones por `Session::project`, y una sesión sin proyecto adopta el abierto al enviar),
   `prefs.rs` (ajustes entre arranques: tema, anchos, proveedor y modelo, proyecto, grupos
   plegados; `poll` compara sin asignar y guarda medio segundo después de que paren de cambiar),
+  `components/code_copy.rs` (el botón Copy de cada bloque de código de una respuesta, por
+  `Markdown::code_frame`; un bloque que aún llega lleva la franja sin botón, para que nada salte),
   `components/inline_diff.rs` (el cambio de un `edit_file` dentro de su tarjeta: diff compacto
   de sólo lectura; `ChangeProposed` lleva el `call` y `pump` guarda su `FileDiff` en `card_diffs`),
   `panes.rs` (dos sesiones lado a lado: `split` guarda la del otro panel; la seleccionada es

@@ -21,7 +21,8 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   (o «Rename» en su menú) la renombra en el sitio: Enter guarda, Escape cancela. El campo de
   búsqueda (`Ctrl+Shift+F`) filtra la lista por título y por el texto de los mensajes.
 - **Panel principal**: título de la sesión, historial (usuario a la derecha, Krampsta a la
-  izquierda con Markdown y bloques de código coloreados), indicador de estado del agente
+  izquierda con Markdown y bloques de código coloreados, cada uno con su botón **Copy**), indicador
+  de estado del agente
   (`Idle`, `Running`, `Completed`, `Failed`, `Cancelled`) y *composer* que crece con el texto.
   Una imagen pegada (`Ctrl+V`, PNG de hasta 5 MiB y 24 megapíxeles) se adjunta al mensaje;
   sólo la envían los proveedores que leen imágenes (hoy, ChatGPT) y se guarda con el historial,
