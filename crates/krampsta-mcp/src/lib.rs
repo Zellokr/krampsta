@@ -29,10 +29,14 @@ use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
 pub mod config;
+mod edits;
 mod servers;
+mod toolset;
 
 pub use config::{ConfigError, ServerConfig};
-pub use servers::{McpServers, PREFIX, ToolSet, tool_name};
+pub use edits::split_command;
+pub use servers::{McpServers, PREFIX, tool_name};
+pub use toolset::ToolSet;
 
 #[doc(hidden)]
 pub mod fake;

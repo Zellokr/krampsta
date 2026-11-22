@@ -79,9 +79,14 @@ pub fn load(file: &Path) -> Result<Vec<ServerConfig>, ConfigError> {
     parsed.servers.into_iter().map(|(name, entry)| server(name, entry)).collect()
 }
 
+/// A server's name: letters, digits, `-` and `_` (it goes into its tools' names).
+pub(crate) fn valid_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 fn server(name: String, entry: Entry) -> Result<ServerConfig, ConfigError> {
     let problem = |problem: &str| ConfigError::Server { name: name.clone(), problem: problem.to_owned() };
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !valid_name(&name) {
         return Err(problem("needs a name of letters, digits, `-` and `_` only"));
     }
     let transport = match (entry.kind.as_deref(), entry.command, entry.url) {

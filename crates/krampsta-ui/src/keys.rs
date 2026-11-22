@@ -203,3 +203,26 @@ pub fn mcp_server(name: &str) -> String {
 pub fn mcp_server_state(name: &str) -> String {
     format!("krampsta-mcp-server-state-{name}")
 }
+
+/// A server's switch, its Remove button and the second click that confirms it.
+pub fn mcp_server_toggle(name: &str) -> String {
+    format!("krampsta-mcp-server-toggle-{name}")
+}
+
+pub fn mcp_server_remove(name: &str) -> String {
+    format!("krampsta-mcp-server-remove-{name}")
+}
+
+pub fn mcp_server_remove_confirm(name: &str) -> String {
+    format!("krampsta-mcp-server-remove-confirm-{name}")
+}
+
+/// The "Add a server" button and the form it opens.
+pub const MCP_ADD_OPEN: &str = "krampsta-mcp-add-open";
+pub const MCP_ADD_FORM: &str = "krampsta-mcp-add-form";
+pub const MCP_ADD_KIND: &str = "krampsta-mcp-add-kind";
+pub const MCP_ADD_NAME: &str = "krampsta-mcp-add-name";
+pub const MCP_ADD_TARGET: &str = "krampsta-mcp-add-target";
+pub const MCP_ADD_EXTRA: &str = "krampsta-mcp-add-extra";
+pub const MCP_ADD_SAVE: &str = "krampsta-mcp-add-save";
+pub const MCP_ADD_ERROR: &str = "krampsta-mcp-add-error";

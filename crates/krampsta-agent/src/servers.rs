@@ -30,6 +30,39 @@ pub struct ServerStatus {
     pub state: ServerState,
 }
 
+/// How a new server is reached.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServerKind {
+    /// A program Krampsta starts (stdio).
+    Command,
+    /// A server at a URL (Streamable HTTP).
+    Url,
+}
+
+/// A server the user adds, as the form holds it; the servers check it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct NewServer {
+    pub name: String,
+    pub kind: ServerKind,
+    /// The command line, or the URL.
+    pub target: String,
+    /// One per line: `KEY=value` environment variables for a command, `Name: value` headers for
+    /// a URL.
+    pub extra: String,
+}
+
+/// `extra` often holds tokens: Debug shows only how long it is.
+impl std::fmt::Debug for NewServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NewServer")
+            .field("name", &self.name)
+            .field("kind", &self.kind)
+            .field("target", &self.target)
+            .field("extra_lines", &self.extra.lines().count())
+            .finish()
+    }
+}
+
 /// The configured servers while Krampsta runs. Cheap to ask: no I/O, no waiting.
 pub trait ToolServers: Send + Sync + 'static {
     /// Grows whenever a server's state changes.
@@ -43,6 +76,29 @@ pub trait ToolServers: Send + Sync + 'static {
 
     /// Called whenever a server's state changes, from here on (the window's waker).
     fn set_notifier(&self, notify: Notifier);
+
+    /// Adds `server`, starts connecting it and saves it. Err: why it can't be added, before
+    /// anything changes. Saving happens in the background; see [`take_problem`](Self::take_problem).
+    fn add(&self, server: NewServer) -> Result<(), String> {
+        let _ = server;
+        Err("servers can't be added here".into())
+    }
+
+    /// Removes the server `name` (closing it) and saves that.
+    fn remove(&self, name: &str) -> Result<(), String> {
+        Err(format!("`{name}` can't be removed here"))
+    }
+
+    /// Starts (and connects) or stops the server `name`, and saves that.
+    fn set_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
+        let _ = enabled;
+        Err(format!("`{name}` can't be changed here"))
+    }
+
+    /// Why the last change couldn't be saved, once (the version moves when it happens).
+    fn take_problem(&self) -> Option<String> {
+        None
+    }
 }
 
 /// A fixed list, for scenes and tests.

@@ -316,7 +316,16 @@ const SCENES: &[Scene] = &[
     ("cost", scene_cost),
     ("prices", scene_prices),
     // Settings with an MCP server in each state: connected with its tools, connecting, failed, off.
-    ("mcp-servers", crate::servers::scene),
+    ("mcp-servers", |s| {
+        // Settings shows the providers too: the stills assign them, never the machine's own.
+        stage_accounts(s, false);
+        crate::servers::scene(s);
+    }),
+    // The form that adds a server, filled in, and a server waiting for the click that removes it.
+    ("mcp-add", |s| {
+        stage_accounts(s, false);
+        crate::servers::scene_add(s);
+    }),
     // No folder open: the row invites opening one.
     ("no-project", |s| {
         s.project = None;

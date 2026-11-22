@@ -53,7 +53,9 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   herramientas de `permissions.json` (`"tools": {"allow": ["mcp__github__get_*"], "deny": […]}`:
   un nombre o un prefijo con `*`; `deny` gana) y, sin regla, pide permiso; «Always allow» guarda
   la regla para esa herramienta. Ajustes muestra cada servidor: conectado con sus herramientas,
-  conectando, fallido con el motivo, o desactivado. Un servidor por stdio sólo hereda las
+  conectando, fallido con el motivo, o desactivado; desde ahí se añaden (comando o URL, con su
+  entorno o sus cabeceras), se encienden y apagan y se quitan, al momento y sin reiniciar: el
+  archivo se actualiza tocando sólo esa entrada. Un servidor por stdio sólo hereda las
   variables básicas del sistema más las suyas, nunca las claves de Krampsta.
   ```json
   {"mcpServers": {

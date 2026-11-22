@@ -31,7 +31,10 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   su stderr para explicar por qué no arrancó; `Transport::Http`, Streamable HTTP con cabeceras
   y token), `tools` y `call` (cancelable, respuesta en texto con tope `MAX_REPLY`). `fake` y el
   binario `krampsta-fake-mcp` son sólo para tests. `config` (`mcp.json`, formato `mcpServers` de
-  Claude Desktop), `McpServers` (conecta en segundo plano en su propio runtime tokio; las
+  Claude Desktop), `edits` (un servidor nuevo del formulario, validado, y las ediciones de
+  `mcp.json`, que tocan sólo su entrada y conservan el resto), `McpServers` (conecta en segundo
+  plano en su propio runtime tokio, aplica al momento lo que cambia Ajustes y escribe el archivo
+  en orden, en una tarea propia; cada intento de conexión lleva un número y uno viejo se descarta; las
   herramientas de un servidor listo entran en las ejecuciones siguientes como
   `mcp__<servidor>__<herramienta>`) y `ToolSet` (el `Toolbox` que recibe el agente: el del
   proyecto más los servidores; una herramienta MCP sigue las reglas `tools` y, sin regla, pregunta).
@@ -59,7 +62,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   la seleccionada; la última no se cierra; Ctrl+W), `costs.rs` (coste por sesión: tokens por modelo, `Session::by_model`, por los precios por
   millón que pone el usuario; sólo proveedores `Cloud`, sin precios de serie),
   `servers.rs` (los servidores MCP en Ajustes, desde `ToolServers`: la lista se copia en `pump`
-  sólo cuando cambia su versión; un servidor que falla lo avisa en el composer),
+  sólo cuando cambia su versión; un servidor que falla lo avisa en el composer; el formulario
+  para añadir y la confirmación de quitar; la vista en `views/mcp.rs`),
   `images.rs` (imágenes pegadas y de los mensajes: se decodifican en un hilo propio y llegan por
   `pump` a `SessionView`; nunca en `view`; sólo se envían si `Provider::images`),
   `changes.rs` (revisar los cambios

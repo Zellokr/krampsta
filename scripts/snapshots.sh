@@ -19,5 +19,7 @@ for scene in empty changes-empty changes change-failed command approval approval
 # Narrow windows: give the side panes a moment to fold away (they close after the first layout).
 snap narrow 800x560 --scene completed --at 1.0
 snap split 1200x800 --scene split --at 1.0
+# The MCP section sits low in Settings: a taller window shows the form whole.
+snap mcp-add 1200x1200 --scene mcp-add
 snap send-message 1200x800 --script scripts/send-message.json --at mark:end
 "$BIN" --tree "$OUT/krampsta-tree.json" --size 1200x800 > /dev/null && echo "  $OUT/krampsta-tree.json"

@@ -57,7 +57,7 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec<
         let hint = "How long the model thinks first. Auto uses each model's own default.";
         column = column.child(setting(k, "Reasoning effort", hint, effort));
     }
-    column = column.children(crate::servers::settings(s, k).map(|part| part.mt(12.0)));
+    column = column.children(crate::views::mcp::settings(s, k).map(|part| part.mt(12.0)));
     if s.key_providers().next().is_some() {
         column = column.child(section(k, "API keys").mt(12.0)).children(s.key_providers().map(|p| api_key(s, k, p)));
     }
