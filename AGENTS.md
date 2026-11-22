@@ -23,7 +23,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   Cargo compila en la caché del usuario, `check-target`; no es un sandbox).
   No depende de Rune.
 - `crates/krampsta-store` — historial en disco: `FileStore` (implementa `SessionStore` de
-  `krampsta-agent`; un JSON por sesión, escrito por un hilo propio, de forma atómica), `load`
+  `krampsta-agent`; un JSON por sesión, escrito por un hilo propio, de forma atómica; las imágenes
+  de los mensajes, en `images/<sesión>-<mensaje>.png`, escritas una vez), `load`
   (lectura bloqueante, fuera del hilo de la UI) y `format` (la forma en disco, versionada,
   separada del dominio). No depende de Rune.
 - `crates/krampsta-ui` — `KrampstaApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`

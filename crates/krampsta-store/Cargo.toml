@@ -8,6 +8,8 @@ rust-version.workspace = true
 
 [dependencies]
 krampsta-agent.workspace = true
+# Messages carry images as base64; on disk they are plain PNG files.
+base64.workspace = true
 krampsta-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

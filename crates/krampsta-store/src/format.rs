@@ -68,7 +68,12 @@ pub struct SavedMessage {
     pub id: u64,
     pub role: SavedRole,
     pub content: String,
+    /// The file in `images/` that holds its image (`images.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// Its image as base64, as the first builds with images wrote it into the JSON; read, never
+    /// written (the next save moves it to a file). Also where `read_session` puts the file's.
+    #[serde(default, skip_serializing)]
     pub image_png: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reasoning: String,
@@ -120,7 +125,7 @@ impl SavedSession {
                     output: m.usage.output,
                 })
                 .collect(),
-            messages: s.messages.iter().map(SavedMessage::from_message).collect(),
+            messages: s.messages.iter().map(|m| SavedMessage::from_message(s.id, m)).collect(),
         }
     }
 
@@ -150,7 +155,7 @@ impl SavedSession {
 }
 
 impl SavedMessage {
-    fn from_message(m: &Message) -> Self {
+    fn from_message(session: SessionId, m: &Message) -> Self {
         SavedMessage {
             id: m.id.0,
             role: match m.role {
@@ -160,7 +165,8 @@ impl SavedMessage {
                 MessageRole::Tool => SavedRole::Tool,
             },
             content: m.content.clone(),
-            image_png: m.image_png.as_deref().map(str::to_owned),
+            image: m.image_png.as_ref().map(|_| crate::images::name(session, m.id)),
+            image_png: None,
             reasoning: m.reasoning.clone(),
             run: m.run.map(|r| r.0),
             tool_calls: m

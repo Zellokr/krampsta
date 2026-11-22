@@ -6,12 +6,14 @@
 //! thread serializes and writes it, so no frame waits on the disk. Saves of the same session
 //! that pile up before the writer gets to them collapse into one write of the newest copy.
 //! Each file is written beside its final name and renamed over it, so a crash never leaves
-//! half a session behind. The same thread reads the history when asked
+//! half a session behind. The images messages carry are files of their own in `images/`, written
+//! once (`images.rs`). The same thread reads the history when asked
 //! ([`SessionStore::load`](krampsta_agent::SessionStore::load)), before any write queued after.
 //!
 //! This crate knows nothing about the UI framework.
 
 mod format;
+mod images;
 
 use std::collections::HashMap;
 use std::fs;
@@ -43,6 +45,10 @@ pub enum StoreError {
     Damaged { path: PathBuf, source: serde_json::Error },
     #[error("the saved session {path} comes from a newer Krampsta (format {found}, this one reads {known})")]
     Newer { path: PathBuf, found: u32, known: u32 },
+    #[error("could not save an image to {path}: {source}")]
+    ImageWrite { path: PathBuf, source: std::io::Error },
+    #[error("could not read the saved image {path}: {source}")]
+    ImageRead { path: PathBuf, source: std::io::Error },
     #[error("could not start the history writer: {0}")]
     Thread(std::io::Error),
 }
@@ -77,8 +83,11 @@ pub fn load(dir: &Path) -> Loaded {
         if path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
-        match read_session(&path) {
-            Ok(session) => loaded.sessions.push(session),
+        match read_session(dir, &path) {
+            Ok((session, missing)) => {
+                loaded.sessions.push(session);
+                loaded.failures.extend(missing);
+            }
             Err(e) => loaded.failures.push(e),
         }
     }
@@ -87,14 +96,25 @@ pub fn load(dir: &Path) -> Loaded {
     loaded
 }
 
-fn read_session(path: &Path) -> Result<Session, StoreError> {
+/// A saved session with the images its messages name. An image that can't be read is left out
+/// of its message and reported; the rest of the session still loads.
+fn read_session(dir: &Path, path: &Path) -> Result<(Session, Vec<StoreError>), StoreError> {
     let text = fs::read_to_string(path).map_err(|source| StoreError::Read { path: path.to_owned(), source })?;
-    let saved: SavedSession =
+    let mut saved: SavedSession =
         serde_json::from_str(&text).map_err(|source| StoreError::Damaged { path: path.to_owned(), source })?;
     if saved.version > format::VERSION {
         return Err(StoreError::Newer { path: path.to_owned(), found: saved.version, known: format::VERSION });
     }
-    Ok(saved.into_session())
+    let mut missing = Vec::new();
+    for m in &mut saved.messages {
+        if let Some(file) = &m.image {
+            match images::read(dir, file) {
+                Ok(png) => m.image_png = Some(png),
+                Err(e) => missing.push(e),
+            }
+        }
+    }
+    Ok((saved.into_session(), missing))
 }
 
 /// The file a session is saved in.
@@ -269,14 +289,21 @@ fn write_loop(dir: &Path, shared: &Shared) {
 fn apply(dir: &Path, id: SessionId, op: Op) -> Result<(), StoreError> {
     let path = file_for(dir, id);
     match op {
-        Op::Save(session) => write_atomically(&path, &SavedSession::from_session(&session))
-            .map_err(|source| StoreError::Write { path, source }),
-        Op::Delete => match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            // Never saved (an empty session), or already gone: nothing to do.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(source) => Err(StoreError::Delete { path, source }),
-        },
+        Op::Save(session) => {
+            // The images first: the JSON never names a file that isn't there.
+            images::write_new(dir, &session)?;
+            write_atomically(&path, &SavedSession::from_session(&session))
+                .map_err(|source| StoreError::Write { path, source })
+        }
+        Op::Delete => {
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                // Never saved (an empty session), or already gone: nothing to do.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(source) => return Err(StoreError::Delete { path, source }),
+            }
+            images::delete(dir, id)
+        }
     }
 }
 
@@ -498,5 +525,93 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let loaded = load(&dir.path().join("nothing-here"));
         assert!(loaded.sessions.is_empty() && loaded.failures.is_empty());
+    }
+
+    /// A session whose first message carries an image (any bytes: the store never decodes it).
+    fn with_image(id: u64) -> (Session, Vec<u8>) {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+        let png = b"\x89PNG\r\n\x1a\n not really, but bytes".to_vec();
+        let mut s = Session::new(SessionId(id));
+        s.submit_with_image("What is this?", Some(STANDARD.encode(&png).into()), RunId(1)).unwrap();
+        s.apply(&AgentEvent::Started { run: RunId(1) });
+        s.apply(&AgentEvent::Completed { run: RunId(1) });
+        (s, png)
+    }
+
+    fn image_file(dir: &Path, s: &Session) -> PathBuf {
+        dir.join("images").join(images::name(s.id, s.messages[0].id))
+    }
+
+    #[test]
+    fn an_image_is_saved_once_as_its_own_file_and_loads_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut session, png) = with_image(5);
+        save_all(dir.path(), std::slice::from_ref(&session));
+        let file = image_file(dir.path(), &session);
+        assert_eq!(fs::read(&file).unwrap(), png, "the PNG's own bytes, not base64");
+        let json = fs::read_to_string(file_for(dir.path(), session.id)).unwrap();
+        assert!(!json.contains(session.messages[0].image_png.as_deref().unwrap()), "the JSON only names the file");
+
+        // Saving the session again leaves the image as it was written.
+        fs::write(&file, b"written once").unwrap();
+        session.push_message(MessageRole::User, "and another");
+        save_all(dir.path(), std::slice::from_ref(&session));
+        assert_eq!(fs::read(&file).unwrap(), b"written once");
+
+        fs::write(&file, &png).unwrap();
+        let loaded = load(dir.path());
+        assert!(loaded.failures.is_empty(), "{:?}", loaded.failures);
+        assert_eq!(loaded.sessions, vec![session]);
+    }
+
+    #[test]
+    fn deleting_a_session_deletes_its_images_and_no_one_else_s() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, _) = with_image(1);
+        let (other, _) = with_image(12);
+        save_all(dir.path(), &[first.clone(), other.clone()]);
+        let store = FileStore::open(dir.path()).unwrap();
+        store.delete(first.id);
+        drop(store);
+        assert!(!image_file(dir.path(), &first).exists());
+        assert!(image_file(dir.path(), &other).exists(), "session 12's image isn't session 1's");
+    }
+
+    #[test]
+    fn an_image_saved_inside_the_json_still_loads_and_moves_to_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let (session, png) = with_image(3);
+        // How the first builds with images wrote it.
+        let mut json: serde_json::Value = serde_json::to_value(SavedSession::from_session(&session)).unwrap();
+        let message = &mut json["messages"][0];
+        message.as_object_mut().unwrap().remove("image");
+        message["image_png"] = session.messages[0].image_png.as_deref().unwrap().into();
+        fs::write(file_for(dir.path(), session.id), json.to_string()).unwrap();
+
+        let loaded = load(dir.path());
+        assert!(loaded.failures.is_empty(), "{:?}", loaded.failures);
+        assert_eq!(loaded.sessions[0].messages, session.messages);
+        save_all(dir.path(), &loaded.sessions);
+        assert_eq!(fs::read(image_file(dir.path(), &session)).unwrap(), png);
+    }
+
+    #[test]
+    fn a_missing_image_is_reported_and_the_session_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let (session, _) = with_image(4);
+        save_all(dir.path(), std::slice::from_ref(&session));
+        fs::remove_file(image_file(dir.path(), &session)).unwrap();
+
+        let loaded = load(dir.path());
+        assert_eq!(loaded.sessions.len(), 1);
+        assert!(loaded.sessions[0].messages[0].image_png.is_none());
+        assert!(matches!(loaded.failures.as_slice(), [StoreError::ImageRead { .. }]), "{:?}", loaded.failures);
+    }
+
+    #[test]
+    fn an_image_name_never_leaves_the_images_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(matches!(images::read(dir.path(), "../1.json"), Err(StoreError::ImageRead { .. })));
     }
 }
