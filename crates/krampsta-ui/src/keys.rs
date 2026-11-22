@@ -243,3 +243,12 @@ pub const GIT_SKIPPED: &str = "krampsta-git-skipped";
 /// The sidebar's session search, and the line it shows when nothing matches.
 pub const SESSION_SEARCH: &str = "krampsta-session-search";
 pub const SESSION_SEARCH_EMPTY: &str = "krampsta-session-search-empty";
+
+/// The command palette: its dialog, field, rows and the line shown when nothing matches.
+pub const PALETTE: &str = "krampsta-palette";
+pub const PALETTE_INPUT: &str = "krampsta-palette-input";
+pub const PALETTE_EMPTY: &str = "krampsta-palette-empty";
+
+pub fn palette_item(index: usize) -> String {
+    format!("krampsta-palette-item-{index}")
+}

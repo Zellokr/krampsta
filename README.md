@@ -73,7 +73,9 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
 - **Responsive**: al estrechar la ventana se pliegan los paneles laterales (primero el de
   cambios, después la sidebar) y vuelven a abrirse al ensancharla.
 - Atajos: `Ctrl+N`/`⌘N` nueva sesión, `Ctrl+Shift+B`/`⇧⌘B` sidebar, `Ctrl+J`/`⌘J` cambios,
-  `Ctrl+,`/`⌘,` ajustes, `Enter` enviar, `Shift+Enter` nueva línea.
+  `Ctrl+,`/`⌘,` ajustes, `Ctrl+Shift+F`/`⇧⌘F` buscar sesiones, `Enter` enviar, `Shift+Enter` nueva
+  línea. `Ctrl+K`/`⌘K` abre la **paleta de comandos**: escribe parte del nombre de un comando o de
+  una sesión; las flechas eligen, Enter lo ejecuta y Escape la cierra.
 
 | Running | Completed | Failed |
 | --- | --- | --- |

@@ -121,6 +121,8 @@ pub struct KrampstaApp {
     pub repo: crate::git::RepoView,
     /// The project's files, as the "Files" view shows them.
     pub files: crate::files::ProjectTree,
+    /// The command palette (Ctrl+K).
+    pub palette: crate::palette::Palette,
     /// The sidebar's search: its query and the sessions it matches.
     pub search: crate::search::SessionSearch,
     /// The session whose name is being edited in the sidebar.
@@ -276,6 +278,7 @@ impl KrampstaApp {
             inspector: crate::files::Inspector::default(),
             files: crate::files::ProjectTree::default(),
             repo: crate::git::RepoView::default(),
+            palette: crate::palette::Palette::default(),
             search: crate::search::SessionSearch::default(),
             renaming: crate::rename::Renaming::default(),
             servers: crate::servers::ServerList::default(),

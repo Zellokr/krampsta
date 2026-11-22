@@ -64,6 +64,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `tabs.rs` (sesiones abiertas en pestañas sobre el chat, `TabStrip` de rune-kit; la activa es
   la seleccionada; la última no se cierra; Ctrl+W), `costs.rs` (coste por sesión: tokens por modelo, `Session::by_model`, por los precios por
   millón que pone el usuario; sólo proveedores `Cloud`, sin precios de serie),
+  `palette.rs` (la paleta de comandos, `Ctrl+K`: comandos y sesiones filtrados por palabras al
+  escribir, como mucho `MAX_SHOWN` filas; su diálogo es `views/palette.rs`),
   `search.rs` (buscar sesiones por título y mensajes desde la sidebar; las coincidencias se calculan
   al escribir y en momentos concretos, `sessions_changed`, nunca por frame; `groups` las filtra),
   `rename.rs` (renombrar una sesión en su fila, `SidebarRow::renaming`: Enter guarda, Escape

@@ -77,6 +77,14 @@ pub fn on_key(s: &mut KrampstaApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
         s.new_session();
         return true;
     }
+    if ev.is_command('k') && !ev.mods.shift {
+        s.toggle_palette();
+        return true;
+    }
+    if ev.key == Key::Escape && s.palette.open {
+        s.close_palette();
+        return true;
+    }
     if ev.is_command('f') && ev.mods.shift {
         if !s.sidebar.is_open() {
             s.sidebar.toggle();
@@ -122,6 +130,7 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>) -> El {
     sign_in::dialog(s, k, &mut layer);
     menus::delete_dialog(s, k, &mut layer);
     crate::approvals::dialog(s, k, &mut layer);
+    crate::views::palette::dialog(s, k, &mut layer);
     // The root's rect is the window: refit the side panes whenever its width changes.
     let base = rune::el()
         .key("krampsta-root")
@@ -328,6 +337,8 @@ const SCENES: &[Scene] = &[
     ("rename", crate::rename::scene),
     // The sidebar searching: only the sessions that mention the word show.
     ("search", crate::search::scene),
+    // The command palette (Ctrl+K), a letter typed.
+    ("palette", crate::palette::scene),
     ("files", crate::files::scene),
     // The "Git" view: the example changes, written and not committed yet, and a binary file.
     ("git", crate::git::scene),
