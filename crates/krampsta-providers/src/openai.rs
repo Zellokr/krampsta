@@ -115,8 +115,9 @@ impl AgentEngine for OpenAiEngine {
             let tools: Vec<WireTool<'_>> = ctx.tool_specs().iter().map(WireTool::from).collect();
             let mut messages = wire_messages(&request.history);
             if !tools.is_empty() {
-                // With tools the model must know it works in a project; without, it is a plain chat.
-                let instructions = format!("{} {}", crate::responses::INSTRUCTIONS, steps::TOOLS_HINT);
+                // With tools the model must know it works in a project, and what the project's
+                // rules are; without, it is a plain chat.
+                let instructions = steps::instructions(&ctx);
                 messages.insert(
                     0,
                     WireMessage { role: "system", content: Some(Cow::Owned(instructions)), ..WireMessage::default() },

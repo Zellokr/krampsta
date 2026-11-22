@@ -7,6 +7,7 @@
 
 mod command;
 mod edit;
+pub mod guidance;
 mod list;
 mod overlay;
 mod permissions;
@@ -58,6 +59,8 @@ pub struct Workspace {
     /// Where Cargo builds when a command checks the pending edits (`pending: true`), kept
     /// between checks. None: in the throwaway copy.
     check_target: Option<PathBuf>,
+    /// The project's `AGENTS.md` and skill list, read at open (see [`guidance`]).
+    guidance: Option<Arc<str>>,
 }
 
 impl Workspace {
@@ -80,12 +83,15 @@ impl Workspace {
 
     /// Tools over `root` whose rules and log live in `config` (tests pass a temporary folder).
     pub fn open_with(root: impl AsRef<Path>, config: Option<PathBuf>) -> std::io::Result<Self> {
+        let project = Project::open(root)?;
+        let guidance = guidance::read(&project).map(Arc::from);
         Ok(Workspace {
-            project: Project::open(root)?,
+            project,
             specs: specs(),
             pending: edit::Pending::default(),
             rules: Permissions::open_with(config),
             check_target: None,
+            guidance,
         })
     }
 
@@ -155,6 +161,10 @@ impl Workspace {
 impl Toolbox for Workspace {
     fn specs(&self) -> Arc<[ToolSpec]> {
         self.specs.clone()
+    }
+
+    fn guidance(&self) -> Option<Arc<str>> {
+        self.guidance.clone()
     }
 
     fn run(&self, name: &str, arguments: &str, call: &Call<'_>) -> Result<ToolOutput, String> {
@@ -352,6 +362,21 @@ mod tests {
         assert_eq!(project.root, dir.path().canonicalize().unwrap());
         assert_eq!(project.name(), project_name(&dir.path().canonicalize().unwrap()));
         assert!(project.tools.specs().iter().any(|s| s.name == "read_file"));
+    }
+
+    #[test]
+    fn the_projects_rules_and_skills_come_with_its_tools_and_a_guide_opens_with_read_file() {
+        let guide = "---\nname: validate\ndescription: Check a fix.\n---\nRun `just ci`.\n";
+        let (_d, _c, tools) = workspace(&[("AGENTS.md", "Use tabs.\n"), (".agents/skills/validate/SKILL.md", guide)]);
+        let guidance = tools.guidance().expect("the project has rules");
+        assert!(guidance.contains("Use tabs."), "{guidance}");
+        assert!(guidance.contains("- validate (.agents/skills/validate/SKILL.md): Check a fix."), "{guidance}");
+        let read =
+            run(&tools, "read_file", r#"{"path": ".agents/skills/validate/SKILL.md"}"#, &CancellationToken::new());
+        assert!(read.expect("the guide reads").text.contains("Run `just ci`."));
+
+        let (_d, _c, plain) = workspace(&[("hello.txt", "hi\n")]);
+        assert_eq!(plain.guidance(), None);
     }
 
     #[test]

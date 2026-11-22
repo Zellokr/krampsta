@@ -79,6 +79,13 @@ pub trait Toolbox: Send + Sync + 'static {
     /// Every tool it offers, built once.
     fn specs(&self) -> Arc<[ToolSpec]>;
 
+    /// What the project tells the agent (its `AGENTS.md`, the skills it offers), read when it
+    /// was opened, for the model's instructions. Text only: it grants no permission. Cheap: no
+    /// I/O. A toolbox that wraps another passes its guidance on.
+    fn guidance(&self) -> Option<Arc<str>> {
+        None
+    }
+
     /// Runs `name` with its JSON `arguments`. `Err` is a readable reason, which the model also
     /// gets (marked as an error) so it can try otherwise.
     fn run(&self, name: &str, arguments: &str, call: &Call<'_>) -> Result<ToolOutput, String>;

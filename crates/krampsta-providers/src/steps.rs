@@ -13,6 +13,26 @@ Change files only with edit_file, never through run_command (no scripts, sed, Se
 redirections that write files): edit_file shows the user each change to review, a command doesn't. \
 Use run_command to build, test and inspect.";
 
+/// Krampsta's instructions for one run: who it is and, with tools, how to use them and what the
+/// project says ([`RunContext::guidance`]: its `AGENTS.md` and skills), which comes with them.
+pub fn instructions(ctx: &RunContext) -> String {
+    let tools = !ctx.tool_specs().is_empty();
+    let guidance = if tools { ctx.guidance() } else { None };
+    let mut out = String::with_capacity(
+        crate::responses::INSTRUCTIONS.len() + TOOLS_HINT.len() + 4 + guidance.as_deref().map_or(0, str::len),
+    );
+    out.push_str(crate::responses::INSTRUCTIONS);
+    if tools {
+        out.push(' ');
+        out.push_str(TOOLS_HINT);
+    }
+    if let Some(guidance) = guidance {
+        out.push_str("\n\n");
+        out.push_str(&guidance);
+    }
+    out
+}
+
 /// Requests one run may make before Krampsta stops it: a model calling tools in circles would
 /// otherwise spend tokens forever.
 pub const MAX_STEPS: usize = 50;

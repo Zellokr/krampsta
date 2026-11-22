@@ -58,8 +58,11 @@ fn serve(replies: Vec<String>) -> (String, Receiver<Value>) {
     (url, bodies)
 }
 
-/// `echo` (and `run_command`, as recorded streams call it) answers with its arguments; `broken` fails.
+/// `echo` (and `run_command`, as recorded streams call it) answers with its arguments; `broken`
+/// fails. Its project has rules ([`GUIDANCE`]).
 struct Echo;
+
+const GUIDANCE: &str = "<project_instructions>\nRun `just ci` before you finish.\n</project_instructions>";
 
 impl Toolbox for Echo {
     fn specs(&self) -> Arc<[ToolSpec]> {
@@ -68,6 +71,10 @@ impl Toolbox for Echo {
             ToolSpec { name: "echo".into(), description: "Echo".into(), parameters: object.clone() },
             ToolSpec { name: "broken".into(), description: "Fails".into(), parameters: object },
         ])
+    }
+
+    fn guidance(&self) -> Option<Arc<str>> {
+        Some(GUIDANCE.into())
     }
 
     fn run(&self, name: &str, arguments: &str, _: &Call<'_>) -> Result<ToolOutput, String> {
@@ -167,6 +174,7 @@ fn chat_completions_runs_the_calls_and_sends_their_results_back() {
         instructions.contains("Change files only with edit_file"),
         "the model is told not to edit through commands"
     );
+    assert!(instructions.ends_with(GUIDANCE), "the project's rules follow Krampsta's: {instructions}");
     let mut second = bodies.recv_timeout(Duration::from_secs(5)).unwrap();
     second["messages"].as_array_mut().unwrap().remove(0);
     assert_eq!(
@@ -215,7 +223,9 @@ fn the_responses_api_gets_its_output_items_back_without_ids_and_the_call_outputs
     let second = bodies.recv_timeout(Duration::from_secs(5)).unwrap();
     let input = second["input"].as_array().unwrap();
     assert_eq!(input.len(), 5, "developer, user, reasoning, call, output: {input:?}");
-    assert!(input[0]["content"][0]["text"].as_str().unwrap().contains("read_file"), "the tools hint");
+    let instructions = input[0]["content"][0]["text"].as_str().unwrap();
+    assert!(instructions.contains("read_file"), "the tools hint");
+    assert!(instructions.contains(GUIDANCE), "the project's rules: {instructions}");
     assert_eq!(input[2], json!({"type": "reasoning", "summary": [], "encrypted_content": "gAAA…"}));
     assert_eq!(
         input[3],

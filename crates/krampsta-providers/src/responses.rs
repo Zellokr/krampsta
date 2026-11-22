@@ -85,7 +85,7 @@ impl AgentEngine for ResponsesEngine {
             // Built once per run; each step appends its output items and the tools' results.
             let reasoning = reasoning(&shape);
             let tools: Vec<Value> = ctx.tool_specs().iter().map(wire_tool).collect();
-            let mut input = input(&request.history, !tools.is_empty());
+            let mut input = input(&request.history, steps::instructions(&ctx));
             let mut paragraphs = Paragraphs::default();
             for number in 0..MAX_STEPS {
                 let endpoint = tokio::select! {
@@ -218,15 +218,10 @@ fn reasoning(shape: &ModelShape) -> serde_json::Map<String, Value> {
     reasoning
 }
 
-/// The conversation as input items: Krampsta's instructions (plus any system messages) as a
+/// The conversation as input items: the run's `instructions` (plus any system messages) as a
 /// leading developer message, then each earlier turn's text (its tool traffic served that turn
 /// and would only cost tokens now).
-fn input(history: &[Message], tools: bool) -> Vec<Value> {
-    let mut instructions = INSTRUCTIONS.to_owned();
-    if tools {
-        instructions.push(' ');
-        instructions.push_str(steps::TOOLS_HINT);
-    }
+fn input(history: &[Message], mut instructions: String) -> Vec<Value> {
     let mut conversation = Vec::new();
     for m in history {
         match m.role {
@@ -412,7 +407,7 @@ mod tests {
 
     /// The first request of a run without tools, as JSON.
     fn body(model: &str, history: &[Message], shape: &ModelShape) -> Value {
-        let (input, reasoning) = (input(history, false), reasoning(shape));
+        let (input, reasoning) = (input(history, INSTRUCTIONS.into()), reasoning(shape));
         serde_json::to_value(Request::new(model, &input, &reasoning, &[])).unwrap()
     }
 
@@ -420,7 +415,8 @@ mod tests {
     fn tools_go_as_functions_and_are_left_out_when_there_are_none() {
         let spec =
             ToolSpec { name: "search".into(), description: "Find".into(), parameters: json!({"type": "object"}) };
-        let (input, reasoning) = (input(&[Message::user(MessageId(1), "hi")], true), reasoning(&ModelShape::default()));
+        let (input, reasoning) =
+            (input(&[Message::user(MessageId(1), "hi")], INSTRUCTIONS.into()), reasoning(&ModelShape::default()));
         let tools = [wire_tool(&spec)];
         let with = serde_json::to_value(Request::new("m", &input, &reasoning, &tools)).unwrap();
         assert_eq!(
@@ -464,7 +460,7 @@ mod tests {
             Message::new(MessageId(3), MessageRole::Assistant, "x".repeat(steps::HISTORY_BUDGET)),
             Message::user(MessageId(4), "current"),
         ];
-        let mut items = input(&history, true);
+        let mut items = input(&history, INSTRUCTIONS.into());
         let active = [
             json!({"type": "reasoning", "encrypted_content": "opaque"}),
             json!({"type": "function_call", "call_id": "c", "name": "search", "arguments": "{}"}),

@@ -22,7 +22,10 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `list_files`, `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
   propone, y la escritura al aceptar), `command` (`run_command`), `policy` y `permissions` (reglas de permisos: comandos y herramientas),
   `snapshot` (copia desechable con las ediciones pendientes para `run_command` con `pending: true`;
-  Cargo compila en la caché del usuario, `check-target`; no es un sandbox).
+  Cargo compila en la caché del usuario, `check-target`; no es un sandbox), `guidance` (al abrir
+  el proyecto lee su `AGENTS.md` de la raíz, con tope `MAX_RULES`, y lista las skills de
+  `.agents/skills/*/SKILL.md` y `.claude/skills/` sólo por nombre, descripción y ruta; el modelo
+  abre la guía con `read_file` cuando la necesita).
   No depende de Rune.
 - `crates/krampsta-mcp` — cliente MCP sobre el SDK oficial `rmcp`: `McpClient::connect`
   (`Transport::Stdio`, proceso con árbol que se mata entero y sin consola, que sólo hereda las
@@ -134,6 +137,10 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   con `steps::run_calls`. El bucle (pedir → herramientas → resultados → pedir) vive en cada motor,
   porque el formato es de cada API, con el tope `steps::MAX_STEPS`. Los turnos anteriores se
   mandan sólo como texto; el tráfico de herramientas vive en memoria durante la ejecución.
+- Instrucciones: todo motor las forma con `steps::instructions(&ctx)` (las de Krampsta, la pista
+  de herramientas y, con herramientas, `ctx.guidance()`: lo que dice el proyecto abierto, no las
+  reglas de Krampsta). Es sólo texto: no concede permisos. Un `Toolbox` que envuelve a otro
+  (p. ej. para sumar herramientas MCP) reenvía su `guidance`.
 - Las herramientas nunca escriben: `edit_file` devuelve un `FileChange` (antes/después) que la
   UI muestra para revisar, y guarda la propuesta como pendiente (las lecturas y ediciones
   siguientes del agente la ven). Sólo `Toolbox::write`, al aceptar desde el panel, toca el

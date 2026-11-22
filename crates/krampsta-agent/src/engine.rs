@@ -152,6 +152,12 @@ impl RunContext {
         &self.specs
     }
 
+    /// What the project tells the model ([`Toolbox::guidance`]), for the run's instructions;
+    /// `None` without tools or when the project says nothing.
+    pub fn guidance(&self) -> Option<Arc<str>> {
+        self.tools.as_ref().and_then(|t| t.guidance())
+    }
+
     /// Runs one tool call the model made: shows it starting, runs it on a blocking thread and
     /// shows its result, which goes back to the model. `Err` only when the run is cancelled
     /// (the card then shows it was stopped).
