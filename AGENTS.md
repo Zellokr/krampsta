@@ -22,6 +22,12 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `snapshot` (copia desechable con las ediciones pendientes para `run_command` con `pending: true`;
   Cargo compila en la caché del usuario, `check-target`; no es un sandbox).
   No depende de Rune.
+- `crates/krampsta-mcp` — cliente MCP sobre el SDK oficial `rmcp`: `McpClient::connect`
+  (`Transport::Stdio`, proceso con árbol que se mata entero y sin consola, guarda el final de
+  su stderr para explicar por qué no arrancó; `Transport::Http`, Streamable HTTP con cabeceras
+  y token), `tools` y `call` (cancelable, respuesta en texto con tope `MAX_REPLY`). `fake` y el
+  binario `krampsta-fake-mcp` son sólo para tests. Async, en el runtime del host. No depende
+  de Rune ni de otros crates de Krampsta.
 - `crates/krampsta-store` — historial en disco: `FileStore` (implementa `SessionStore` de
   `krampsta-agent`; un JSON por sesión, escrito por un hilo propio, de forma atómica; las imágenes
   de los mensajes, en `images/<sesión>-<mensaje>.png`, escritas una vez), `load`
@@ -52,8 +58,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   (`krampsta <carpeta>`, el último abierto o la carpeta actual; en headless, el proyecto y
   las sesiones de ejemplo) y arranca.
 - Dependencias permitidas: `app → ui → agent → core`, `ui → core`, `app → providers → agent`,
-  `providers → core`, `app → tools → agent`, `app → store → agent`, `store → core`. Sin ciclos;
-  la UI nunca depende de `krampsta-providers`, `krampsta-tools` ni `krampsta-store`.
+  `providers → core`, `app → tools → agent`, `app → store → agent`, `store → core`, `app → mcp`. Sin ciclos;
+  la UI nunca depende de `krampsta-providers`, `krampsta-tools`, `krampsta-store` ni `krampsta-mcp`.
 - Historial: se lee una vez, en `setup` (`load_history`), y llega por `poll` (`take_history`).
   La UI guarda con `SessionStore` (sólo encola), en momentos discretos (enviar, fin de
   herramienta, fin de ejecución, borrar), nunca por delta ni por frame. Con almacén, los ids de

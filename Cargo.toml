@@ -4,6 +4,7 @@ members = [
     "crates/krampsta-app",
     "crates/krampsta-core",
     "crates/krampsta-agent",
+    "crates/krampsta-mcp",
     "crates/krampsta-providers",
     "crates/krampsta-store",
     "crates/krampsta-tools",
@@ -19,6 +20,7 @@ rust-version = "1.99.1"
 [workspace.dependencies]
 krampsta-core = { path = "crates/krampsta-core" }
 krampsta-agent = { path = "crates/krampsta-agent" }
+krampsta-mcp = { path = "crates/krampsta-mcp" }
 krampsta-providers = { path = "crates/krampsta-providers" }
 krampsta-store = { path = "crates/krampsta-store" }
 krampsta-tools = { path = "crates/krampsta-tools" }

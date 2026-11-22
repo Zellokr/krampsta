@@ -66,6 +66,7 @@ krampsta/
 │   ├── krampsta-agent/        contrato AgentEngine, AgentHost (runtime async) y MockAgent
 │   ├── krampsta-providers/    motores reales: HTTP + SSE (reqwest) y OpenAI/compatibles
 │   │   └── tests/          servidor HTTP falso que reproduce streams grabados
+│   ├── krampsta-mcp/          cliente MCP (SDK `rmcp`): servidores por stdio y por HTTP
 │   ├── krampsta-store/        historial: cada sesión en un JSON, escrito en un hilo propio
 │   ├── krampsta-tools/        herramientas del agente: read_file, list_files, search, edit_file,
 │   │                       run_command, y las reglas de permisos
@@ -110,6 +111,11 @@ krampsta-app ──▶ krampsta-store ──────▶ krampsta-agent
   paralelo con detección de binarios. Cada herramienta lee sólo lo necesario, pone tope a su
   salida y se detiene al cancelar. Peor caso medido (764 MB, 31 495 archivos, sin
   coincidencias): ~340 ms, a la par que `rg`.
+- **krampsta-mcp**: cliente MCP sobre el SDK oficial (`rmcp`). `McpClient::connect` arranca un
+  servidor como proceso (stdio; árbol que se mata entero, sin consola, y el final de su stderr
+  explica por qué no arrancó) o lo alcanza por Streamable HTTP (cabeceras y token Bearer);
+  `tools` lista sus herramientas y `call` las llama, cancelable y con la respuesta recortada.
+  Aún no está conectado a la app (Hito 5).
 - **krampsta-store**: `FileStore` implementa el `SessionStore` de `krampsta-agent`. Guarda cada
   sesión en `<carpeta de datos>/krampsta/sessions/<id>.json` (en Windows, `%APPDATA%`). La UI
   sólo encola; un hilo escribe, junta los guardados repetidos de una sesión y renombra un

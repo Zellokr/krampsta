@@ -1,0 +1,44 @@
+[package]
+name = "krampsta-mcp"
+description = "Krampsta's MCP client: connects to Model Context Protocol servers over stdio or HTTP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The official Rust SDK: the protocol (version negotiation, Streamable HTTP sessions) moves fast.
+# Only the client side, its stdio and HTTP transports, and the same reqwest the providers use.
+rmcp = { version = "3.11", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "which-command",
+    "transport-streamable-http-client-reqwest",
+    "reqwest",
+] }
+# A server's process tree is killed whole (job object / process group), as run_command's is.
+process-wrap = { version = "10", default-features = false, features = ["tokio1", "job-object", "creation-flags", "process-group", "kill-on-drop"] }
+tokio = { workspace = true, features = ["process", "io-util"] }
+tokio-util.workspace = true
+http = "1"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["process", "io-util", "rt-multi-thread", "macros", "net"] }
+
+# CREATE_NO_WINDOW: no console flashes up behind the app; the same version process-wrap uses.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", default-features = false, features = ["Win32_System_Threading"] }
+
+# A fake MCP server over stdio, for the tests only (`tests/stdio.rs`).
+[[bin]]
+name = "krampsta-fake-mcp"
+path = "src/bin/fake_mcp.rs"
+test = false
+bench = false
+doc = false
+
+[lints]
+workspace = true
