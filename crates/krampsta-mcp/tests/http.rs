@@ -117,6 +117,30 @@ async fn a_bearer_token_goes_in_the_authorization_header() {
     assert_eq!(reply.text, "let in");
 }
 
+/// Against the reference server started by hand:
+/// `PORT=3917 npx -y @modelcontextprotocol/server-everything streamableHttp`, then
+/// `cargo test -p krampsta-mcp --test http -- --ignored` (`KRAMPSTA_MCP_URL` for another URL).
+#[tokio::test]
+#[ignore = "needs @modelcontextprotocol/server-everything running over HTTP"]
+async fn a_real_server_over_http() {
+    let url = std::env::var("KRAMPSTA_MCP_URL").unwrap_or_else(|_| "http://localhost:3917/mcp".into());
+    let client = McpClient::connect(&http(url, &[])).await.unwrap();
+    eprintln!("server: {:?}", client.server_name());
+    let tools = client.tools().await.unwrap();
+    assert!(tools.iter().any(|t| t.name == "echo"), "{tools:?}");
+    let cancel = CancellationToken::new();
+    let echo = client.call("echo", r#"{"message": "por HTTP"}"#, &cancel).await.unwrap();
+    assert_eq!(echo.text, "Echo: por HTTP");
+    let sum = client.call("get-sum", r#"{"a": 2, "b": 3}"#, &cancel).await.unwrap();
+    eprintln!("get-sum: {sum:?}");
+    assert!(sum.text.contains('5') && !sum.is_error);
+    // A long call that sends progress over an SSE response, then the result.
+    let long = client.call("trigger-long-running-operation", r#"{"duration": 2, "steps": 2}"#, &cancel).await.unwrap();
+    eprintln!("long: {long:?}");
+    assert!(long.text.contains("completed"));
+    client.close().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_bad_header_is_named_before_connecting() {
     let error = McpClient::connect(&http("http://127.0.0.1:9/mcp".into(), &[("Bad Header", "x")])).await.unwrap_err();

@@ -66,6 +66,22 @@ async fn a_call_stops_waiting_when_cancelled() {
 }
 
 #[tokio::test]
+async fn a_server_sees_only_the_basics_and_its_own_variables() {
+    let mut server = fake(&[]);
+    if let Transport::Stdio { env, .. } = &mut server {
+        env.insert("FAKE_TOKEN".into(), "configured".into());
+    }
+    let client = McpClient::connect(&server).await.unwrap();
+    let names = client.call("env", "{}", &CancellationToken::new()).await.unwrap().text;
+    let names: Vec<String> = names.lines().map(str::to_uppercase).collect();
+    assert!(names.contains(&"FAKE_TOKEN".to_owned()), "its configured variables: {names:?}");
+    assert!(names.contains(&"PATH".to_owned()), "what programs need to run: {names:?}");
+    // Cargo sets these for the test process; the server must not inherit them (as it must not
+    // inherit an OPENAI_API_KEY from Krampsta's).
+    assert!(!names.iter().any(|n| n.starts_with("CARGO_")), "nothing else of ours: {names:?}");
+}
+
+#[tokio::test]
 async fn a_server_that_dies_at_start_says_why() {
     let error = McpClient::connect(&fake(&["--crash"])).await.unwrap_err();
     let message = error.to_string();
@@ -80,4 +96,40 @@ async fn a_command_that_doesnt_exist_is_named() {
     let error = McpClient::connect(&missing).await.unwrap_err();
     assert!(matches!(error, McpError::Start { .. }), "{error}");
     assert!(error.to_string().contains("krampsta-no-such-server"));
+}
+
+/// Against the reference server, through npx (needs Node and the network; run by hand with
+/// `cargo test -p krampsta-mcp --test stdio -- --ignored`).
+#[tokio::test]
+#[ignore = "downloads and runs @modelcontextprotocol/server-everything with npx"]
+async fn a_real_server_over_npx() {
+    let everything = Transport::Stdio {
+        command: "npx".into(),
+        args: vec!["-y".into(), "@modelcontextprotocol/server-everything".into()],
+        env: BTreeMap::new(),
+        cwd: None,
+    };
+    let client = McpClient::connect(&everything).await.unwrap();
+    eprintln!("server: {:?}", client.server_name());
+    let tools = client.tools().await.unwrap();
+    eprintln!("tools: {:?}", tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>());
+    let cancel = CancellationToken::new();
+    let echo = client.call("echo", r#"{"message": "hola desde Krampsta"}"#, &cancel).await.unwrap();
+    eprintln!("echo: {echo:?}");
+    assert!(echo.text.contains("hola desde Krampsta") && !echo.is_error);
+    // The test process carries Cargo's variables; the server must see none of them.
+    let seen = client.call("get-env", "{}", &cancel).await.unwrap().text;
+    assert!(seen.contains("PATH") && !seen.contains("CARGO_"), "it inherits only the basics");
+    for tool in tools.iter().filter(|t| t.name != "echo") {
+        // Whatever each answers with arguments it may not accept: never a hang or a panic.
+        let started = Instant::now();
+        let reply = tokio::time::timeout(Duration::from_secs(20), client.call(&tool.name, "{}", &cancel)).await;
+        eprintln!(
+            "{} ({:?}): {:?}",
+            tool.name,
+            started.elapsed(),
+            reply.map(|r| r.map(|r| r.text.chars().take(80).collect::<String>()))
+        );
+    }
+    client.close().await.unwrap();
 }

@@ -258,7 +258,9 @@ fn spawn(
     let start = |source| McpError::Start { command: command.to_owned(), source };
     // Found on PATH with its extension (`npx` is `npx.cmd` on Windows).
     let mut cmd = rmcp::transport::which_command(command).map_err(start)?;
-    cmd.args(args).envs(env);
+    // Only what a program needs to run, never the rest of Krampsta's environment (API keys
+    // live there): the server gets the configured variables on top.
+    cmd.args(args).env_clear().envs(inherited_env()).envs(env);
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
@@ -273,6 +275,35 @@ fn spawn(
     wrapped.wrap(process_wrap::tokio::ProcessGroup::leader());
     wrapped.wrap(process_wrap::tokio::KillOnDrop);
     TokioChildProcess::builder(wrapped).stderr(Stdio::piped()).spawn().map_err(start)
+}
+
+/// The variables a stdio server inherits, as the official TypeScript SDK chooses them
+/// (`getDefaultEnvironment`): enough to find programs and the user's folders.
+const INHERITED_ENV: &[&str] = if cfg!(windows) {
+    &[
+        "APPDATA",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "LOCALAPPDATA",
+        "PATH",
+        "PATHEXT",
+        "PROCESSOR_ARCHITECTURE",
+        "PROGRAMFILES",
+        "SYSTEMDRIVE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "USERNAME",
+        "USERPROFILE",
+        "WINDIR",
+        "COMSPEC",
+    ]
+} else {
+    &["HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER", "LANG", "TMPDIR"]
+};
+
+fn inherited_env() -> impl Iterator<Item = (&'static str, std::ffi::OsString)> {
+    INHERITED_ENV.iter().filter_map(|name| std::env::var_os(name).map(|value| (*name, value)))
 }
 
 /// Keeps the last [`STDERR_TAIL`] bytes the server writes to stderr.

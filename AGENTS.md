@@ -23,7 +23,9 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   Cargo compila en la caché del usuario, `check-target`; no es un sandbox).
   No depende de Rune.
 - `crates/krampsta-mcp` — cliente MCP sobre el SDK oficial `rmcp`: `McpClient::connect`
-  (`Transport::Stdio`, proceso con árbol que se mata entero y sin consola, guarda el final de
+  (`Transport::Stdio`, proceso con árbol que se mata entero y sin consola, que sólo hereda las
+  variables básicas del sistema, `INHERITED_ENV`, más las suyas: nunca las claves de Krampsta;
+  guarda el final de
   su stderr para explicar por qué no arrancó; `Transport::Http`, Streamable HTTP con cabeceras
   y token), `tools` y `call` (cancelable, respuesta en texto con tope `MAX_REPLY`). `fake` y el
   binario `krampsta-fake-mcp` son sólo para tests. Async, en el runtime del host. No depende
