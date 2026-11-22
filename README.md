@@ -18,7 +18,8 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   tema **OpenCode** de Rune (`rune-theme-opencode`, el mismo de Rugents), con Inter e IBM Plex Mono.
 - **Sidebar**: identidad de Krampsta, *New session*, lista de sesiones con la activa resaltada
   (spinner mientras corre, punto de aviso si falló) y acceso a *Settings*. Doble clic en una sesión
-  (o «Rename» en su menú) la renombra en el sitio: Enter guarda, Escape cancela.
+  (o «Rename» en su menú) la renombra en el sitio: Enter guarda, Escape cancela. El campo de
+  búsqueda (`Ctrl+Shift+F`) filtra la lista por título y por el texto de los mensajes.
 - **Panel principal**: título de la sesión, historial (usuario a la derecha, Krampsta a la
   izquierda con Markdown y bloques de código coloreados), indicador de estado del agente
   (`Idle`, `Running`, `Completed`, `Failed`, `Cancelled`) y *composer* que crece con el texto.

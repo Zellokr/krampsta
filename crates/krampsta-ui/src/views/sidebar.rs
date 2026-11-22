@@ -4,9 +4,9 @@ use std::path::Path;
 
 use krampsta_agent::project_name;
 use krampsta_core::{AgentStatus, Session};
-use rune::{El, Tx, col, icon, row, text};
+use rune::{El, Key, Tx, col, icon, row, text};
 use rune_kit::shell::RowStatus;
-use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit, Sidebar, SidebarRow, SidebarSection};
+use rune_kit::{ControlSize, IconButton, IconButtonVariant, Kit, Sidebar, SidebarRow, SidebarSection, TextInput};
 
 use crate::components::{icons, menus};
 use crate::keys;
@@ -34,7 +34,24 @@ pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
         .on_select(|s: &mut KrampstaApp, _: &mut Tx| s.open_settings())
         .build(k)
         .key(keys::SETTINGS);
-    let sidebar = Sidebar::new()
+    let search = TextInput::new(&s.search.query)
+        .placeholder("Search sessions")
+        .label("Search sessions")
+        .leading_icon(k.glyph.search)
+        .clear_button()
+        .width(None)
+        .on_edit(|s: &mut KrampstaApp| &mut s.search.query)
+        .on_change(|s: &mut KrampstaApp, _: &mut Tx| s.refresh_search())
+        .on_key(|s: &mut KrampstaApp, ev, _: &mut Tx| {
+            if ev.key == Key::Escape && !s.search.query.text.is_empty() {
+                s.clear_search();
+                return true;
+            }
+            false
+        })
+        .build(k)
+        .key(keys::SESSION_SEARCH);
+    let mut sidebar = Sidebar::new()
         .label("Sessions")
         .inset(0.0)
         .header_gap(4.0)
@@ -43,7 +60,12 @@ pub fn view(s: &KrampstaApp, k: &Kit, layer: &mut Vec<El>) -> El {
         .header(brand(k))
         .header(project(s, k))
         .header(new)
+        .header(search)
         .footer(settings);
+    if s.search_count() == Some(0) {
+        let none = text("No sessions match").font(k.ty.small).color(k.c.text_faint).px(8.0).py(6.0);
+        sidebar = sidebar.header(none.key(keys::SESSION_SEARCH_EMPTY));
+    }
     s.groups().into_iter().fold(sidebar, |sb, g| sb.section(group(s, g, k, layer))).build(k)
 }
 
@@ -56,7 +78,8 @@ fn group(s: &KrampstaApp, g: Group<'_>, k: &Kit, layer: &mut Vec<El>) -> Sidebar
     let mut section = SidebarSection::new(g.name.clone())
         .key(keys::project_group(g.root))
         .count(g.sessions.len())
-        .collapsed(s.is_group_collapsed(g.root))
+        // While searching, every group shows its matches.
+        .collapsed(s.is_group_collapsed(g.root) && !s.search.is_active())
         .on_toggle(move |s: &mut KrampstaApp, _: &mut Tx| s.toggle_group(toggle_root.clone()));
     if let Some(folder) = root.filter(|_| !is_open) {
         let open = IconButton::new(&icons::FOLDER)

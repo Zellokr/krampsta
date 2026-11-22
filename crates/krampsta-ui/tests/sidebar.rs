@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! Renaming a session from the sidebar, as a person would: a double click on its row, a name
-//! typed, Return to keep it or Escape to drop it.
+//! The sessions in the sidebar, used as a person would: renamed with a double click on the row,
+//! a name typed, Return to keep it or Escape to drop it; and searched from the field above them.
 
 use std::sync::Arc;
 
@@ -90,4 +90,34 @@ fn rename_in_the_rows_menu_opens_the_field_too() {
     retype(&mut rt, "From the menu");
     press(&mut rt, Key::Enter);
     assert_eq!(rt.state.session(id).unwrap().title, "From the menu");
+}
+
+fn listed(rt: &Runtime<KrampstaApp>, id: krampsta_core::SessionId) -> bool {
+    rt.find(&keys::session(id)).is_some()
+}
+
+#[test]
+fn the_search_shortcut_and_typing_filter_the_list_and_escape_brings_it_back() {
+    let mut rt = runtime();
+    let (welcome, retry) = (rt.state.sessions[0].id, rt.state.sessions[1].id);
+    // App shortcuts go through `app::on_key`, as the window's spec routes them.
+    let search = KeyEvent { key: Key::Command('f'), mods: Mods { cmd: true, shift: true, ..Mods::default() } };
+    rt.update(|s, tx| {
+        app::on_key(s, &search, tx);
+    });
+    settle(&mut rt);
+    assert!(rt.state.search.query.focused, "Ctrl+Shift+F puts the caret in the search");
+
+    rt.ime(Ime::Commit("jitter".into()));
+    settle(&mut rt);
+    assert!(listed(&rt, retry), "a session whose messages mention it");
+    assert!(!listed(&rt, welcome), "one that doesn't is hidden");
+
+    rt.ime(Ime::Commit(" nothing like this".into()));
+    settle(&mut rt);
+    assert!(rt.find(keys::SESSION_SEARCH_EMPTY).is_some(), "nothing matches: it says so");
+
+    press(&mut rt, Key::Escape);
+    assert!(listed(&rt, welcome) && listed(&rt, retry), "Escape empties the search");
+    assert!(rt.find(keys::SESSION_SEARCH_EMPTY).is_none());
 }

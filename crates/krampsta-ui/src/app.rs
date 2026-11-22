@@ -77,6 +77,13 @@ pub fn on_key(s: &mut KrampstaApp, ev: &KeyEvent, tx: &mut Tx) -> bool {
         s.new_session();
         return true;
     }
+    if ev.is_command('f') && ev.mods.shift {
+        if !s.sidebar.is_open() {
+            s.sidebar.toggle();
+        }
+        s.focus_search();
+        return true;
+    }
     if ev.is_command('\\') && s.screen == Screen::Chat {
         s.toggle_split();
         return true;
@@ -319,6 +326,8 @@ const SCENES: &[Scene] = &[
     // The right panel's "Files" view: the project's tree, filtered by nothing, with proposed files marked.
     // A session's row turned into a field, being renamed.
     ("rename", crate::rename::scene),
+    // The sidebar searching: only the sessions that mention the word show.
+    ("search", crate::search::scene),
     ("files", crate::files::scene),
     // The "Git" view: the example changes, written and not committed yet, and a binary file.
     ("git", crate::git::scene),

@@ -57,7 +57,7 @@ impl KrampstaApp {
         if let Some(root) = open {
             groups.push(Group { root: Some(root), name: project_name(root), sessions: Vec::new() });
         }
-        for session in &self.sessions {
+        for session in self.sessions.iter().filter(|s| self.shows(s.id)) {
             let root = session.project.as_deref().or(open);
             match groups.iter_mut().find(|g| g.root == root) {
                 Some(group) => group.sessions.push(session),

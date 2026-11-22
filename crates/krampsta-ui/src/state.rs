@@ -121,6 +121,8 @@ pub struct KrampstaApp {
     pub repo: crate::git::RepoView,
     /// The project's files, as the "Files" view shows them.
     pub files: crate::files::ProjectTree,
+    /// The sidebar's search: its query and the sessions it matches.
+    pub search: crate::search::SessionSearch,
     /// The session whose name is being edited in the sidebar.
     pub renaming: crate::rename::Renaming,
     /// The MCP servers, as Settings shows them.
@@ -198,6 +200,7 @@ impl KrampstaApp {
             }
         }
         let mut changed = self.sessions.len() != before;
+        self.sessions_changed();
         if let Some(first) = history.failures.first() {
             for failure in &history.failures {
                 eprintln!("krampsta: {failure}");
@@ -273,6 +276,7 @@ impl KrampstaApp {
             inspector: crate::files::Inspector::default(),
             files: crate::files::ProjectTree::default(),
             repo: crate::git::RepoView::default(),
+            search: crate::search::SessionSearch::default(),
             renaming: crate::rename::Renaming::default(),
             servers: crate::servers::ServerList::default(),
             images: crate::images::Images::default(),
@@ -333,6 +337,8 @@ impl KrampstaApp {
 
     /// Adds an empty session at the top and selects it.
     pub fn new_session(&mut self) -> SessionId {
+        // A new session matches no query: it shows, so the search goes.
+        self.clear_search();
         let id = SessionId(self.ids.next());
         let mut session = Session::new(id);
         session.project = self.project.as_ref().map(|p| p.root.clone());
@@ -472,6 +478,10 @@ impl KrampstaApp {
                     // Saved at each step's end, not per word: a crash mid-run keeps the
                     // finished steps, and no frame writes.
                     let step_ended = matches!(event, AgentEvent::ToolCallFinished { .. }) || event.is_terminal();
+                    if applied && event.is_terminal() {
+                        // What the run wrote may match the search now.
+                        self.sessions_changed();
+                    }
                     if applied && step_ended {
                         self.persist(e.session);
                     }

@@ -239,3 +239,7 @@ pub const GIT_DIFF: &str = "krampsta-git-diff";
 pub const GIT_REFRESH: &str = "krampsta-git-refresh";
 pub const GIT_EMPTY: &str = "krampsta-git-empty";
 pub const GIT_SKIPPED: &str = "krampsta-git-skipped";
+
+/// The sidebar's session search, and the line it shows when nothing matches.
+pub const SESSION_SEARCH: &str = "krampsta-session-search";
+pub const SESSION_SEARCH_EMPTY: &str = "krampsta-session-search-empty";

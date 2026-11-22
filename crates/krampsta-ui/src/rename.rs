@@ -45,6 +45,7 @@ impl KrampstaApp {
         {
             session.title = typed;
             self.persist(id);
+            self.sessions_changed();
         }
         self.focus_composer(self.selected);
     }
