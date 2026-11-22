@@ -37,6 +37,10 @@ impl Toolbox for ToolSet {
         cached.1.clone()
     }
 
+    fn guidance(&self) -> Option<Arc<str>> {
+        self.local.as_ref().and_then(|l| l.guidance())
+    }
+
     fn run(&self, name: &str, arguments: &str, call: &Call<'_>) -> Result<ToolOutput, String> {
         if name.starts_with(PREFIX) {
             return self.mcp.call(name, arguments, call.cancel);

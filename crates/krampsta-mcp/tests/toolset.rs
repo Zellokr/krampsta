@@ -26,6 +26,10 @@ impl Toolbox for Local {
         }])
     }
 
+    fn guidance(&self) -> Option<Arc<str>> {
+        Some("Use tabs.".into())
+    }
+
     fn run(&self, _: &str, _: &str, _: &Call<'_>) -> Result<ToolOutput, String> {
         Ok("local".to_owned().into())
     }
@@ -133,6 +137,13 @@ fn without_a_project_only_the_servers_tools_run() {
     assert_eq!(call(&tools, "mcp__fake__echo", r#"{"text": "no folder"}"#).unwrap().text, "no folder");
     assert!(call(&tools, "read_file", "{}").unwrap_err().contains("open one first"));
     assert!(call(&tools, "mcp__gone__x", "{}").unwrap_err().contains("isn't connected"));
+}
+
+#[test]
+fn the_projects_guidance_passes_through_and_there_is_none_without_a_project() {
+    let servers = McpServers::start(Vec::new(), None).unwrap();
+    assert_eq!(ToolSet::new(Some(Arc::new(Local)), servers.clone()).guidance().as_deref(), Some("Use tabs."));
+    assert_eq!(ToolSet::new(None, servers).guidance(), None);
 }
 
 #[test]
