@@ -22,6 +22,7 @@ pub fn session(s: &KrampstaApp, x: &Session, trigger: El, k: &Kit, layer: &mut V
                 .icon(&icons::COPY)
                 .on_select_tx(move |s: &mut KrampstaApp, tx: &mut Tx| s.copy_session_title(id, tx)),
         )
+        .item(MenuItem::new("Rename").icon(&icons::PENCIL).on_select(move |s: &mut KrampstaApp| s.start_rename(id)))
         .separator()
         .item(
             MenuItem::new("Delete…")

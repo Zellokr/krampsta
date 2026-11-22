@@ -67,6 +67,9 @@ impl KrampstaApp {
         if self.sessions[index].status.is_running() {
             return;
         }
+        if self.renaming.session == Some(id) {
+            self.cancel_rename();
+        }
         let removed = self.sessions.remove(index);
         if let Some(store) = &self.store {
             store.delete(id);

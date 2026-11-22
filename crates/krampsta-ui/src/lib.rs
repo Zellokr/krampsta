@@ -27,6 +27,7 @@ pub mod panes;
 pub mod picker;
 pub mod prefs;
 pub mod projects;
+pub mod rename;
 pub mod sample;
 pub mod servers;
 pub mod session_view;

@@ -317,6 +317,8 @@ const SCENES: &[Scene] = &[
     ("prices", scene_prices),
     // Settings with an MCP server in each state: connected with its tools, connecting, failed, off.
     // The right panel's "Files" view: the project's tree, filtered by nothing, with proposed files marked.
+    // A session's row turned into a field, being renamed.
+    ("rename", crate::rename::scene),
     ("files", crate::files::scene),
     // The "Git" view: the example changes, written and not committed yet, and a binary file.
     ("git", crate::git::scene),

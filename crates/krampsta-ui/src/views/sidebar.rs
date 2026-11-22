@@ -129,7 +129,16 @@ fn session_row(s: &KrampstaApp, x: &Session, k: &Kit, layer: &mut Vec<El>) -> El
         .height(44.0)
         .subtitle(subtitle(x))
         .selected(s.screen == Screen::Chat && s.selected == id)
-        .on_select(move |s: &mut KrampstaApp, _: &mut Tx| s.select(id));
+        .on_select(move |s: &mut KrampstaApp, _: &mut Tx| s.select(id))
+        .on_double_click(move |s: &mut KrampstaApp, _: &mut Tx| s.start_rename(id));
+    if let Some(edit) = s.renaming_field(id) {
+        row = row.renaming(
+            edit,
+            |s: &mut KrampstaApp| &mut s.renaming.edit,
+            |s: &mut KrampstaApp, _: &mut Tx| s.commit_rename(),
+            |s: &mut KrampstaApp, _: &mut Tx| s.cancel_rename(),
+        );
+    }
     match x.status {
         AgentStatus::Running => row = row.status(RowStatus::Busy),
         AgentStatus::Failed { .. } => row = row.status(RowStatus::Attention),

@@ -64,6 +64,8 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `tabs.rs` (sesiones abiertas en pestañas sobre el chat, `TabStrip` de rune-kit; la activa es
   la seleccionada; la última no se cierra; Ctrl+W), `costs.rs` (coste por sesión: tokens por modelo, `Session::by_model`, por los precios por
   millón que pone el usuario; sólo proveedores `Cloud`, sin precios de serie),
+  `rename.rs` (renombrar una sesión en su fila, `SidebarRow::renaming`: Enter guarda, Escape
+  cancela, y uno a medias se guarda al elegir otra sesión),
   `servers.rs` (los servidores MCP en Ajustes, desde `ToolServers`: la lista se copia en `pump`
   sólo cuando cambia su versión; un servidor que falla lo avisa en el composer; el formulario
   para añadir y la confirmación de quitar; la vista en `views/mcp.rs`),

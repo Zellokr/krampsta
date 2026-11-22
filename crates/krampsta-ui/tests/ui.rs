@@ -399,8 +399,8 @@ fn a_session_is_deleted_from_its_context_menu_after_confirming() {
     right_click(&mut rt, &keys::session(first));
     assert!(has(&rt, &format!("{menu}-menu")), "right-click opens the row's menu");
 
-    // Items: Copy title, a separator, Delete….
-    click(&mut rt, &format!("{menu}-item2"));
+    // Items: Copy title, Rename, a separator, Delete….
+    click(&mut rt, &format!("{menu}-item3"));
     assert!(!has(&rt, &format!("{menu}-menu")), "choosing closes the menu");
     let dialog = format!("{}-dialog", keys::DELETE_SESSION);
     assert!(has(&rt, &dialog), "deleting asks first");
@@ -409,7 +409,7 @@ fn a_session_is_deleted_from_its_context_menu_after_confirming() {
     assert!(rt.state.session(first).is_some(), "cancel keeps it");
 
     right_click(&mut rt, &keys::session(first));
-    click(&mut rt, &format!("{menu}-item2"));
+    click(&mut rt, &format!("{menu}-item3"));
     click(&mut rt, keys::DELETE_SESSION_CONFIRM);
     assert!(rt.state.session(first).is_none());
     assert!(!has(&rt, &keys::session(first)));

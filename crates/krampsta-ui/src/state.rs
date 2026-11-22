@@ -121,6 +121,8 @@ pub struct KrampstaApp {
     pub repo: crate::git::RepoView,
     /// The project's files, as the "Files" view shows them.
     pub files: crate::files::ProjectTree,
+    /// The session whose name is being edited in the sidebar.
+    pub renaming: crate::rename::Renaming,
     /// The MCP servers, as Settings shows them.
     pub servers: crate::servers::ServerList,
     /// Reads pasted and saved images off the UI thread.
@@ -210,7 +212,7 @@ impl KrampstaApp {
     }
 
     /// Queues the session for saving, if there is a store and it has something worth keeping.
-    fn persist(&self, id: SessionId) {
+    pub(crate) fn persist(&self, id: SessionId) {
         if let (Some(store), Some(session)) = (&self.store, self.session(id))
             && !session.messages.is_empty()
         {
@@ -271,6 +273,7 @@ impl KrampstaApp {
             inspector: crate::files::Inspector::default(),
             files: crate::files::ProjectTree::default(),
             repo: crate::git::RepoView::default(),
+            renaming: crate::rename::Renaming::default(),
             servers: crate::servers::ServerList::default(),
             images: crate::images::Images::default(),
             ids,
@@ -305,7 +308,7 @@ impl KrampstaApp {
         self.sessions.iter().find(|s| s.id == id)
     }
 
-    fn session_mut(&mut self, id: SessionId) -> Option<&mut Session> {
+    pub(crate) fn session_mut(&mut self, id: SessionId) -> Option<&mut Session> {
         self.sessions.iter_mut().find(|s| s.id == id)
     }
 
@@ -341,6 +344,11 @@ impl KrampstaApp {
     }
 
     pub fn select(&mut self, id: SessionId) {
+        // A rename left open keeps its name when another session is chosen (as a click elsewhere
+        // would); a click on its own row, inside the field, leaves it open.
+        if self.renaming.session.is_some_and(|r| r != id) {
+            self.commit_rename();
+        }
         if self.session(id).is_some() {
             self.open_tab(id);
             self.swap_if_other(id);
