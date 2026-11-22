@@ -7,6 +7,7 @@
 
 mod command;
 mod edit;
+mod git;
 pub mod guidance;
 mod list;
 mod overlay;
@@ -22,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use krampsta_agent::{
-    Access, Approval, Call, OpenedProject, ProjectFiles, ProjectOpener, ToolOutput, ToolSpec, Toolbox,
+    Access, Approval, Call, OpenedProject, ProjectFiles, ProjectOpener, RepoDiff, ToolOutput, ToolSpec, Toolbox,
 };
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -217,6 +218,10 @@ impl Toolbox for Workspace {
 
     fn set_pending(&self, path: &str, content: Option<Arc<str>>) {
         self.pending.set(path, content);
+    }
+
+    fn repo_diff(&self) -> Result<RepoDiff, String> {
+        git::repo_diff(&self.project)
     }
 
     fn files(&self) -> Result<ProjectFiles, String> {

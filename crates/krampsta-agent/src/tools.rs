@@ -39,6 +39,27 @@ pub struct ProjectFiles {
     pub truncated: bool,
 }
 
+/// One file that differs from the repository's last commit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepoChange {
+    /// Relative to the project folder, with `/`.
+    pub path: String,
+    /// What the last commit holds; `None` for a file it doesn't have (new, untracked).
+    pub before: Option<Arc<str>>,
+    /// What the folder holds; `None` for a deleted file.
+    pub after: Option<Arc<str>>,
+}
+
+/// What differs from the repository's last commit, as [`Toolbox::repo_diff`] reads it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RepoDiff {
+    pub changes: Vec<RepoChange>,
+    /// Changed files shown by name only: binary, or too big to compare.
+    pub skipped: Vec<String>,
+    /// It stopped at its cap: more files changed.
+    pub truncated: bool,
+}
+
 /// Whether a call may run, as the permission rules say.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Access {
@@ -127,6 +148,12 @@ pub trait Toolbox: Send + Sync + 'static {
     /// `.gitignore` leaves out left out, new files still only proposed included). Blocking:
     /// the host calls it on a blocking thread.
     fn files(&self) -> Result<ProjectFiles, String> {
+        Err("no project folder is open".into())
+    }
+
+    /// What differs from the repository's last commit (`HEAD`): staged and unstaged changes and
+    /// untracked files. Blocking: the host calls it on a blocking thread.
+    fn repo_diff(&self) -> Result<RepoDiff, String> {
         Err("no project folder is open".into())
     }
 }

@@ -26,7 +26,9 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   como archivo aparte (`images/` junto a las sesiones).
 - **Panel derecho**: los cambios que propone el agente, como diff (`rune-kit` `DiffView`): cada
   archivo se acepta o rechaza entero desde su cabecera, y cada bloque desde debajo;
-  se oculta/muestra desde la barra (`Ctrl+J` / `⌘J`). Su cabecera cambia a **Files**: el árbol
+  se oculta/muestra desde la barra (`Ctrl+J` / `⌘J`). Su cabecera cambia a **Git**: lo que difiere
+  del último commit (preparado o no, y los archivos sin seguimiento), en un diff de sólo lectura
+  que lee `git`; los binarios o los muy grandes sólo se nombran. Y a **Files**: el árbol
   de archivos del proyecto (`Tree` de rune-kit), como lo deja `.gitignore`, con un filtro y una marca
   en los archivos (y carpetas) con cambios propuestos; abrir un archivo (doble clic o Enter) añade
   su ruta al mensaje.

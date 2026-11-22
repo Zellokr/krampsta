@@ -71,7 +71,9 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   `pump` a `SessionView`; nunca en `view`; sólo se envían si `Provider::images`),
   `files.rs` (el árbol de archivos de la vista «Files»: la lista sale de `Toolbox::files` por
   `AgentHost::list_files`, numerada, y llega por `pump`; caduca al cambiar de proyecto o escribir un
-  cambio; el panel con su selector es `views/inspector.rs`),
+  cambio; el panel con su selector es `views/inspector.rs`), `git.rs` (la vista «Git»: el diff frente
+  a `HEAD` sale de `Toolbox::repo_diff`, que ejecuta `git` en `krampsta-tools` (`git.rs`, sin consola,
+  con topes) por `AgentHost::diff_repo`; caduca con la lista de archivos, `disk_changed`),
   `changes.rs` (revisar los cambios
   propuestos: aceptar o rechazar archivos y bloques), `theme.rs` (único sitio de colores),
   `keys.rs` (claves estables), `sample.rs` (ejemplos sólo para capturas y tests:

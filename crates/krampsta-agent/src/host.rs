@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::catalog::{DeviceCode, LoginPrompt};
 use crate::engine::{AgentEngine, AgentError, Approvals, BoxFuture, RunContext, RunRequest, lock};
 use crate::projects::{ProjectOpened, ProjectOpener};
-use crate::tools::{Decision, ProjectFiles, Toolbox};
+use crate::tools::{Decision, ProjectFiles, RepoDiff, Toolbox};
 
 /// Called from a worker thread after each event is queued, to wake the UI so it drains them.
 /// Rune's `Waker` (`Arc<dyn Fn() + Send + Sync>`) is one.
@@ -41,6 +41,8 @@ pub struct AgentHost {
     projects_rx: Receiver<ProjectOpened>,
     files_tx: Sender<FileList>,
     files_rx: Receiver<FileList>,
+    repo_tx: Sender<RepoDiffList>,
+    repo_rx: Receiver<RepoDiffList>,
     /// Calls waiting for the user to allow them, shared with every run's context.
     approvals: Approvals,
     /// The sign-in in progress, if any (one at a time).
@@ -62,6 +64,14 @@ pub struct FileList {
     /// that was open before) from the current one.
     pub ask: u64,
     pub result: Result<ProjectFiles, String>,
+}
+
+/// The answer to [`AgentHost::diff_repo`]: which request it answers, and the diff.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepoDiffList {
+    /// The number the caller gave the request (see [`FileList::ask`]).
+    pub ask: u64,
+    pub result: Result<RepoDiff, String>,
 }
 
 /// The answer to [`AgentHost::fetch_models`].
@@ -103,6 +113,7 @@ impl AgentHost {
         let (writes_tx, writes_rx) = channel();
         let (projects_tx, projects_rx) = channel();
         let (files_tx, files_rx) = channel();
+        let (repo_tx, repo_rx) = channel();
         AgentHost {
             writes_tx,
             writes_rx,
@@ -110,6 +121,8 @@ impl AgentHost {
             projects_rx,
             files_tx,
             files_rx,
+            repo_tx,
+            repo_rx,
             approvals: Approvals::default(),
             engine,
             tools: None,
@@ -209,6 +222,31 @@ impl AgentHost {
     /// Takes every answer to [`list_files`](Self::list_files), without blocking.
     pub fn drain_files(&mut self) -> Vec<FileList> {
         self.files_rx.try_iter().collect()
+    }
+
+    /// Reads what differs from the repository's last commit through the tools, off the UI
+    /// thread; the answer, tagged `ask`, arrives through [`drain_repo`](Self::drain_repo).
+    pub fn diff_repo(&mut self, ask: u64) -> Result<(), AgentError> {
+        let (tx, notify, tools) = (self.repo_tx.clone(), self.notify.clone(), self.tools.clone());
+        let Some(tools) = tools else {
+            if tx.send(RepoDiffList { ask, result: Err("no project folder is open".into()) }).is_ok() {
+                notify();
+            }
+            return Ok(());
+        };
+        self.runtime()?.spawn(async move {
+            let job = tokio::task::spawn_blocking(move || tools.repo_diff());
+            let result = job.await.unwrap_or_else(|e| Err(format!("reading the repository stopped abnormally: {e}")));
+            if tx.send(RepoDiffList { ask, result }).is_ok() {
+                notify();
+            }
+        });
+        Ok(())
+    }
+
+    /// Takes every answer to [`diff_repo`](Self::diff_repo), without blocking.
+    pub fn drain_repo(&mut self) -> Vec<RepoDiffList> {
+        self.repo_rx.try_iter().collect()
     }
 
     /// Takes every answer to [`open_project`](Self::open_project), without blocking.

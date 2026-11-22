@@ -318,6 +318,8 @@ const SCENES: &[Scene] = &[
     // Settings with an MCP server in each state: connected with its tools, connecting, failed, off.
     // The right panel's "Files" view: the project's tree, filtered by nothing, with proposed files marked.
     ("files", crate::files::scene),
+    // The "Git" view: the example changes, written and not committed yet, and a binary file.
+    ("git", crate::git::scene),
     ("mcp-servers", |s| {
         // Settings shows the providers too: the stills assign them, never the machine's own.
         stage_accounts(s, false);

@@ -198,7 +198,7 @@ impl KrampstaApp {
                 Err(e) => self.review.error = Some(e),
                 Ok(()) => {
                     // A new file may have been written: the file tree lists it.
-                    self.files_changed();
+                    self.disk_changed();
                     if let Some(i) = self.review.proposals.iter().position(|c| c.path == path) {
                         let change = FileChange { before: Some(content), ..self.review.proposals[i].clone() };
                         self.replace_change(i, change);

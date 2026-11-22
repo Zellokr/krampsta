@@ -117,6 +117,8 @@ pub struct KrampstaApp {
     pub(crate) opener: Option<Arc<dyn ProjectOpener>>,
     /// What the right panel shows: the changes, or the project's files.
     pub inspector: crate::files::Inspector,
+    /// What differs from the last commit, as the "Git" view shows it.
+    pub repo: crate::git::RepoView,
     /// The project's files, as the "Files" view shows them.
     pub files: crate::files::ProjectTree,
     /// The MCP servers, as Settings shows them.
@@ -268,6 +270,7 @@ impl KrampstaApp {
             opener: None,
             inspector: crate::files::Inspector::default(),
             files: crate::files::ProjectTree::default(),
+            repo: crate::git::RepoView::default(),
             servers: crate::servers::ServerList::default(),
             images: crate::images::Images::default(),
             ids,
@@ -420,9 +423,11 @@ impl KrampstaApp {
         let writes = self.agent.drain_writes();
         let projects = self.agent.drain_projects();
         let file_lists = self.agent.drain_files();
+        let repo_diffs = self.agent.drain_repo();
         let mut changed = self.land_accounts(accounts);
         changed |= self.land_projects(projects);
         changed |= self.land_files(file_lists);
+        changed |= self.land_repo(repo_diffs);
         changed |= self.land_models(lists);
         let (writes_changed, mut panel_dirty) = self.land_writes(writes);
         changed |= writes_changed;

@@ -233,3 +233,9 @@ pub const FILES_TREE: &str = "krampsta-files-tree";
 pub const FILES_FILTER: &str = "krampsta-files-filter";
 pub const FILES_REFRESH: &str = "krampsta-files-refresh";
 pub const FILES_EMPTY: &str = "krampsta-files-empty";
+
+/// The "Git" view: the diff, its refresh button, the empty or failed state, the skipped files.
+pub const GIT_DIFF: &str = "krampsta-git-diff";
+pub const GIT_REFRESH: &str = "krampsta-git-refresh";
+pub const GIT_EMPTY: &str = "krampsta-git-empty";
+pub const GIT_SKIPPED: &str = "krampsta-git-skipped";

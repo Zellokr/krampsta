@@ -16,6 +16,8 @@ pub enum Inspector {
     /// The changes the agent proposed, to review.
     #[default]
     Changes,
+    /// What differs from the repository's last commit (`git.rs`).
+    Git,
     /// The project's files.
     Files,
 }
@@ -55,11 +57,14 @@ impl Default for ProjectTree {
 }
 
 impl KrampstaApp {
-    /// Shows `inspector` in the right panel, opening it, and lists the files if they aren't yet.
+    /// Shows `inspector` in the right panel, opening it, and reads what it shows if it isn't yet.
     pub fn show_inspector(&mut self, inspector: Inspector) {
         self.inspector = inspector;
         if !self.changes.is_open() {
             self.toggle_changes();
+        }
+        if inspector == Inspector::Git && self.repo.listing == Listing::Stale {
+            self.refresh_repo();
         }
         if inspector == Inspector::Files && self.files.listing == Listing::Stale {
             self.refresh_files();
@@ -75,9 +80,10 @@ impl KrampstaApp {
         }
     }
 
-    /// The files changed (another project, a written change): list them again if they show,
-    /// else when they next do.
-    pub(crate) fn files_changed(&mut self) {
+    /// The folder changed (another project, a written change): the file list and the Git diff
+    /// are read again if they show, else when they next do.
+    pub(crate) fn disk_changed(&mut self) {
+        self.repo_changed();
         if self.inspector == Inspector::Files && self.changes.is_open() {
             self.refresh_files();
         } else {
@@ -245,7 +251,7 @@ mod tests {
         assert!(app.files.model.is_match("docs/guide.md"));
         assert!(!app.files.model.is_match("src/main.rs"));
 
-        app.files_changed();
+        app.disk_changed();
         assert_eq!(app.files.listing, Listing::Stale, "hidden: listed when it next shows");
         app.show_inspector(Inspector::Files);
         assert_eq!(app.files.listing, Listing::Loading);

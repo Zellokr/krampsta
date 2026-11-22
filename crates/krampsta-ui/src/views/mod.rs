@@ -3,6 +3,7 @@
 pub mod changes;
 pub mod chat;
 pub mod files;
+pub mod git;
 pub mod inspector;
 pub mod mcp;
 pub mod settings;

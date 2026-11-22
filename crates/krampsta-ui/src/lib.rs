@@ -18,6 +18,7 @@ pub mod changes;
 pub mod components;
 pub mod costs;
 pub mod files;
+pub mod git;
 pub mod images;
 pub mod keys;
 pub mod menus;

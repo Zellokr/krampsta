@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use krampsta_agent::{Access, Approval, Call, ProjectFiles, ToolOutput, ToolServers, ToolSpec, Toolbox};
+use krampsta_agent::{Access, Approval, Call, ProjectFiles, RepoDiff, ToolOutput, ToolServers, ToolSpec, Toolbox};
 
 use crate::McpServers;
 use crate::servers::PREFIX;
@@ -80,6 +80,13 @@ impl Toolbox for ToolSet {
         match &self.local {
             Some(local) => local.write(path, expected, content),
             None => Err(format!("`{path}` can't be written: no project folder is open")),
+        }
+    }
+
+    fn repo_diff(&self) -> Result<RepoDiff, String> {
+        match &self.local {
+            Some(local) => local.repo_diff(),
+            None => Err("no project folder is open".into()),
         }
     }
 
