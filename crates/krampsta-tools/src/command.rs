@@ -127,8 +127,33 @@ pub fn run(
     Ok((capture.into_text(), outcome))
 }
 
+/// The AI providers' API keys, as Krampsta (and the user's other tools) read them from the
+/// environment. A build or a test never needs them, and a command's output goes to the model:
+/// `echo $env:OPENAI_API_KEY` would send the key along. Commands don't get them.
+pub const MODEL_KEYS: [&str; 12] = [
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "XAI_API_KEY",
+    "TOGETHER_API_KEY",
+    "COHERE_API_KEY",
+];
+
+fn hide_model_keys(cmd: &mut Command) {
+    for name in MODEL_KEYS {
+        cmd.env_remove(name);
+    }
+}
+
 fn spawn(project: &Project, command: &str, cargo_target: Option<&Path>) -> std::io::Result<Box<dyn ChildWrapper>> {
     let mut cmd = shell(command);
+    hide_model_keys(&mut cmd);
     if let Some(target) = cargo_target {
         cmd.env("CARGO_TARGET_DIR", target);
     }
@@ -279,6 +304,21 @@ mod tests {
             run(&project, &Args { command: command.into(), timeout_ms, pending: false }, None, &call).unwrap();
         let streamed = streamed.into_inner().unwrap();
         (text, outcome, streamed)
+    }
+
+    #[test]
+    fn commands_never_see_the_model_providers_keys() {
+        let echo = if cfg!(windows) {
+            "Write-Output \"[$env:OPENAI_API_KEY][$env:ANTHROPIC_API_KEY][$env:KRAMPSTA_TEST_KEEP]\""
+        } else {
+            "echo \"[$OPENAI_API_KEY][$ANTHROPIC_API_KEY][$KRAMPSTA_TEST_KEEP]\""
+        };
+        let mut cmd = shell(echo);
+        cmd.env("OPENAI_API_KEY", "sk-secret").env("ANTHROPIC_API_KEY", "sk-ant").env("KRAMPSTA_TEST_KEEP", "kept");
+        hide_model_keys(&mut cmd);
+        let out = cmd.output().unwrap();
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(said.trim(), "[][][kept]", "the keys are gone, the rest of the environment stays");
     }
 
     #[test]

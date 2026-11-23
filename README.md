@@ -53,7 +53,8 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   al acabar, pero Cargo compila en una carpeta propia de la caché del usuario
   (`krampsta/check-target`), así que la siguiente comprobación no recompila las dependencias.
   Se aplican los mismos permisos: la copia temporal cambia la carpeta de trabajo del comando,
-  pero **no** lo aísla del sistema.
+  pero **no** lo aísla del sistema. Los comandos no ven las claves de los proveedores de IA del
+  entorno (`OPENAI_API_KEY` y similares), porque lo que escriben llega al modelo.
 - **Servidores MCP**: los de `mcp.json`, en la carpeta de configuración (`%APPDATA%\krampsta`
   en Windows), con el formato `mcpServers` de Claude Desktop, Claude Code o Cursor: un archivo
   de cualquiera de ellos sirve tal cual. Por stdio (`command`, `args`, `env`) o por HTTP

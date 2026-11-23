@@ -175,6 +175,9 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   no se puede leer, todo pregunta y nada se guarda encima. `read_file` de un archivo de secretos
   (`secrets.rs`, por su nombre) pregunta; «siempre» guarda la regla `read_file:<ruta>`, sólo para ese
   archivo; `search` se los salta. `.gitignore` oculta un archivo en listados, no de una lectura.
+- Los comandos no heredan las claves de los proveedores de IA (`command::MODEL_KEYS`:
+  `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`…): su salida va al modelo. Una clave nueva que lea Krampsta
+  del entorno se añade ahí.
 - `run_command` corre como árbol de procesos que se mata entero (Job Object / grupo de procesos,
   con `process-wrap`) al vencer el tiempo, al cancelar o al salir su shell. La salida va a la UI
   por lotes (`Call::output`, cada 50 ms o 16 KB) y al modelo como cabeza + cola acotadas.
