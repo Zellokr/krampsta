@@ -152,8 +152,11 @@ fn chat_completions_runs_the_calls_and_sends_their_results_back() {
 
     assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })), "{events:?}");
     assert_eq!(text(&events), "Let me check.\n\nAll good.", "the reply resumes in a new paragraph");
+    // The step's calls run at once: their cards finish in whichever order they do.
+    let mut finished = results(&events);
+    finished.sort();
     assert_eq!(
-        results(&events),
+        finished,
         [("call_a".into(), "echo {\"x\":1}".into(), false), ("call_b".into(), "it broke".into(), true)]
     );
     let usage: Vec<Usage> = events
