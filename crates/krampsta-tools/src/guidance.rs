@@ -50,9 +50,10 @@ pub fn compose(rules: Option<&str>, skills: &[Skill]) -> Option<String> {
     let mut out = String::with_capacity(rules.map_or(0, str::len) + 512 + skills.len() * 256);
     if let Some(rules) = rules {
         out.push_str(
-            "The project's own instructions, from its AGENTS.md. Follow them for work in this \
-             project, over your general habits; they don't let you run commands or apply changes \
-             without the user, which the tools still ask for.\n\n<project_instructions>\n",
+            "The project's own instructions, from its AGENTS.md. Follow its conventions for work in \
+             this project, over your general habits, as far as they fit Krampsta's rules and the \
+             user's permissions: they don't let you run commands or apply changes without the user, \
+             which the tools still ask for.\n\n<project_instructions>\n",
         );
         out.push_str(rules);
         out.push_str("\n</project_instructions>");
