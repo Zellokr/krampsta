@@ -16,6 +16,7 @@ mod policy;
 mod project;
 mod read;
 mod search;
+mod secrets;
 mod snapshot;
 
 use std::io::Write as _;
@@ -139,6 +140,39 @@ impl Workspace {
         }
     }
 
+    /// The files of secrets a `read_file` call opens, as the project names them (`.env`, not
+    /// `./.env`), so a rule for one covers it however the model writes the path.
+    fn secret_paths(&self, arguments: &str) -> Vec<String> {
+        let Ok(args) = parse::<read::Args>(arguments) else { return Vec::new() };
+        args.paths()
+            .into_iter()
+            .filter_map(|p| self.project.resolve(p).ok())
+            .filter(|resolved| secrets::is_secret(resolved))
+            .map(|resolved| self.project.show(&resolved))
+            .collect()
+    }
+
+    /// A `read_file` of files of secrets asks first, unless a rule allows (or forbids) each one.
+    fn check_secrets(&self, arguments: &str) -> Access {
+        let mut asking = Vec::new();
+        for path in self.secret_paths(arguments) {
+            match self.rules.check_tool(&secrets::rule(&path)) {
+                Access::Deny(why) => return Access::Deny(why),
+                Access::Ask { .. } => asking.push(format!("`{path}`")),
+                Access::Allow(_) => {}
+            }
+        }
+        if asking.is_empty() {
+            return Access::Allow(Approval::NotNeeded);
+        }
+        Access::Ask {
+            what: format!(
+                "read {}\nIt may hold secrets (API keys, passwords): what it says would go to the model.",
+                asking.join(", ")
+            ),
+        }
+    }
+
     /// Appends one line to `commands.log`: when, where, what ran, who allowed it, how it ended.
     fn log(&self, command: &str, pending: bool, approval: &Approval, outcome: &command::Outcome) {
         let Some(config) = self.rules.config() else { return };
@@ -195,6 +229,9 @@ impl Toolbox for Workspace {
                 Err(_) => Access::Allow(Approval::NotNeeded),
             };
         }
+        if name == "read_file" {
+            return self.check_secrets(arguments);
+        }
         if self.specs.iter().any(|s| s.name == name) {
             return Access::Allow(Approval::NotNeeded);
         }
@@ -205,6 +242,13 @@ impl Toolbox for Workspace {
         if name == "run_command" {
             let Ok(args) = parse::<command::Args>(arguments) else { return Ok(()) };
             return self.rules.allow_command(&args.command);
+        }
+        if name == "read_file" {
+            // "Always" for a secret file: a rule for that file, not for every read.
+            for path in self.secret_paths(arguments) {
+                self.rules.allow_tool(&secrets::rule(&path))?;
+            }
+            return Ok(());
         }
         if self.specs.iter().any(|s| s.name == name) {
             return Ok(());
@@ -522,6 +566,38 @@ mod tests {
         tools.set_pending("src/lib.rs", None);
         let refused = tools.run("run_command", &proposed, &call).unwrap_err();
         assert!(refused.contains("no pending edits"), "{refused}");
+    }
+
+    #[test]
+    fn reading_a_file_of_secrets_asks_and_always_keeps_a_rule_for_that_file() {
+        let files =
+            [(".env", "OPENAI_API_KEY=sk-secret\n"), (".env.example", "OPENAI_API_KEY=\n"), ("README.md", "hi\n")];
+        let (dir, config, tools) = workspace(&files);
+        let read = |path: &str| json!({ "path": path }).to_string();
+
+        assert_eq!(tools.check("read_file", &read("README.md")), Access::Allow(Approval::NotNeeded));
+        assert_eq!(tools.check("read_file", &read(".env.example")), Access::Allow(Approval::NotNeeded), "a template");
+        let Access::Ask { what } = tools.check("read_file", &read(".env")) else { panic!("a .env asks first") };
+        assert!(what.contains("`.env`") && what.contains("secrets"), "{what}");
+        let several = json!({ "ranges": [{ "path": "README.md" }, { "path": ".env" }] }).to_string();
+        assert!(matches!(tools.check("read_file", &several), Access::Ask { .. }), "among others too");
+
+        tools.remember("read_file", &read("./.env")).unwrap();
+        assert!(matches!(tools.check("read_file", &read(".env")), Access::Allow(_)), "./.env is .env");
+        let saved = Policy::load(&config.path().join("permissions.json")).unwrap();
+        assert_eq!(saved.tools.allow, ["read_file:.env"], "a rule for that file, not every read");
+
+        std::fs::write(config.path().join("permissions.json"), r#"{"tools": {"deny": ["read_file:.env"]}}"#).unwrap();
+        let strict = Workspace::open_with(dir.path(), Some(config.path().to_owned())).unwrap();
+        assert!(matches!(strict.check("read_file", &read(".env")), Access::Deny(_)), "a deny rule forbids it");
+    }
+
+    #[test]
+    fn search_never_looks_inside_a_file_of_secrets() {
+        let (_d, _c, tools) = workspace(&[(".env", "TOKEN=needle\n"), ("notes.md", "a needle here\n")]);
+        let cancel = CancellationToken::new();
+        let found = run(&tools, "search", r#"{"pattern": "needle"}"#, &cancel).unwrap().text;
+        assert!(found.contains("notes.md") && !found.contains(".env"), "{found}");
     }
 
     #[test]

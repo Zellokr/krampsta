@@ -272,6 +272,19 @@ const SCENES: &[Scene] = &[
     ("approval-apply", scene_approval_apply),
     // A tool from an MCP server asks too, worded for a call rather than a command.
     ("approval-mcp", scene_approval_mcp),
+    // Reading a file of secrets asks first, like a command.
+    ("approval-secret", |s| {
+        let run = staged(s, "Why does the app say the API key is missing?");
+        let call = ToolCall {
+            id: ToolCallId("scene-approval-secret".into()),
+            name: "read_file".into(),
+            arguments: r#"{"path": ".env"}"#.into(),
+        };
+        apply(s, &[AgentEvent::ToolCallStarted { run, call: call.clone() }]);
+        let what = "read `.env`
+It may hold secrets (API keys, passwords): what it says would go to the model.";
+        s.ask(crate::approvals::Asking { run, call: call.id, tool: call.name, what: what.into() });
+    }),
     ("approval-applying", scene_approval_applying),
     ("streaming", scene_streaming),
     ("change-failed", |s| {

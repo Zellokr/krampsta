@@ -45,7 +45,9 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   carpeta (PowerShell en Windows, `sh` en el resto): la salida se ve en directo en la tarjeta, y
   cada comando pide permiso (una vez, siempre o denegar) salvo que lo cubra una regla de
   `permissions.json`, en la carpeta de configuración (`%APPDATA%\krampsta` en Windows). Lo que se
-  ejecuta queda en `commands.log`. Con `pending: true`, el agente puede ejecutar, por ejemplo,
+  ejecuta queda en `commands.log`. Leer un archivo de secretos (`.env`, claves `*.pem`, `id_rsa`,
+  `credentials.json`…; no `.env.example`) también pide permiso, porque lo que dice llegaría al
+  modelo, y `search` nunca mira dentro de ellos. Con `pending: true`, el agente puede ejecutar, por ejemplo,
   `cargo check` en una copia temporal con los cambios pendientes, sin aplicarlos. La copia incluye
   los archivos locales no ignorados y excluye `.git` y el `target` de la raíz. La copia se descarta
   al acabar, pero Cargo compila en una carpeta propia de la caché del usuario

@@ -29,7 +29,7 @@ Si `fmt --check` falla, ejecuta `cargo fmt --all` y repite.
 bash scripts/snapshots.sh
 ```
 
-Escribe en `assets/screenshots/`: `krampsta` (estado inicial), `empty`, `changes-empty` (panel de cambios vacío), `changes` y `change-failed` (cambios propuestos con Accept/Reject por archivo y por bloque, y una escritura fallida), `command` (comando en marcha con su salida en directo), `approval` (diálogo para permitir un comando), `approval-mcp` (el mismo para una herramienta de un servidor MCP), `running`, `tools`
+Escribe en `assets/screenshots/`: `krampsta` (estado inicial), `empty`, `changes-empty` (panel de cambios vacío), `changes` y `change-failed` (cambios propuestos con Accept/Reject por archivo y por bloque, y una escritura fallida), `command` (comando en marcha con su salida en directo), `approval` (diálogo para permitir un comando), `approval-mcp` (el mismo para una herramienta de un servidor MCP), `approval-secret` (leer un `.env`), `running`, `tools`
 (tarjetas de herramienta: abierta, fallida y en curso), `thinking` y `reasoning` (razonamiento
 mientras piensa y abierto al terminar), `completed`,
 `failed`, `cancelled`, `settings`, `api-key` y `api-key-saved` (clave de OpenAI escrita y guardada), `signed-in`, `sign-in` (diálogo con el código), `sign-in-failed` (el fallo, con «Try again»), `session-menu` (ahora con «Rename»), `rename` (una sesión renombrándose en su fila), `search` (la sidebar buscando una palabra), `palette` (la paleta de comandos con una letra escrita), `code-copied` (el botón de un bloque de código tras copiarlo), `message-menu` y `delete-session` (menús contextuales y la confirmación de borrado), `light`,

@@ -40,6 +40,13 @@ struct Range {
     limit: Option<usize>,
 }
 
+impl Args {
+    /// Every file the call reads, as the model wrote it.
+    pub(crate) fn paths(&self) -> Vec<&str> {
+        self.path.iter().map(String::as_str).chain(self.ranges.iter().flatten().map(|r| r.path.as_str())).collect()
+    }
+}
+
 pub fn run(project: &Project, pending: &Pending, args: Args, cancel: &CancellationToken) -> Result<String, String> {
     let mut budget = MAX_BYTES;
     if let Some(ranges) = args.ranges {

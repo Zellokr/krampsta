@@ -140,6 +140,10 @@ pub fn run(project: &Project, pending: &Pending, args: Args, cancel: &Cancellati
     let count = AtomicUsize::new(0);
     let stopped = || cancel.is_cancelled() || count.load(Ordering::Relaxed) >= MAX_MATCHES;
     let scan = |searcher: &mut Searcher, path: &Path| {
+        // Never inside a file of secrets: what it holds would reach the model (`secrets.rs`).
+        if crate::secrets::is_secret(path) {
+            return;
+        }
         let mut sink = Collect {
             count: &count,
             cancel,

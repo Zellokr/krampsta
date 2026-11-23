@@ -172,7 +172,9 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
   nombre o prefijo `*`): las aplica el `Workspace` o, sin carpeta, `Permissions` (un `Toolbox`
   sin herramientas). Para un nombre `mcp__…`, la `ToolSet` toma un `NotNeeded` como `Ask`: un
   toolbox que no conoce la herramienta nunca la deja pasar sin preguntar. Si `permissions.json`
-  no se puede leer, todo pregunta y nada se guarda encima.
+  no se puede leer, todo pregunta y nada se guarda encima. `read_file` de un archivo de secretos
+  (`secrets.rs`, por su nombre) pregunta; «siempre» guarda la regla `read_file:<ruta>`, sólo para ese
+  archivo; `search` se los salta. `.gitignore` oculta un archivo en listados, no de una lectura.
 - `run_command` corre como árbol de procesos que se mata entero (Job Object / grupo de procesos,
   con `process-wrap`) al vencer el tiempo, al cancelar o al salir su shell. La salida va a la UI
   por lotes (`Call::output`, cada 50 ms o 16 KB) y al modelo como cabeza + cola acotadas.
