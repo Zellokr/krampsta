@@ -51,7 +51,10 @@ Lee `README.md` primero. Este archivo recoge las reglas para seguir desarrollán
   separada del dominio). No depende de Rune.
 - `crates/krampsta-ui` — `KrampstaApp` (estado), `picker.rs` (selector de proveedor y modelo), `app.rs`
   (spec, vista raíz, poll, teclas, escenas), `views/` (pantallas y paneles), `components/`
-  (piezas), `accounts.rs` (diálogo de inicio de sesión), `approvals.rs` (permitir comandos),
+  (piezas), `accounts.rs` (diálogo de inicio de sesión), `approvals.rs` (permitir comandos), `attention.rs` (con la
+  ventana detrás, una ejecución que acaba o un permiso pedido hace parpadear el botón de la barra de
+  tareas y lo cuenta, por `WindowAttention`; `main.rs` le da la ventana real con `App::on_window`;
+  el foco llega por `on_window_focus` en la raíz de `rune_kit::root`, no en un hijo),
   `projects.rs` (carpeta del proyecto: diálogo nativo con `tx.open_folder`, se abre con el
   `ProjectOpener` en el host y sólo entonces cambian las herramientas; `groups` agrupa las
   sesiones por `Session::project`, y una sesión sin proyecto adopta el abierto al enviar),

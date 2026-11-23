@@ -123,6 +123,8 @@ pub struct KrampstaApp {
     pub files: crate::files::ProjectTree,
     /// The code block copied last (its message and place), whose button says "Copied".
     pub copied_code: Option<(MessageId, usize)>,
+    /// Calling the person back while the window is behind: whether it is, and who needs them.
+    pub attention: crate::attention::Attention,
     /// The command palette (Ctrl+K).
     pub palette: crate::palette::Palette,
     /// The sidebar's search: its query and the sessions it matches.
@@ -281,6 +283,7 @@ impl KrampstaApp {
             files: crate::files::ProjectTree::default(),
             repo: crate::git::RepoView::default(),
             copied_code: None,
+            attention: crate::attention::Attention::default(),
             palette: crate::palette::Palette::default(),
             search: crate::search::SessionSearch::default(),
             renaming: crate::rename::Renaming::default(),
@@ -465,6 +468,7 @@ impl KrampstaApp {
                 }
                 AgentEvent::ApprovalRequested { run, call, tool, what } => {
                     self.ask(Asking { run, call, tool, what });
+                    self.needs_attention(e.session);
                     changed = true;
                 }
                 event => {
@@ -486,6 +490,8 @@ impl KrampstaApp {
                     // finished steps, and no frame writes.
                     let step_ended = matches!(event, AgentEvent::ToolCallFinished { .. }) || event.is_terminal();
                     if applied && event.is_terminal() {
+                        // Behind, the window calls the person back.
+                        self.needs_attention(e.session);
                         // What the run wrote may match the search now.
                         self.sessions_changed();
                     }

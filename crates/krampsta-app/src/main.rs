@@ -18,6 +18,7 @@ use krampsta_agent::{EngineCatalog, MockCatalog, MockConfig, OpenedProject, Proj
 use krampsta_mcp::{McpServers, ToolSet};
 use krampsta_tools::WorkspaceOpener;
 use krampsta_ui::KrampstaApp;
+use krampsta_ui::attention::WindowSlot;
 use krampsta_ui::prefs::Prefs;
 
 /// Opens a folder as the project, its tools joined by the MCP servers'.
@@ -116,10 +117,15 @@ fn store(settings: Option<&Path>) -> Option<Arc<dyn SessionStore>> {
 
 fn main() {
     rune::prewarm_gpu();
+    // The window, once Rune makes it: the app flashes its taskbar button through it when a
+    // session needs the person while it is behind.
+    let window = WindowSlot::default();
+    let made = window.clone();
     rune::App::new(krampsta_ui::spec())
         .chrome(krampsta_ui::chrome())
-        .init(|| {
-            let mut app = KrampstaApp::new(catalog());
+        .on_window(move |w: &rune::WindowHandle| *made.borrow_mut() = Some(w.clone()))
+        .init(move || {
+            let mut app = KrampstaApp::new(catalog()).with_attention(Box::new(window));
             if rune::is_headless() {
                 // Stills show the same folder and defaults on every machine, and neither read nor
                 // add to this one's history, settings or MCP servers; the simulated agent needs no

@@ -14,6 +14,7 @@
 pub mod accounts;
 pub mod app;
 pub mod approvals;
+pub mod attention;
 pub mod changes;
 pub mod components;
 pub mod costs;

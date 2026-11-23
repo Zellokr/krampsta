@@ -71,6 +71,9 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
     "docs": {"type": "http", "url": "https://example.com/mcp", "headers": {"Authorization": "Bearer …"}}
   }}
   ```
+- **Aviso en segundo plano**: si una ejecución termina o un comando pide permiso con la ventana
+  detrás, el botón de la barra de tareas parpadea y cuenta las sesiones que te esperan (en macOS,
+  el número sale en el Dock); al volver a la ventana se apaga.
 - **Responsive**: al estrechar la ventana se pliegan los paneles laterales (primero el de
   cambios, después la sidebar) y vuelven a abrirse al ensancharla.
 - Atajos: `Ctrl+N`/`⌘N` nueva sesión, `Ctrl+Shift+B`/`⇧⌘B` sidebar, `Ctrl+J`/`⌘J` cambios,

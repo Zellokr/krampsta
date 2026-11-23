@@ -138,7 +138,9 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>) -> El {
         .h_full()
         .on_layout(|s: &mut KrampstaApp, r: [f32; 4]| s.fit_width(r[2]))
         .child(screen);
-    rune_kit::root(base, layer)
+    // On the root itself (Rune sends window focus there): coming back to the window ends a call
+    // back (the flashing taskbar button).
+    rune_kit::root(base, layer).on_window_focus(|s: &mut KrampstaApp, focused, _: &mut Tx| s.window_focus(focused))
 }
 
 fn workspace(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>, k: &Kit, layer: &mut Vec<El>) -> El {
