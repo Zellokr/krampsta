@@ -50,7 +50,6 @@ mod tests {
             ".env",
             ".env.local",
             "config/.env.production",
-            "C:\\code\\app\\.ENV",
             "id_rsa",
             "certs/server.pem",
             "tls.key",
@@ -60,6 +59,9 @@ mod tests {
         ] {
             assert!(is_secret(Path::new(secret)), "{secret}");
         }
+        // Only Windows reads `\` as a separator.
+        #[cfg(windows)]
+        assert!(is_secret(Path::new("C:\\code\\app\\.ENV")));
         for plain in
             [".env.example", ".env.sample", "id_rsa.pub", "src/main.rs", "README.md", "keys.rs", "environment.ts"]
         {
