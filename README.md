@@ -276,16 +276,19 @@ en el árbol JSON.
 ## Actualizar Rune de forma segura
 
 Rune es pre-release: se fija **un único commit** de la rama `dev` (que nunca se reescribe).
-Commit actual: **`47eaa86eba751687597d0aaf6ee325baeecd4666`**.
+Commit actual: **`66006728af7cd3dc54a6bb31ca7690242fb8d6aa`**.
 
 1. `git ls-remote https://github.com/anomalyco/rune refs/heads/dev` → nuevo SHA.
 2. Lee el `Cargo.toml` raíz de Rune **en ese SHA**: la tabla `[patch.crates-io]` (hoy `winit`,
-   `parley_engine`, `wgpu-hal`, `accesskit_windows`, `accesskit_macos`) y su `rust-toolchain.toml`.
+   `parley_engine`, `wgpu-hal`, `naga`, `sctk-adwaita`, `accesskit_windows`, `accesskit_macos` y
+   `accesskit_atspi_common`) y su `rust-toolchain.toml`.
 3. En el `Cargo.toml` de Krampsta sustituye el SHA en `rune`, `rune-kit` **y en cada parche**
    (todos iguales); añade o quita parches según la lista de Rune. Cargo no hereda los
    `[patch]` de una dependencia. Ajusta `rust-toolchain.toml` si Rune cambió de versión.
 4. Revisa el `CHANGELOG.md` de Rune por cambios incompatibles.
-5. `cargo update -p rune -p rune-kit`, y después todas las comprobaciones de arriba más
+5. `cargo update -p rune -p rune-kit`. Si Cargo avisa de un parche «not used in the crate graph»,
+   el `Cargo.lock` tiene una versión más nueva de crates.io: fíjala a la del parche
+   (`cargo update -p naga@<lock> --precise <parche>`). Después todas las comprobaciones de arriba más
    `bash scripts/snapshots.sh`; compara las capturas con las anteriores.
 6. Versiona `Cargo.lock` junto al cambio.
 
