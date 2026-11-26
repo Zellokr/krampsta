@@ -189,6 +189,10 @@ configuración del usuario):
   `RECENT_OUTPUT_MAX` por resultado y `RECENT_TURN_MAX` por turno; los anteriores, una línea y
   sin argumentos largos; pasados `FORGET_AFTER`, sólo el texto. Una llamada sin resultado (se
   paró la ejecución) no se manda. `trim_history` sigue quitando turnos enteros por presupuesto.
+- La última petición de una ejecución (`steps::is_last`, la número `MAX_STEPS`) va con
+  `tool_choice: "none"` y la nota `steps::WRAP_UP` al final del último resultado: el modelo
+  responde con lo que tiene en vez de acabar en error. Sólo si aun así pide herramientas falla
+  con `too_many_steps`.
 - Espera con `ctx.sleep(..)` o futuros cancelables; `usage` se emite también si la petición falla
   tras contar los tokens. Devuelve `Ok(())`, `Err(AgentError::..)` o `Err(AgentError::Cancelled)`.
 - `edit_file` devuelve un `FileChange` (antes/después) y guarda la propuesta como pendiente: las

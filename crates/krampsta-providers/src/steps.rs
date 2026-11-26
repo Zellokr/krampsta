@@ -75,6 +75,23 @@ pub fn trim_history<T>(
     });
 }
 
+/// Added to the last result before a run's last request, which may call no tools: without it
+/// the run would end in an error and the user would get nothing for its steps.
+pub const WRAP_UP: &str = "[Krampsta: this run has reached its step limit, so this request can't call \
+tools. Answer now with what you found, say what is still unchecked, and what the user can ask next to go on.]";
+
+/// Whether request `number` (from 0) is the run's last, the one that may call no tools.
+pub fn is_last(number: usize) -> bool {
+    number + 1 == MAX_STEPS
+}
+
+/// Tells the model, after `output` (the last result it gets), to answer without tools.
+pub fn wrap_up(output: &mut String) {
+    output.push_str("\n\n");
+    output.push_str(WRAP_UP);
+}
+
+/// The model asked for tools in the request that was told to answer without them.
 pub fn too_many_steps() -> AgentError {
     AgentError::Provider(format!(
         "the model kept calling tools for {MAX_STEPS} steps without answering, so Krampsta stopped it"

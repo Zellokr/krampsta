@@ -94,8 +94,22 @@ impl AgentEngine for ResponsesEngine {
                     () = ctx.cancellation().cancelled() => return Err(AgentError::Cancelled),
                     endpoint = self.access.endpoint() => endpoint?,
                 };
+                let last = steps::is_last(number);
+                if last
+                    && let Some(output) = input
+                        .last_mut()
+                        .filter(|item| item["type"] == "function_call_output")
+                        .and_then(|item| item.get_mut("output"))
+                    && let Value::String(output) = output
+                {
+                    steps::wrap_up(output);
+                }
                 trim_history(&mut input);
-                let body = serde_json::to_vec(&Request::new(&self.model, &input, &reasoning, &tools))
+                let mut request = Request::new(&self.model, &input, &reasoning, &tools);
+                if last {
+                    request.tool_choice = "none";
+                }
+                let body = serde_json::to_vec(&request)
                     .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
                 let mut req = self
                     .client

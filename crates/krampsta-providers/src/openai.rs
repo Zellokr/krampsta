@@ -126,6 +126,10 @@ impl AgentEngine for OpenAiEngine {
             }
             let mut paragraphs = Paragraphs::default();
             for number in 0..MAX_STEPS {
+                let last = steps::is_last(number);
+                if last && let Some(WireMessage { role: "tool", content: Some(output), .. }) = messages.last_mut() {
+                    steps::wrap_up(output.to_mut());
+                }
                 trim_history(&mut messages, HISTORY_BUDGET);
                 let endpoint = tokio::select! {
                     biased;
@@ -138,6 +142,7 @@ impl AgentEngine for OpenAiEngine {
                     stream_options: StreamOptions { include_usage: true },
                     messages: &messages,
                     tools: &tools,
+                    tool_choice: (last && !tools.is_empty()).then_some("none"),
                 };
                 let body = serde_json::to_vec(&body)
                     .map_err(|e| AgentError::Provider(format!("could not encode the request: {e}")))?;
@@ -335,6 +340,9 @@ struct ChatRequest<'a> {
     messages: &'a [WireMessage<'a>],
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     tools: &'a [WireTool<'a>],
+    /// `none` in a run's last request; otherwise the server's default (`auto` with tools).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<&'static str>,
 }
 
 /// A tool as Chat Completions declares it: `{"type": "function", "function": {…}}`.
@@ -565,6 +573,7 @@ mod tests {
                 stream_options: StreamOptions { include_usage: true },
                 messages,
                 tools: &[],
+                tool_choice: None,
             })
             .unwrap()
             .len()

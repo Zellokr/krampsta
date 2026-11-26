@@ -283,3 +283,72 @@ fn a_recorded_chatgpt_turn_calls_the_tool_and_answers_with_its_output() {
         json!({"type": "function_call_output", "call_id": call_id, "output": format!("echo {arguments}")})
     );
 }
+
+/// The engines' `steps::MAX_STEPS`: requests one run may make.
+const MAX_STEPS: usize = 50;
+
+/// What the last request of a run that called tools at every step carried: its last item, and
+/// how it chose tools.
+fn wrapped_up(bodies: &Receiver<Value>, last_item: impl Fn(&Value) -> Value) -> (Value, Value) {
+    let bodies: Vec<Value> = (0..MAX_STEPS).map(|_| bodies.recv_timeout(Duration::from_secs(5)).unwrap()).collect();
+    for body in &bodies[..MAX_STEPS - 1] {
+        assert!(!last_item(body).to_string().contains("step limit"), "only the last request is told to stop");
+    }
+    let last = &bodies[MAX_STEPS - 1];
+    (last_item(last), last["tool_choice"].clone())
+}
+
+#[test]
+fn chat_completions_answers_without_tools_at_the_step_limit() {
+    let call = |n: usize| {
+        sse(&[json!({"choices": [{"index": 0, "delta": {"tool_calls": [
+            {"index": 0, "id": format!("call_{n}"), "type": "function", "function": {"name": "echo", "arguments": "{}"}}
+        ]}}]})])
+            + "data: [DONE]\n\n"
+    };
+    let mut replies: Vec<String> = (0..MAX_STEPS - 1).map(call).collect();
+    replies.push(
+        sse(&[json!({"choices": [{"index": 0, "delta": {"content": "Here is what I found."}}]})]) + "data: [DONE]\n\n",
+    );
+    let (url, bodies) = serve(replies);
+    let config = OpenAiConfig { base_url: url, api_key: None, model: "m".into() };
+    let events = run(Arc::new(OpenAiEngine::new(config).unwrap()));
+
+    assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })), "{events:?}");
+    assert!(text(&events).ends_with("Here is what I found."));
+    let (last, choice) = wrapped_up(&bodies, |body| body["messages"].as_array().unwrap().last().unwrap().clone());
+    assert_eq!(last["role"], "tool");
+    let output = last["content"].as_str().unwrap();
+    assert!(output.starts_with("echo {}") && output.contains("can't call tools"), "{output}");
+    assert_eq!(choice, "none");
+}
+
+#[test]
+fn the_responses_api_answers_without_tools_at_the_step_limit() {
+    let event = |kind: &str, mut rest: Value| {
+        rest["type"] = json!(kind);
+        rest
+    };
+    let call = |n: usize| {
+        let item = json!({"type": "function_call", "call_id": format!("call_{n}"), "name": "echo", "arguments": "{}"});
+        sse(&[
+            event("response.output_item.done", json!({"output_index": 0, "item": item})),
+            event("response.completed", json!({"response": {}})),
+        ])
+    };
+    let mut replies: Vec<String> = (0..MAX_STEPS - 1).map(call).collect();
+    replies.push(sse(&[
+        event("response.output_text.delta", json!({"delta": "Here is what I found."})),
+        event("response.completed", json!({"response": {}})),
+    ]));
+    let (url, bodies) = serve(replies);
+    let access = Arc::new(StaticAccess::new(&url, None).unwrap());
+    let events = run(Arc::new(ResponsesEngine::new(access, "m", reqwest::Client::new(), "ChatGPT")));
+
+    assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })), "{events:?}");
+    let (last, choice) = wrapped_up(&bodies, |body| body["input"].as_array().unwrap().last().unwrap().clone());
+    assert_eq!(last["type"], "function_call_output");
+    let output = last["output"].as_str().unwrap();
+    assert!(output.starts_with("echo {}") && output.contains("can't call tools"), "{output}");
+    assert_eq!(choice, "none");
+}
