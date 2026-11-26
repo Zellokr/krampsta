@@ -5,7 +5,7 @@ use krampsta_core::{Message, MessageRole, SessionId};
 use rune::{El, col, el, icon, row, text};
 use rune_kit::{Kit, Markdown, Spinner};
 
-use crate::components::{code_copy, icons, reasoning, shimmer, tool_card};
+use crate::components::{code_copy, icons, reasoning, shimmer, summary, tool_card};
 use crate::images::MessageImage;
 use crate::keys;
 use crate::state::KrampstaApp;
@@ -16,6 +16,7 @@ pub fn view(s: &KrampstaApp, session: SessionId, m: &Message, streaming: bool, k
     let body = match m.role {
         MessageRole::User => user(s, session, m, k),
         MessageRole::Assistant => assistant(s, session, m, streaming, k),
+        MessageRole::Summary => summary::view(m, s.open_reasoning.contains(&m.id), k),
         MessageRole::System | MessageRole::Tool => {
             text(m.content.clone()).font(k.ty.small).color(k.c.text_faint).wrap().selectable(true)
         }

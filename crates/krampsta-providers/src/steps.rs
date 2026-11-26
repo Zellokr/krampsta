@@ -40,8 +40,7 @@ pub fn instructions(ctx: &RunContext) -> String {
 /// otherwise spend tokens forever.
 pub const MAX_STEPS: usize = 50;
 
-/// Soft byte budget, not a tokenizer or a model context limit.
-pub const HISTORY_BUDGET: usize = 128 * 1024;
+pub use krampsta_agent::replay::HISTORY_BUDGET;
 
 /// Drop complete older turns first. Keep instructions and the current turn, even over budget.
 /// Providers classify instructions as `system` and user turn boundaries as `user`.

@@ -145,6 +145,11 @@ pub fn reasoning(id: krampsta_core::MessageId) -> String {
     format!("krampsta-reasoning-{id}")
 }
 
+/// The header of a summary of earlier messages, which opens it.
+pub fn summary(id: krampsta_core::MessageId) -> String {
+    format!("krampsta-summary-{id}")
+}
+
 /// A project's group of sessions in the sidebar (None: "No project"). Keyed by the folder's
 /// whole path, so two projects with the same name never share a key.
 pub fn project_group(root: Option<&std::path::Path>) -> String {

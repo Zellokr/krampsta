@@ -177,6 +177,12 @@ impl Session {
             // The app asks the user; the conversation shows the call as running meanwhile.
             AgentEvent::ApprovalRequested { .. } => return false,
             AgentEvent::Usage { usage, .. } => self.add_usage(*usage),
+            AgentEvent::Compacted { summary, before, .. } => {
+                let Some(at) = self.messages.iter().position(|m| m.id == *before) else { return false };
+                let id = self.mint_message_id();
+                let summary = Message { run: Some(run), ..Message::new(id, MessageRole::Summary, summary.clone()) };
+                self.messages.insert(at, summary);
+            }
             // Changes belong to the project, not the conversation: the app keeps them.
             AgentEvent::ChangeProposed { .. } => return false,
             AgentEvent::Completed { .. } => self.finish(AgentStatus::Completed),
@@ -256,6 +262,31 @@ mod tests {
         s.submit("first", RunId(1)).unwrap();
         assert_eq!(s.submit("second", RunId(2)), Err(SessionError::AlreadyRunning));
         assert_eq!(s.messages.len(), 1);
+    }
+
+    #[test]
+    fn a_summary_goes_in_before_the_message_it_names_and_the_reply_still_streams() {
+        let mut s = session();
+        s.push_message(MessageRole::User, "old question");
+        let previous = s.push_message(MessageRole::User, "previous question");
+        let run = RunId(2);
+        s.submit("now", run).unwrap();
+        s.apply(&AgentEvent::Started { run });
+        assert!(s.apply(&AgentEvent::Compacted { run, summary: "We talked.".into(), before: previous }));
+        s.apply(&AgentEvent::TextDelta { run, text: "Answer".into() });
+        let roles: Vec<_> = s.messages.iter().map(|m| (m.role, m.content.as_str())).collect();
+        assert_eq!(
+            roles,
+            [
+                (MessageRole::User, "old question"),
+                (MessageRole::Summary, "We talked."),
+                (MessageRole::User, "previous question"),
+                (MessageRole::User, "now"),
+                (MessageRole::Assistant, "Answer"),
+            ]
+        );
+        let unknown = AgentEvent::Compacted { run, summary: "x".into(), before: MessageId(99) };
+        assert!(!s.apply(&unknown), "no such message: nothing changes");
     }
 
     #[test]

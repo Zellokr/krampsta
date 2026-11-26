@@ -7,11 +7,22 @@
 //! a line or so ([`OLD_OUTPUT_MAX`]), which says what was looked at and that it can be looked
 //! at again, and turns older than [`FORGET_AFTER`] only their text. A recent turn spends at most
 //! [`RECENT_TURN_MAX`] on results, so one busy turn can't push the conversation out of
-//! [`crate::steps::trim_history`]'s budget, which still drops whole turns past it.
+//! [`HISTORY_BUDGET`], past which the engines drop whole turns.
+//!
+//! A [`MessageRole::Summary`] stands for everything before it ([`start`]): the host writes one
+//! when the conversation nears the budget (`compact.rs`), and the engines send it, as
+//! instructions headed by [`SUMMARY_HEADER`], instead of the messages it covers.
 
 use std::borrow::Cow;
 
 use krampsta_core::{Message, MessageRole, ToolCall};
+
+/// Soft byte budget for what one request sends, not a tokenizer or a model context limit.
+pub const HISTORY_BUDGET: usize = 128 * 1024;
+
+/// Heads a summary as the engines send it.
+pub const SUMMARY_HEADER: &str = "Summary of the conversation so far (the messages it sums up aren't shown to you; \
+the user still sees them):";
 
 /// Turns before the current one whose results go back nearly whole.
 pub const RECENT_TURNS: usize = 2;
@@ -33,6 +44,32 @@ pub struct Replayed<'a> {
     /// Always JSON, as providers require.
     pub arguments: Cow<'a, str>,
     pub output: Cow<'a, str>,
+}
+
+/// Where the conversation the model is sent starts: the last summary, which stands for what
+/// came before it, or the first message. System messages before it still go.
+pub fn start(history: &[Message]) -> usize {
+    history.iter().rposition(|m| m.role == MessageRole::Summary).unwrap_or(0)
+}
+
+/// About how many bytes `history` takes as the engines send it (from [`start`], earlier calls
+/// shortened by age), before their JSON framing.
+pub fn estimated_bytes(history: &[Message]) -> usize {
+    let from = start(history);
+    history
+        .iter()
+        .zip(ages(history))
+        .enumerate()
+        .filter(|(index, (m, _))| *index >= from || m.role == MessageRole::System)
+        .map(|(_, (m, age))| {
+            let calls: usize = if m.role == MessageRole::Assistant {
+                calls(m, age).map(|r| 96 + r.call.name.len() + r.arguments.len() + r.output.len()).sum()
+            } else {
+                0
+            };
+            48 + m.content.len() + calls
+        })
+        .sum()
 }
 
 /// How many user turns came after each message of `history` (0 for the current prompt and
@@ -174,6 +211,22 @@ mod tests {
         assert_eq!(sizes[..4], [RECENT_OUTPUT_MAX; 4]);
         assert!(sizes[4..].iter().all(|&size| size < OLD_OUTPUT_MAX + 128), "{sizes:?}");
         assert!(sizes.iter().sum::<usize>() < RECENT_TURN_MAX + 6 * (OLD_OUTPUT_MAX + 128));
+    }
+
+    #[test]
+    fn a_summary_hides_what_came_before_it_from_the_estimate() {
+        let mut history = vec![
+            Message::new(MessageId(1), MessageRole::System, "rules"),
+            Message::user(MessageId(2), "x".repeat(10_000)),
+            Message::new(MessageId(3), MessageRole::Summary, "short"),
+            Message::user(MessageId(4), "now"),
+        ];
+        assert_eq!(start(&history), 2);
+        let summed = estimated_bytes(&history);
+        assert!(summed < 300, "{summed}");
+        history.remove(2);
+        assert_eq!(start(&history), 0);
+        assert!(estimated_bytes(&history) > 10_000);
     }
 
     #[test]

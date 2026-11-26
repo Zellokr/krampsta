@@ -13,12 +13,13 @@ lee aquí la sección de lo que vayas a tocar.
   `EngineCatalog` (qué proveedores y modelos hay, cómo construir un motor), `MockAgent`,
   `MockCatalog`, `Toolbox` (las herramientas como las ve un motor: `specs`, `check`, `run`,
   `files`, `repo_diff`…), `ToolServers` (cómo ve la UI los servidores MCP: estado por servidor y
-  versión; `FixedServers` para escenas y tests). No depende de Rune.
+  versión; `FixedServers` para escenas y tests), `replay` (qué vuelve al modelo de los turnos
+  anteriores: sus herramientas recortadas por antigüedad, y el resumen en lugar de lo que cubre;
+  `HISTORY_BUDGET`) y `compact` (resumir la conversación antes de una ejecución). No depende de Rune.
 - `crates/krampsta-providers` — motores reales: `sse` (parser), `http` (cliente `reqwest`, petición
   SSE cancelable, `HttpError`), `access` (URL + cabeceras por petición: clave fija o token de
   cuenta), `OpenAiEngine`, `responses` (motor de la API Responses), `steps` (lo común del bucle:
-  instrucciones, llamadas a la vez, recorte del historial), `replay` (qué vuelve al modelo de las
-  herramientas de turnos anteriores), `list_models`, `copilot` (device flow,
+  instrucciones, llamadas a la vez, recorte del historial), `list_models`, `copilot` (device flow,
   token de Copilot), `chatgpt` (código de dispositivo de OpenAI, refresh), `accounts`
   (iniciar/cerrar sesión), `secrets` (llavero del sistema) y `Catalog`. No depende de Rune.
 - `crates/krampsta-tools` — las herramientas del agente sobre la carpeta del proyecto
@@ -51,7 +52,7 @@ lee aquí la sección de lo que vayas a tocar.
   `krampsta-agent`; un JSON por sesión, escrito por un hilo propio, de forma atómica; las imágenes
   de los mensajes, en `images/<sesión>-<mensaje>.png`, escritas una vez), `load` (lectura
   bloqueante, fuera del hilo de la UI) y `format` (la forma en disco, versionada, separada del
-  dominio). No depende de Rune.
+  dominio; versión 2: el rol `summary`). No depende de Rune.
 - `crates/krampsta-ui` — `KrampstaApp` (estado, `state.rs`), `app.rs` (spec, vista raíz, poll,
   teclas, escenas), `views/` (pantallas y paneles), `components/` (piezas) y, por capacidad:
   - `picker.rs` (selector de proveedor y modelo), `accounts.rs` (diálogo de inicio de sesión),
@@ -75,6 +76,8 @@ lee aquí la sección de lo que vayas a tocar.
     `disk_changed`), `git.rs` (la vista «Git»: el diff de `Toolbox::repo_diff` por
     `AgentHost::diff_repo`; caduca con la lista de archivos); el panel con su selector es
     `views/inspector.rs`.
+  - `components/summary.rs` (el resumen de mensajes anteriores en el chat: una línea con su
+    cabecera, plegada; se abre como el razonamiento, con `open_reasoning`).
   - `search.rs` (buscar sesiones por título y mensajes desde la sidebar; las coincidencias se
     calculan al escribir y en momentos concretos, `sessions_changed`, nunca por frame; `groups`
     las filtra), `rename.rs` (renombrar una sesión en su fila, `SidebarRow::renaming`: Enter
@@ -110,6 +113,21 @@ renombrar, borrar), nunca por delta ni por frame. Con almacén, los ids de sesi�
 `IdGen::from_clock` para no repetir uno guardado. Las ejecuciones headless (`rune::is_headless()`)
 no abren almacén. Un cambio en la forma en disco sube `format::VERSION`; los tests usan
 `MemoryStore` o `tempfile`, nunca la carpeta real.
+
+## Compactación
+
+Antes de cada ejecución, `AgentHost::start` llama a `compact::before_run`: si lo que mandarían los
+motores (`replay::estimated_bytes`, desde el último resumen) pasa de `COMPACT_AT` (¾ de
+`HISTORY_BUDGET`), todo lo anterior a los últimos `KEEP_TURNS` turnos va como transcript
+(`TRANSCRIPT_MAX`, lo más nuevo si no cabe) a una petición oculta al mismo motor, sin
+herramientas ni audiencia: su texto no llega a la UI, sus tokens sí cuentan. La respuesta llega como
+`AgentEvent::Compacted`, que `Session::apply` inserta como mensaje `MessageRole::Summary` antes
+del primer mensaje que se queda entero; los motores mandan el resumen como instrucciones
+(`SUMMARY_HEADER`) y omiten lo que cubre (`replay::start`). El usuario sigue viendo todo; el chat
+marca dónde empieza el resumen (`components/summary.rs`, escena `summary`). Si el resumen falla,
+se avisa por stderr y la ejecución sigue sin él (los motores recortan); sólo la cancelación la
+para. Un test que quiera ver el recorte de un motor con un historial largo llama al motor
+directamente (`RunContext::detached`), no al host.
 
 ## Streaming
 
@@ -185,7 +203,7 @@ configuración del usuario):
   al modelo en orden). El bucle (pedir → herramientas → resultados → pedir) vive en cada motor,
   porque el formato es de cada API. Los turnos anteriores llevan sus llamadas respondidas (de
   `Message::tool_calls`/`tool_results`), cada una seguida de su resultado y después el texto;
-  `replay.rs` las recorta por antigüedad: los últimos `RECENT_TURNS` turnos, hasta
+  `krampsta_agent::replay` las recorta por antigüedad: los últimos `RECENT_TURNS` turnos, hasta
   `RECENT_OUTPUT_MAX` por resultado y `RECENT_TURN_MAX` por turno; los anteriores, una línea y
   sin argumentos largos; pasados `FORGET_AFTER`, sólo el texto. Una llamada sin resultado (se
   paró la ejecución) no se manda. `trim_history` sigue quitando turnos enteros por presupuesto.

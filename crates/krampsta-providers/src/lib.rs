@@ -16,7 +16,6 @@ pub mod chatgpt;
 pub mod copilot;
 pub mod http;
 mod openai;
-mod replay;
 mod responses;
 pub mod secrets;
 pub mod sse;

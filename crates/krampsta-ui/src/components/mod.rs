@@ -13,4 +13,5 @@ pub mod reasoning;
 pub mod shimmer;
 pub mod sign_in;
 pub mod status;
+pub mod summary;
 pub mod tool_card;

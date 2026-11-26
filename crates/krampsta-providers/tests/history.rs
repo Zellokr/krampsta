@@ -9,10 +9,10 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use krampsta_agent::{AgentEngine, AgentHost, Call, RunRequest, ToolOutput, ToolSpec, Toolbox};
-use krampsta_core::{AgentEvent, Message, MessageId, MessageRole, SessionId};
+use krampsta_agent::{AgentEngine, Call, RunContext, RunRequest, ToolOutput, ToolSpec, Toolbox};
+use krampsta_core::{Message, MessageId, MessageRole, RunId, SessionId};
 use krampsta_providers::access::StaticAccess;
 use krampsta_providers::{OpenAiConfig, OpenAiEngine, ResponsesEngine};
 use serde_json::{Value, json};
@@ -84,20 +84,14 @@ fn history() -> Vec<Message> {
     history
 }
 
-/// Runs one turn with `engine`; the bodies of the requests it made.
+/// Runs one turn with `engine` itself, without the host, which would sum such a long
+/// conversation up first (`compact.rs`): this is what the engines do when it isn't. The bodies
+/// of the requests it made.
 fn run(engine: Arc<dyn AgentEngine>, bodies: &Receiver<Vec<u8>>, requests: usize) -> Vec<Vec<u8>> {
-    let mut host = AgentHost::new(engine);
-    host.set_toolbox(Some(Arc::new(Look)));
-    let run = host.next_run_id();
-    host.start(RunRequest { session: SessionId(1), run, history: history(), effort: None }).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let mut events = Vec::new();
-    while !events.last().is_some_and(AgentEvent::is_terminal) {
-        assert!(Instant::now() < deadline, "timed out: {events:?}");
-        events.extend(host.drain().into_iter().map(|e| e.event));
-        thread::sleep(Duration::from_millis(2));
-    }
-    assert!(matches!(events.last(), Some(AgentEvent::Completed { .. })), "{events:?}");
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+    let (ctx, _events) = RunContext::detached(Some(Arc::new(Look)));
+    let request = RunRequest { session: SessionId(1), run: RunId(1), history: history(), effort: None };
+    runtime.block_on(engine.run(request, ctx)).unwrap();
     (0..requests).map(|_| bodies.recv_timeout(Duration::from_secs(5)).unwrap()).collect()
 }
 

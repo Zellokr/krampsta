@@ -14,10 +14,12 @@
 //! This crate knows nothing about the UI framework.
 
 mod catalog;
+pub mod compact;
 mod engine;
 mod host;
 mod mock;
 mod projects;
+pub mod replay;
 mod servers;
 mod store;
 mod tools;

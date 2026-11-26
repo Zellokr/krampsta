@@ -3,14 +3,13 @@
 
 use std::sync::Arc;
 
-use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest, ToolSpec};
+use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest, ToolSpec, replay};
 use krampsta_core::{Message, MessageRole, ToolCall, ToolCallId, Usage};
 use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::access::Access;
 use crate::http::{self, Flow};
-use crate::replay;
 use crate::sse::SseEvent;
 use crate::steps::{self, MAX_STEPS, Paragraphs};
 
@@ -235,12 +234,23 @@ fn reasoning(shape: &ModelShape) -> serde_json::Map<String, Value> {
 
 /// The conversation as input items: the run's `instructions` (plus any system messages) as a
 /// leading developer message, then each earlier turn: the calls it made, each followed by its
-/// result (shortened for the turn's age, [`replay`]), and its text.
+/// result (shortened for the turn's age, [`replay`]), and its text. A summary joins the
+/// instructions, and what it covers doesn't go.
 fn input(history: &[Message], mut instructions: String) -> Vec<Value> {
     let mut conversation = Vec::new();
-    for (m, age) in history.iter().zip(replay::ages(history)) {
+    let from = replay::start(history);
+    for (index, (m, age)) in history.iter().zip(replay::ages(history)).enumerate() {
+        if index < from && m.role != MessageRole::System {
+            continue;
+        }
         match m.role {
             MessageRole::System => {
+                instructions.push_str("\n\n");
+                instructions.push_str(&m.content);
+            }
+            MessageRole::Summary => {
+                instructions.push_str("\n\n");
+                instructions.push_str(replay::SUMMARY_HEADER);
                 instructions.push_str("\n\n");
                 instructions.push_str(&m.content);
             }

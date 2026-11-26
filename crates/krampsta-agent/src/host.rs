@@ -408,10 +408,14 @@ impl AgentHost {
         let handle = runtime.handle().clone();
         runtime.spawn(async move {
             ctx.emit(AgentEvent::Started { run });
-            // The engine runs as its own task so a panic inside it still ends the run.
-            let result = match handle.spawn(engine.run(request, ctx.clone())).await {
-                Ok(result) => result,
-                Err(join) => Err(AgentError::Provider(format!("engine task ended abnormally: {join}"))),
+            // A long conversation is summed up first (`compact.rs`).
+            let result = match crate::compact::before_run(engine.clone(), request, &ctx, &handle).await {
+                // The engine runs as its own task so a panic inside it still ends the run.
+                Ok(request) => match handle.spawn(engine.run(request, ctx.clone())).await {
+                    Ok(result) => result,
+                    Err(join) => Err(AgentError::Provider(format!("engine task ended abnormally: {join}"))),
+                },
+                Err(stopped) => Err(stopped),
             };
             let terminal = match result {
                 _ if ctx.cancellation().is_cancelled() => AgentEvent::Cancelled { run },

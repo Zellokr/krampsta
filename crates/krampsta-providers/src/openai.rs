@@ -4,13 +4,12 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest, ToolSpec};
+use krampsta_agent::{AgentEngine, AgentError, BoxFuture, RunContext, RunRequest, ToolSpec, replay};
 use krampsta_core::{Message, MessageRole, ToolCall, ToolCallId, ToolResult, Usage};
 use serde::{Deserialize, Serialize};
 
 use crate::access::{Access, StaticAccess};
 use crate::http::{self, Flow, HttpError};
-use crate::replay;
 use crate::sse::SseEvent;
 use crate::steps::{self, HISTORY_BUDGET, MAX_STEPS, Paragraphs};
 
@@ -291,13 +290,23 @@ fn on_event(
 
 /// The conversation as the API expects it. An earlier turn goes as the calls it made, each
 /// answered by its result (shortened for the turn's age, [`replay`]), then its text; empty
-/// assistant turns (a run that failed before doing anything) are left out.
+/// assistant turns (a run that failed before doing anything) are left out. A summary goes as a
+/// system message, and what it covers doesn't go.
 fn wire_messages(history: &[Message]) -> Vec<WireMessage<'_>> {
     let mut wire = Vec::with_capacity(history.len());
-    for (message, age) in history.iter().zip(replay::ages(history)) {
+    let from = replay::start(history);
+    for (index, (message, age)) in history.iter().zip(replay::ages(history)).enumerate() {
+        if index < from && message.role != MessageRole::System {
+            continue;
+        }
         let role = match message.role {
             MessageRole::User => "user",
             MessageRole::System => "system",
+            MessageRole::Summary => {
+                let content = format!("{}\n\n{}", replay::SUMMARY_HEADER, message.content);
+                wire.push(WireMessage { role: "system", content: Some(Cow::Owned(content)), ..WireMessage::default() });
+                continue;
+            }
             MessageRole::Assistant if replay::has_content(message, age) => {
                 for replayed in replay::calls(message, age) {
                     let call = WireCall {

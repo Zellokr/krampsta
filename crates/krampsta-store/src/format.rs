@@ -10,8 +10,8 @@ use krampsta_core::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Bumped when the shape changes in a way older builds can't read.
-pub const VERSION: u32 = 1;
+/// Bumped when the shape changes in a way older builds can't read. 2: the `summary` role.
+pub const VERSION: u32 = 2;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SavedSession {
@@ -61,6 +61,7 @@ pub enum SavedRole {
     Assistant,
     System,
     Tool,
+    Summary,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -163,6 +164,7 @@ impl SavedMessage {
                 MessageRole::Assistant => SavedRole::Assistant,
                 MessageRole::System => SavedRole::System,
                 MessageRole::Tool => SavedRole::Tool,
+                MessageRole::Summary => SavedRole::Summary,
             },
             content: m.content.clone(),
             image: m.image_png.as_ref().map(|_| crate::images::name(session, m.id)),
@@ -188,6 +190,7 @@ impl SavedMessage {
             SavedRole::Assistant => MessageRole::Assistant,
             SavedRole::System => MessageRole::System,
             SavedRole::Tool => MessageRole::Tool,
+            SavedRole::Summary => MessageRole::Summary,
         };
         let mut message = Message::new(MessageId(self.id), role, self.content);
         message.image_png = self.image_png.map(Into::into);

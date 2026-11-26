@@ -11,6 +11,9 @@ pub enum MessageRole {
     System,
     /// Output a tool returned to the model.
     Tool,
+    /// What the conversation before it said, summed up by the model to fit its context: from
+    /// here on the model is sent this instead of the messages it covers (the user still sees them).
+    Summary,
 }
 
 impl MessageRole {
@@ -20,6 +23,7 @@ impl MessageRole {
             MessageRole::Assistant => "Krampsta",
             MessageRole::System => "System",
             MessageRole::Tool => "Tool",
+            MessageRole::Summary => "Summary",
         }
     }
 }

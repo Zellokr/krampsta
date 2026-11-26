@@ -1,6 +1,6 @@
 //! What an agent run reports while it works.
 
-use crate::{FileChange, RunId, SessionId, ToolCallId};
+use crate::{FileChange, MessageId, RunId, SessionId, ToolCallId};
 
 /// The state of a session's agent. A plain enum: each variant carries only what is valid in it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -124,6 +124,13 @@ pub enum AgentEvent {
         call: ToolCallId,
         change: FileChange,
     },
+    /// The conversation before message `before` was summed up to fit the model's context: the
+    /// summary goes in just before it, and the model is sent it instead of what it covers.
+    Compacted {
+        run: RunId,
+        summary: String,
+        before: MessageId,
+    },
     /// Tokens one request to the provider used. A run that makes several requests reports each.
     Usage {
         run: RunId,
@@ -150,6 +157,7 @@ impl AgentEvent {
             | AgentEvent::ToolCallStarted { run, .. }
             | AgentEvent::ToolCallFinished { run, .. }
             | AgentEvent::Usage { run, .. }
+            | AgentEvent::Compacted { run, .. }
             | AgentEvent::ChangeProposed { run, .. }
             | AgentEvent::ToolOutputDelta { run, .. }
             | AgentEvent::ApprovalRequested { run, .. }
