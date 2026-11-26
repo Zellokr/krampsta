@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 
 use crate::access::Access;
 use crate::http::{self, Flow};
+use crate::replay;
 use crate::sse::SseEvent;
 use crate::steps::{self, MAX_STEPS, Paragraphs};
 
@@ -219,11 +220,11 @@ fn reasoning(shape: &ModelShape) -> serde_json::Map<String, Value> {
 }
 
 /// The conversation as input items: the run's `instructions` (plus any system messages) as a
-/// leading developer message, then each earlier turn's text (its tool traffic served that turn
-/// and would only cost tokens now).
+/// leading developer message, then each earlier turn: the calls it made, each followed by its
+/// result (shortened for the turn's age, [`replay`]), and its text.
 fn input(history: &[Message], mut instructions: String) -> Vec<Value> {
     let mut conversation = Vec::new();
-    for m in history {
+    for (m, age) in history.iter().zip(replay::ages(history)) {
         match m.role {
             MessageRole::System => {
                 instructions.push_str("\n\n");
@@ -239,10 +240,27 @@ fn input(history: &[Message], mut instructions: String) -> Vec<Value> {
                 }
                 conversation.push(json!({"type": "message", "role": "user", "content": content}));
             }
-            MessageRole::Assistant if !m.content.is_empty() => conversation.push(
-                json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": m.content}]}),
-            ),
-            MessageRole::Assistant | MessageRole::Tool => {}
+            MessageRole::Assistant => {
+                for replayed in replay::calls(m, age) {
+                    let id = &replayed.call.id.0;
+                    conversation.push(json!({
+                        "type": "function_call",
+                        "call_id": id,
+                        "name": replayed.call.name,
+                        "arguments": replayed.arguments,
+                    }));
+                    conversation
+                        .push(json!({"type": "function_call_output", "call_id": id, "output": replayed.output}));
+                }
+                if !m.content.is_empty() {
+                    conversation.push(json!({
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": m.content}],
+                    }));
+                }
+            }
+            MessageRole::Tool => {}
         }
     }
     let mut input = vec![
@@ -450,6 +468,34 @@ mod tests {
         assert!(b["input"][0]["content"][0]["text"].as_str().unwrap().ends_with("Reply in Spanish."));
         assert_eq!(b["input"][2]["content"][0]["type"], "output_text");
         assert_eq!(b["reasoning"], json!({"effort": "medium", "summary": "auto"}));
+    }
+
+    #[test]
+    fn earlier_turns_send_their_answered_calls_before_their_text() {
+        let mut answered = Message::assistant(MessageId(2), RunId(1));
+        answered.content = "It says hi.".into();
+        for call in ["read", "stopped"] {
+            answered.tool_calls.push(ToolCall {
+                id: ToolCallId(call.into()),
+                name: "read_file".into(),
+                arguments: r#"{"path":"a.txt"}"#.into(),
+            });
+        }
+        answered.tool_results.push(krampsta_core::ToolResult {
+            call_id: ToolCallId("read".into()),
+            output: "hi".into(),
+            is_error: false,
+        });
+        let history = [Message::user(MessageId(1), "what's in a.txt?"), answered, Message::user(MessageId(3), "and?")];
+        let items = input(&history, INSTRUCTIONS.into());
+        assert_eq!(
+            items[2],
+            json!({"type": "function_call", "call_id": "read", "name": "read_file", "arguments": r#"{"path":"a.txt"}"#})
+        );
+        assert_eq!(items[3], json!({"type": "function_call_output", "call_id": "read", "output": "hi"}));
+        assert_eq!(items[4]["content"][0]["text"], "It says hi.");
+        assert_eq!(items[5]["content"][0]["text"], "and?");
+        assert_eq!(items.len(), 6, "the stopped call, with no result, is left out");
     }
 
     #[test]

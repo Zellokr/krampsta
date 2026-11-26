@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::access::{Access, StaticAccess};
 use crate::http::{self, Flow, HttpError};
+use crate::replay;
 use crate::sse::SseEvent;
 use crate::steps::{self, HISTORY_BUDGET, MAX_STEPS, Paragraphs};
 
@@ -283,22 +284,43 @@ fn on_event(
     Ok(Flow::Continue)
 }
 
-/// The conversation as the API expects it. Earlier turns go as their text: empty assistant
-/// turns (a run that failed before writing) are left out, and so is their tool traffic, which
-/// served those turns and would only cost tokens now.
+/// The conversation as the API expects it. An earlier turn goes as the calls it made, each
+/// answered by its result (shortened for the turn's age, [`replay`]), then its text; empty
+/// assistant turns (a run that failed before doing anything) are left out.
 fn wire_messages(history: &[Message]) -> Vec<WireMessage<'_>> {
-    history
-        .iter()
-        .filter_map(|m| {
-            let role = match m.role {
-                MessageRole::User => "user",
-                MessageRole::Assistant if !m.content.is_empty() => "assistant",
-                MessageRole::System => "system",
-                MessageRole::Assistant | MessageRole::Tool => return None,
-            };
-            Some(WireMessage { role, content: Some(Cow::Borrowed(&m.content)), ..WireMessage::default() })
-        })
-        .collect()
+    let mut wire = Vec::with_capacity(history.len());
+    for (message, age) in history.iter().zip(replay::ages(history)) {
+        let role = match message.role {
+            MessageRole::User => "user",
+            MessageRole::System => "system",
+            MessageRole::Assistant if replay::has_content(message, age) => {
+                for replayed in replay::calls(message, age) {
+                    let call = WireCall {
+                        id: replayed.call.id.0.clone(),
+                        kind: "function",
+                        function: WireCallFunction {
+                            name: replayed.call.name.clone(),
+                            arguments: replayed.arguments.into_owned(),
+                        },
+                    };
+                    wire.push(WireMessage { role: "assistant", tool_calls: vec![call], ..WireMessage::default() });
+                    wire.push(WireMessage {
+                        role: "tool",
+                        content: Some(replayed.output),
+                        tool_call_id: Some(replayed.call.id.0.clone()),
+                        ..WireMessage::default()
+                    });
+                }
+                if message.content.is_empty() {
+                    continue;
+                }
+                "assistant"
+            }
+            MessageRole::Assistant | MessageRole::Tool => continue,
+        };
+        wire.push(WireMessage { role, content: Some(Cow::Borrowed(&message.content)), ..WireMessage::default() });
+    }
+    wire
 }
 
 fn trim_history(messages: &mut Vec<WireMessage<'_>>, budget: usize) {
@@ -580,6 +602,52 @@ mod tests {
         }
         // The active turn alone is now larger than the budget; don't cut it.
         assert_eq!(bounded.len(), 8);
+    }
+
+    /// An earlier answer that read a file, then said what it found; a stopped call with no result.
+    fn turn_with_tools(id: u64) -> Message {
+        let mut message = Message::assistant(MessageId(id), RunId(id));
+        message.content = "It says hi.".into();
+        for call in ["read", "stopped"] {
+            message.tool_calls.push(ToolCall {
+                id: ToolCallId(call.into()),
+                name: "read_file".into(),
+                arguments: r#"{"path":"a.txt"}"#.into(),
+            });
+        }
+        message.tool_results.push(ToolResult {
+            call_id: ToolCallId("read".into()),
+            output: "hi".into(),
+            is_error: false,
+        });
+        message
+    }
+
+    #[test]
+    fn earlier_turns_send_their_answered_calls_before_their_text() {
+        let history = vec![
+            Message::user(MessageId(1), "what's in a.txt?"),
+            turn_with_tools(2),
+            Message::user(MessageId(3), "and?"),
+        ];
+        let wire = wire_messages(&history);
+        let shape: Vec<_> = wire
+            .iter()
+            .map(|m| {
+                (m.role, m.content.as_deref(), m.tool_calls.first().map(|c| c.id.as_str()), m.tool_call_id.as_deref())
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                ("user", Some("what's in a.txt?"), None, None),
+                ("assistant", None, Some("read"), None),
+                ("tool", Some("hi"), None, Some("read")),
+                ("assistant", Some("It says hi."), None, None),
+                ("user", Some("and?"), None, None),
+            ]
+        );
+        assert_eq!(wire[1].tool_calls[0].function.arguments, r#"{"path":"a.txt"}"#);
     }
 
     #[test]

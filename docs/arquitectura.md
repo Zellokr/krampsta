@@ -17,7 +17,8 @@ lee aquí la sección de lo que vayas a tocar.
 - `crates/krampsta-providers` — motores reales: `sse` (parser), `http` (cliente `reqwest`, petición
   SSE cancelable, `HttpError`), `access` (URL + cabeceras por petición: clave fija o token de
   cuenta), `OpenAiEngine`, `responses` (motor de la API Responses), `steps` (lo común del bucle:
-  instrucciones, llamadas a la vez, recorte del historial), `list_models`, `copilot` (device flow,
+  instrucciones, llamadas a la vez, recorte del historial), `replay` (qué vuelve al modelo de las
+  herramientas de turnos anteriores), `list_models`, `copilot` (device flow,
   token de Copilot), `chatgpt` (código de dispositivo de OpenAI, refresh), `accounts`
   (iniciar/cerrar sesión), `secrets` (llavero del sistema) y `Catalog`. No depende de Rune.
 - `crates/krampsta-tools` — las herramientas del agente sobre la carpeta del proyecto
@@ -182,8 +183,12 @@ configuración del usuario):
   (hilo bloqueante, cancelable, emite la tarjeta); las de un paso van a la vez con
   `steps::run_calls`, y sus tarjetas terminan en el orden en que acaben (los resultados vuelven
   al modelo en orden). El bucle (pedir → herramientas → resultados → pedir) vive en cada motor,
-  porque el formato es de cada API. Los turnos anteriores se mandan sólo como texto; el tráfico
-  de herramientas vive en memoria durante la ejecución.
+  porque el formato es de cada API. Los turnos anteriores llevan sus llamadas respondidas (de
+  `Message::tool_calls`/`tool_results`), cada una seguida de su resultado y después el texto;
+  `replay.rs` las recorta por antigüedad: los últimos `RECENT_TURNS` turnos, hasta
+  `RECENT_OUTPUT_MAX` por resultado y `RECENT_TURN_MAX` por turno; los anteriores, una línea y
+  sin argumentos largos; pasados `FORGET_AFTER`, sólo el texto. Una llamada sin resultado (se
+  paró la ejecución) no se manda. `trim_history` sigue quitando turnos enteros por presupuesto.
 - Espera con `ctx.sleep(..)` o futuros cancelables; `usage` se emite también si la petición falla
   tras contar los tokens. Devuelve `Ok(())`, `Err(AgentError::..)` o `Err(AgentError::Cancelled)`.
 - `edit_file` devuelve un `FileChange` (antes/después) y guarda la propuesta como pendiente: las
