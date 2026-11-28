@@ -18,7 +18,10 @@ lee aquí la sección de lo que vayas a tocar.
   `HISTORY_BUDGET`) y `compact` (resumir la conversación antes de una ejecución). No depende de Rune.
 - `crates/krampsta-providers` — motores reales: `sse` (parser), `http` (cliente `reqwest`, petición
   SSE cancelable, `HttpError`), `access` (URL + cabeceras por petición: clave fija o token de
-  cuenta), `OpenAiEngine`, `responses` (motor de la API Responses), `steps` (lo común del bucle:
+  cuenta), `OpenAiEngine`, `responses` (motor de la API Responses), `anthropic` (`AnthropicEngine`, la API
+  Messages de Claude: `thinking` adaptativo con resumen, `output_config.effort`, `cache_control`,
+  `fallbacks` en los modelos que lo admiten; los bloques del asistente vuelven tal cual dentro de la
+  ejecución, firma del razonamiento incluida), `steps` (lo común del bucle:
   instrucciones, llamadas a la vez, recorte del historial), `list_models`, `copilot` (device flow,
   token de Copilot), `chatgpt` (código de dispositivo de OpenAI, refresh), `accounts`
   (iniciar/cerrar sesión), `secrets` (llavero del sistema) y `Catalog`. No depende de Rune.
@@ -189,6 +192,8 @@ configuración del usuario):
   `spawn_blocking`. Los tests usan `MemoryStore` y un servidor falso, nunca el llavero real.
 - Claves de API guardadas desde la app: `EngineCatalog::set_api_key` (llavero), y el proveedor lo
   anuncia con `Provider::api_key` (`KeySource`). La guardada manda sobre la variable de entorno.
+  Los proveedores con clave están en `KEYED` (`catalog.rs`: entrada del llavero, variable y aviso),
+  hoy OpenAI y Anthropic; en Ajustes cada uno tiene su propio campo (`KeyField::draft`).
 - Para ver qué manda de verdad un backend, `KRAMPSTA_TRACE_SSE=1` escribe en stderr el tipo de
   cada evento del motor Responses (y los nombres de campo de los que ignora), nunca su contenido.
   Pide al usuario esa traza antes de cambiar la petición a ciegas.

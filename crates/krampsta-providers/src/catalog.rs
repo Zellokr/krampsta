@@ -3,6 +3,7 @@
 //! | Provider | Server | Credentials |
 //! | --- | --- | --- |
 //! | OpenAI | `https://api.openai.com/v1` | saved in Settings (system keychain), else `OPENAI_API_KEY` |
+//! | Anthropic | `https://api.anthropic.com/v1` (`ANTHROPIC_BASE_URL`) | saved in Settings, else `ANTHROPIC_API_KEY` |
 //! | OpenAI-compatible | `OPENAI_BASE_URL` (only listed when set) | `OPENAI_API_KEY`, if any |
 //! | llama.cpp | `http://127.0.0.1:9931/v1` (`LLAMA_CPP_URL`) | none |
 //! | Ollama | `http://localhost:11434/v1` | none |
@@ -11,6 +12,7 @@
 //!
 //! `KRAMPSTA_PROVIDER` (a provider id) and `KRAMPSTA_MODEL` choose what is selected at start.
 
+use std::collections::HashMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use krampsta_agent::{
@@ -21,6 +23,7 @@ use krampsta_agent::{
 use crate::ProviderError;
 use crate::accounts::{self, Accounts, CHATGPT, COPILOT, Hosts};
 
+use crate::anthropic::{self, ANTHROPIC_URL, AnthropicEngine};
 use crate::http;
 use crate::openai::{self, DEFAULT_BASE_URL, OpenAiConfig, OpenAiEngine};
 use crate::secrets::{KeyringStore, SecretStore};
@@ -33,19 +36,47 @@ pub const LM_STUDIO_URL: &str = "http://localhost:1234/v1";
 /// overrides it (llama-server's own default is port 8080).
 pub const LLAMA_CPP_URL: &str = "http://127.0.0.1:9931/v1";
 
-/// The provider whose API key can be saved from the app, and its keychain entry.
 const OPENAI: &str = "openai";
+const ANTHROPIC: &str = "anthropic";
 pub const OPENAI_KEY_ENTRY: &str = "openai-api-key";
-const OPENAI_KEY_VAR: &str = "OPENAI_API_KEY";
+pub const ANTHROPIC_KEY_ENTRY: &str = "anthropic-api-key";
 const OPENAI_KEY_HINT: &str = "needs an API key (Settings › API keys, or OPENAI_API_KEY)";
+const ANTHROPIC_KEY_HINT: &str = "needs an API key (Settings › API keys, or ANTHROPIC_API_KEY)";
 
-/// OpenAI's key and where it comes from: the one saved in the app wins over the environment's.
-fn openai_key(saved: Option<&str>, env: Option<&str>) -> (Option<String>, KeySource) {
+/// A provider whose API key can be saved from the app: its keychain entry, the variable that
+/// can give it instead, and what its selector says while there is none.
+struct Keyed {
+    provider: &'static str,
+    entry: &'static str,
+    var: &'static str,
+    hint: &'static str,
+}
+
+const KEYED: [Keyed; 2] = [
+    Keyed { provider: OPENAI, entry: OPENAI_KEY_ENTRY, var: "OPENAI_API_KEY", hint: OPENAI_KEY_HINT },
+    Keyed { provider: ANTHROPIC, entry: ANTHROPIC_KEY_ENTRY, var: "ANTHROPIC_API_KEY", hint: ANTHROPIC_KEY_HINT },
+];
+
+fn keyed(provider: &str) -> Option<&'static Keyed> {
+    KEYED.iter().find(|k| k.provider == provider)
+}
+
+/// A key and where it comes from: the one saved in the app wins over the environment's.
+fn pick_key(keyed: &Keyed, saved: Option<&str>, env: Option<&str>) -> (Option<String>, KeySource) {
     match (saved, env) {
         (Some(key), _) => (Some(key.to_owned()), KeySource::Saved),
-        (None, Some(key)) => (Some(key.to_owned()), KeySource::Environment(OPENAI_KEY_VAR.into())),
+        (None, Some(key)) => (Some(key.to_owned()), KeySource::Environment(keyed.var.into())),
         (None, None) => (None, KeySource::Missing),
     }
+}
+
+/// Which API a server speaks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Api {
+    /// Chat Completions (OpenAI and the servers that copy it).
+    OpenAi,
+    /// Anthropic's Messages API.
+    Anthropic,
 }
 
 /// How a server's model list is shown.
@@ -61,13 +92,14 @@ enum Listing {
     FileNames,
 }
 
-/// One OpenAI-protocol server.
+/// One server with a fixed address.
 #[derive(Clone)]
 struct Server {
     provider: Provider,
     base_url: String,
     api_key: Option<String>,
     listing: Listing,
+    api: Api,
 }
 
 pub struct Catalog {
@@ -77,9 +109,10 @@ pub struct Catalog {
     client: reqwest::Client,
     mock: MockConfig,
     store: Arc<dyn SecretStore>,
-    /// OpenAI's key as saved from the app (and in `store`), and as `OPENAI_API_KEY` gave it.
-    saved_key: Arc<RwLock<Option<String>>>,
-    env_key: Option<String>,
+    /// The keys saved from the app (and in `store`), and the ones the environment gave, by
+    /// provider ([`KEYED`]).
+    saved_keys: Arc<RwLock<HashMap<&'static str, String>>>,
+    env_keys: HashMap<&'static str, String>,
 }
 
 impl Catalog {
@@ -97,10 +130,15 @@ impl Catalog {
         let var = |name: &str| var(name).map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
         let client = http::client()?;
         let accounts = Accounts::load(client.clone(), store.clone(), hosts);
-        let key = var(OPENAI_KEY_VAR);
+        let env_keys: HashMap<&'static str, String> =
+            KEYED.iter().filter_map(|k| var(k.var).map(|key| (k.provider, key))).collect();
         // An unreadable entry means none saved; the environment's key (if any) still works.
-        let saved = store.get(OPENAI_KEY_ENTRY).ok().flatten().filter(|k| !k.trim().is_empty());
-        // OpenAI's key and `missing` are filled in by `resolve`, from the saved or environment key.
+        let saved_keys: HashMap<&'static str, String> = KEYED
+            .iter()
+            .filter_map(|k| store.get(k.entry).ok().flatten().filter(|v| !v.trim().is_empty()).map(|v| (k.provider, v)))
+            .collect();
+        let key = env_keys.get(OPENAI).cloned();
+        // The keyed providers' keys and `missing` are filled in by `resolve`.
         let mut servers = vec![Server {
             provider: Provider {
                 id: OPENAI.into(),
@@ -115,7 +153,24 @@ impl Catalog {
             base_url: DEFAULT_BASE_URL.into(),
             api_key: None,
             listing: Listing::ChatOnly,
+            api: Api::OpenAi,
         }];
+        servers.push(Server {
+            provider: Provider {
+                id: ANTHROPIC.into(),
+                label: "Anthropic".into(),
+                default_model: Some(anthropic::DEFAULT_MODEL.into()),
+                missing: None,
+                kind: ProviderKind::Cloud,
+                reasoning_effort: true,
+                images: true,
+                api_key: None,
+            },
+            base_url: var("ANTHROPIC_BASE_URL").unwrap_or_else(|| ANTHROPIC_URL.to_owned()),
+            api_key: None,
+            listing: Listing::All,
+            api: Api::Anthropic,
+        });
         if let Some(url) = var("OPENAI_BASE_URL") {
             servers.push(Server {
                 provider: Provider {
@@ -131,6 +186,7 @@ impl Catalog {
                 base_url: url,
                 api_key: key.clone(),
                 listing: Listing::All,
+                api: Api::OpenAi,
             });
         }
         let llama_cpp = var("LLAMA_CPP_URL").unwrap_or_else(|| LLAMA_CPP_URL.to_owned());
@@ -154,20 +210,21 @@ impl Catalog {
                 base_url,
                 api_key: None,
                 listing,
+                api: Api::OpenAi,
             });
         }
 
-        let has_openai_key = openai_key(saved.as_deref(), key.as_deref()).0.is_some();
-        let ready = |id: &str| match id {
-            OPENAI => has_openai_key,
-            _ => servers.iter().any(|s| s.provider.id == id && s.provider.missing.is_none()),
+        let ready = |id: &str| match keyed(id) {
+            Some(k) => saved_keys.contains_key(k.provider) || env_keys.contains_key(k.provider),
+            None => servers.iter().any(|s| s.provider.id == id && s.provider.missing.is_none()),
         };
         let known = |p: &str| p == MOCK_PROVIDER || Accounts::handles(p) || servers.iter().any(|s| s.provider.id == p);
         let provider = match var("KRAMPSTA_PROVIDER").map(|p| p.to_ascii_lowercase()) {
             Some(p) if known(&p) => p,
             Some(p) => return Err(ProviderError::Unknown(p)),
             None if ready("custom") => "custom".into(),
-            None if ready("openai") => "openai".into(),
+            None if ready(OPENAI) => OPENAI.into(),
+            None if ready(ANTHROPIC) => ANTHROPIC.into(),
             None if accounts.signed_in(CHATGPT) => CHATGPT.into(),
             None if accounts.signed_in(COPILOT) => COPILOT.into(),
             None => MOCK_PROVIDER.into(),
@@ -185,8 +242,8 @@ impl Catalog {
             client,
             mock: MockConfig::default(),
             store,
-            saved_key: Arc::new(RwLock::new(saved)),
-            env_key: key,
+            saved_keys: Arc::new(RwLock::new(saved_keys)),
+            env_keys,
         })
     }
 
@@ -199,13 +256,14 @@ impl Catalog {
             .ok_or_else(|| AgentError::Provider(format!("unknown provider `{id}`")))
     }
 
-    /// A server as it stands: OpenAI's takes the saved key, else the environment's.
+    /// A server as it stands: a keyed provider takes the saved key, else the environment's.
     fn resolve(&self, server: &Server) -> Server {
         let mut server = server.clone();
-        if server.provider.id == OPENAI {
-            let saved = self.saved_key.read().unwrap_or_else(PoisonError::into_inner);
-            let (key, source) = openai_key(saved.as_deref(), self.env_key.as_deref());
-            server.provider.missing = key.is_none().then(|| OPENAI_KEY_HINT.into());
+        if let Some(k) = keyed(&server.provider.id) {
+            let saved = self.saved_keys.read().unwrap_or_else(PoisonError::into_inner);
+            let env = self.env_keys.get(k.provider).map(String::as_str);
+            let (key, source) = pick_key(k, saved.get(k.provider).map(String::as_str), env);
+            server.provider.missing = key.is_none().then(|| k.hint.into());
             server.provider.api_key = Some(source);
             server.api_key = key;
         }
@@ -218,10 +276,11 @@ impl Catalog {
 }
 
 impl EngineCatalog for Catalog {
-    /// OpenAI first, then the account providers, the other servers and the simulated agent.
+    /// OpenAI and Anthropic first, then the account providers, the other servers and the
+    /// simulated agent.
     fn providers(&self) -> Vec<Provider> {
         let mut out: Vec<Provider> = self.servers.iter().map(|s| self.resolve(s).provider).collect();
-        out.splice(1..1, self.accounts.providers());
+        out.splice(2..2, self.accounts.providers());
         out.push(MockCatalog::provider());
         out
     }
@@ -241,28 +300,39 @@ impl EngineCatalog for Catalog {
         if let Some(missing) = &server.provider.missing {
             return Err(AgentError::Provider(format!("{} {missing}", server.provider.label)));
         }
-        let engine =
-            OpenAiEngine::with_client(Self::config(&server, model), self.client.clone(), &server.provider.label)?;
-        Ok(Arc::new(engine))
+        let label = &server.provider.label;
+        Ok(match server.api {
+            Api::OpenAi => {
+                Arc::new(OpenAiEngine::with_client(Self::config(&server, model), self.client.clone(), label)?)
+            }
+            Api::Anthropic => {
+                let key = server.api_key.as_deref().unwrap_or_default();
+                Arc::new(AnthropicEngine::new(&server.base_url, key, model, self.client.clone(), label)?)
+            }
+        })
     }
 
     fn set_api_key(&self, provider: &str, key: Option<String>) -> BoxFuture<'static, Result<(), AgentError>> {
-        if provider != OPENAI {
+        let Some(k) = keyed(provider) else {
             let error = AgentError::Provider(format!("`{provider}` takes no API key"));
             return Box::pin(async move { Err(error) });
-        }
+        };
         let key = key.map(|k| k.trim().to_owned());
-        let (store, slot) = (self.store.clone(), self.saved_key.clone());
+        let (store, slot, entry, id) = (self.store.clone(), self.saved_keys.clone(), k.entry, k.provider);
         Box::pin(async move {
             match &key {
                 Some(k) if k.is_empty() => return Err(AgentError::Provider("The API key is empty.".into())),
                 Some(k) => {
                     let k = k.clone();
-                    accounts::blocking(move || store.set(OPENAI_KEY_ENTRY, &k)).await?;
+                    accounts::blocking(move || store.set(entry, &k)).await?;
                 }
-                None => accounts::blocking(move || store.delete(OPENAI_KEY_ENTRY)).await?,
+                None => accounts::blocking(move || store.delete(entry)).await?,
             }
-            *slot.write().unwrap_or_else(PoisonError::into_inner) = key;
+            let mut saved = slot.write().unwrap_or_else(PoisonError::into_inner);
+            match key {
+                Some(key) => saved.insert(id, key),
+                None => saved.remove(id),
+            };
             Ok(())
         })
     }
@@ -276,7 +346,10 @@ impl EngineCatalog for Catalog {
     }
 
     fn efforts(&self, provider: &str, model: &str) -> Vec<EffortLevel> {
-        self.accounts.efforts(provider, model)
+        match provider {
+            ANTHROPIC => anthropic::efforts(model),
+            _ => self.accounts.efforts(provider, model),
+        }
     }
 
     fn models(&self, provider: &str) -> BoxFuture<'static, Result<Vec<String>, AgentError>> {
@@ -295,6 +368,12 @@ impl EngineCatalog for Catalog {
             Err(e) => return Box::pin(async move { Err(e) }),
         };
         let client = self.client.clone();
+        if server.api == Api::Anthropic {
+            return Box::pin(async move {
+                let key = server.api_key.unwrap_or_default();
+                Ok(anthropic::list_models(&client, &server.base_url, &key).await?)
+            });
+        }
         Box::pin(async move {
             let config = Self::config(&server, "");
             let models = openai::list_models(&client, &config, server.listing == Listing::ChatOnly).await?;
@@ -373,12 +452,36 @@ mod tests {
     }
 
     #[test]
-    fn only_openai_takes_a_key_and_an_empty_one_is_refused() {
+    fn only_openai_and_anthropic_take_a_key_and_an_empty_one_is_refused() {
         let c = catalog(&[]).unwrap();
         let err = block_on(c.set_api_key(OPENAI, Some("   ".into()))).unwrap_err();
         assert_eq!(err, AgentError::Provider("The API key is empty.".into()));
         assert!(block_on(c.set_api_key("ollama", Some("x".into()))).is_err());
-        assert!(c.providers().iter().filter(|p| p.id != OPENAI).all(|p| p.api_key.is_none()));
+        let keyed: Vec<String> = c.providers().into_iter().filter(|p| p.api_key.is_some()).map(|p| p.id).collect();
+        assert_eq!(keyed, [OPENAI, ANTHROPIC]);
+    }
+
+    #[test]
+    fn anthropic_takes_its_own_key_from_the_app_or_the_environment() {
+        let store = Arc::new(crate::secrets::MemoryStore::default());
+        let c = catalog_with(&[], store.clone()).unwrap();
+        let anthropic = |c: &Catalog| c.providers().into_iter().find(|p| p.id == ANTHROPIC).unwrap();
+        assert_eq!(anthropic(&c).missing.as_deref(), Some(ANTHROPIC_KEY_HINT));
+        assert!(c.engine(ANTHROPIC, "claude-opus-5-5").is_err());
+
+        block_on(c.set_api_key(ANTHROPIC, Some("sk-ant-saved".into()))).unwrap();
+        assert_eq!(store.get(ANTHROPIC_KEY_ENTRY).unwrap().as_deref(), Some("sk-ant-saved"));
+        assert_eq!(store.get(OPENAI_KEY_ENTRY).unwrap(), None, "each provider has its own entry");
+        assert_eq!(anthropic(&c).api_key, Some(KeySource::Saved));
+        assert_eq!(openai(&c).api_key, Some(KeySource::Missing));
+        assert_eq!(c.engine(ANTHROPIC, "claude-opus-5-5").unwrap().name(), "Anthropic · claude-opus-5-5");
+        assert_eq!(c.efforts(ANTHROPIC, "claude-opus-5-5").len(), 5);
+
+        let c = catalog(&[("ANTHROPIC_API_KEY", "sk-ant-env")]).unwrap();
+        assert_eq!(c.initial(), Selection { provider: ANTHROPIC.into(), model: Some("claude-opus-5-5".into()) });
+        assert_eq!(anthropic(&c).api_key, Some(KeySource::Environment("ANTHROPIC_API_KEY".into())));
+        let both = catalog(&[("ANTHROPIC_API_KEY", "a"), ("OPENAI_API_KEY", "o")]).unwrap();
+        assert_eq!(both.initial().provider, OPENAI, "OpenAI stays first when both have keys");
     }
 
     #[test]
@@ -395,7 +498,7 @@ mod tests {
     #[test]
     fn with_nothing_configured_the_simulated_agent_is_selected() {
         let c = catalog(&[]).unwrap();
-        assert_eq!(ids(&c), ["openai", "chatgpt", "copilot", "llamacpp", "ollama", "lmstudio", "mock"]);
+        assert_eq!(ids(&c), ["openai", "anthropic", "chatgpt", "copilot", "llamacpp", "ollama", "lmstudio", "mock"]);
         assert_eq!(c.initial(), MockCatalog::default().initial());
         assert_eq!(c.providers()[0].missing.as_deref(), Some(OPENAI_KEY_HINT));
         let err = c.engine("openai", "gpt-4o-mini").err().unwrap();
@@ -409,9 +512,10 @@ mod tests {
         assert_eq!(c.engine("openai", "gpt-4o").unwrap().name(), "OpenAI · gpt-4o");
 
         let c = catalog(&[("OPENAI_BASE_URL", "http://gpu-box:8000/v1"), ("KRAMPSTA_MODEL", "qwen3")]).unwrap();
-        assert_eq!(ids(&c), ["openai", "chatgpt", "copilot", "custom", "llamacpp", "ollama", "lmstudio", "mock"]);
+        let all = ["openai", "anthropic", "chatgpt", "copilot", "custom", "llamacpp", "ollama", "lmstudio", "mock"];
+        assert_eq!(ids(&c), all);
         assert_eq!(c.initial(), Selection { provider: "custom".into(), model: Some("qwen3".into()) });
-        assert_eq!(c.providers()[3].label, "OpenAI-compatible (gpu-box:8000)");
+        assert_eq!(c.providers()[4].label, "OpenAI-compatible (gpu-box:8000)");
     }
 
     #[test]

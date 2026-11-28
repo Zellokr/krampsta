@@ -11,6 +11,7 @@
 
 pub mod access;
 mod accounts;
+mod anthropic;
 mod catalog;
 pub mod chatgpt;
 pub mod copilot;
@@ -22,6 +23,7 @@ pub mod sse;
 mod steps;
 
 pub use accounts::Hosts;
+pub use anthropic::{ANTHROPIC_URL, AnthropicEngine};
 pub use catalog::{Catalog, DEFAULT_OPENAI_MODEL, LLAMA_CPP_URL, LM_STUDIO_URL, OLLAMA_URL};
 pub use http::HttpError;
 pub use openai::{DEFAULT_BASE_URL, OpenAiConfig, OpenAiEngine, list_models};
@@ -31,7 +33,7 @@ pub use responses::ResponsesEngine;
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     #[error(
-        "unknown KRAMPSTA_PROVIDER `{0}` (expected openai, chatgpt, copilot, custom, llamacpp, ollama, lmstudio or mock)"
+        "unknown KRAMPSTA_PROVIDER `{0}` (expected openai, anthropic, chatgpt, copilot, custom, llamacpp, ollama, lmstudio or mock)"
     )]
     Unknown(String),
     #[error(transparent)]

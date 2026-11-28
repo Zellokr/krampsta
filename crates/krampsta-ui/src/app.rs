@@ -224,7 +224,7 @@ const SCENES: &[Scene] = &[
     ("api-key", |s| {
         stage_accounts(s, false);
         s.open_settings();
-        s.api_key.draft = TextEdit::new("sk-proj-0123456789").secure();
+        *s.api_key.draft_mut("openai") = TextEdit::new("sk-proj-0123456789").secure();
     }),
     ("api-key-saved", |s| {
         stage_saved_key(s);
@@ -660,6 +660,12 @@ fn stage_accounts(s: &mut KrampstaApp, signed_in: bool) {
         Provider {
             api_key: Some(KeySource::Missing),
             ..provider("openai", "OpenAI", Some(OPENAI_KEY_HINT), ProviderKind::Cloud)
+        },
+        Provider {
+            api_key: Some(KeySource::Environment("ANTHROPIC_API_KEY".into())),
+            reasoning_effort: true,
+            images: true,
+            ..provider("anthropic", "Anthropic", None, ProviderKind::Cloud)
         },
         account("chatgpt", "ChatGPT", "me@example.com"),
         account("copilot", "GitHub Copilot", "octocat"),

@@ -41,13 +41,26 @@ impl SignIn {
 /// The API key field in settings: what is typed (masked) and how the last save went.
 #[derive(Clone, Debug)]
 pub struct KeyField {
-    pub draft: TextEdit,
+    /// What is typed for each provider: every card has its own masked field.
+    drafts: std::collections::HashMap<String, TextEdit>,
+    /// What a field nobody has typed in shows.
+    empty: TextEdit,
     pub state: KeyState,
 }
 
 impl Default for KeyField {
     fn default() -> Self {
-        KeyField { draft: TextEdit::new("").secure(), state: KeyState::Idle }
+        KeyField { drafts: Default::default(), empty: TextEdit::new("").secure(), state: KeyState::Idle }
+    }
+}
+
+impl KeyField {
+    pub fn draft(&self, provider: &str) -> &TextEdit {
+        self.drafts.get(provider).unwrap_or(&self.empty)
+    }
+
+    pub fn draft_mut(&mut self, provider: &str) -> &mut TextEdit {
+        self.drafts.entry(provider.to_owned()).or_insert_with(|| TextEdit::new("").secure())
     }
 }
 
@@ -73,7 +86,7 @@ impl KrampstaApp {
 
     /// Saves the typed key for `provider` in the system keychain.
     pub fn save_api_key(&mut self, provider: &str) {
-        let key = self.api_key.draft.text.trim().to_owned();
+        let key = self.api_key.draft(provider).text.trim().to_owned();
         if key.is_empty() {
             return;
         }
@@ -165,7 +178,8 @@ impl KrampstaApp {
                 AccountEvent::KeySaved { provider, result } => match result {
                     Ok(()) => {
                         // A fresh secure field: the old one's buffer is wiped as it drops.
-                        self.api_key = KeyField::default();
+                        self.api_key.drafts.remove(&provider);
+                        self.api_key.state = KeyState::Idle;
                         self.accounts_changed(&provider);
                     }
                     Err(e) => self.api_key.state = KeyState::Failed { provider, error: reason(&e) },
@@ -402,24 +416,27 @@ mod tests {
         app.save_api_key("keyed");
         assert_eq!(app.api_key.state, KeyState::Idle, "nothing typed, nothing saved");
 
-        app.api_key.draft = TextEdit::new("  sk-typed  ").secure();
+        *app.api_key.draft_mut("keyed") = TextEdit::new("  sk-typed  ").secure();
         app.save_api_key("keyed");
         assert_eq!(app.api_key.state, KeyState::Saving { provider: "keyed".into() });
         pump_until(&mut app, |a| keyed(a) == Some(KeySource::Saved));
         assert_eq!(catalog.key.lock().unwrap().as_deref(), Some("sk-typed"), "trimmed");
         assert_eq!(app.api_key.state, KeyState::Idle);
-        assert!(app.api_key.draft.text.is_empty() && app.api_key.draft.is_secure(), "a fresh masked field");
+        let draft = app.api_key.draft("keyed");
+        assert!(draft.text.is_empty() && draft.is_secure(), "a fresh masked field");
         assert_eq!(listed(&app), ["keyed", MOCK_PROVIDER]);
 
         app.remove_api_key("keyed");
         pump_until(&mut app, |a| keyed(a) == Some(KeySource::Missing));
         assert_eq!(listed(&app), [MOCK_PROVIDER]);
 
-        app.api_key.draft = TextEdit::new("bad").secure();
+        *app.api_key.draft_mut("keyed") = TextEdit::new("bad").secure();
+        *app.api_key.draft_mut("other") = TextEdit::new("sk-other").secure();
         app.save_api_key("keyed");
         pump_until(&mut app, |a| matches!(a.api_key.state, KeyState::Failed { .. }));
         let error = "the keychain is locked".to_owned();
         assert_eq!(app.api_key.state, KeyState::Failed { provider: "keyed".into(), error });
-        assert_eq!(app.api_key.draft.text, "bad", "what was typed stays to try again");
+        assert_eq!(app.api_key.draft("keyed").text, "bad", "what was typed stays to try again");
+        assert_eq!(app.api_key.draft("other").text, "sk-other", "each provider has its own field");
     }
 }

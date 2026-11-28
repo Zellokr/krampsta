@@ -154,6 +154,7 @@ fn api_key(s: &KrampstaApp, k: &Kit, p: &Provider) -> El {
     let id = p.id.as_str();
     let field = &s.api_key;
     let busy = matches!(&field.state, KeyState::Saving { provider } if provider == id);
+    let draft = field.draft(id);
     let description = match (&field.state, &p.api_key) {
         (KeyState::Failed { provider, error }, _) if provider == id => error.clone(),
         (_, Some(KeySource::Saved)) => "Saved in the system keychain.".to_owned(),
@@ -170,21 +171,21 @@ fn api_key(s: &KrampstaApp, k: &Kit, p: &Provider) -> El {
             .build(k)
             .key(keys::api_key_remove(id))
     } else {
-        let (submit_id, save_id) = (p.id.clone(), p.id.clone());
-        let input = TextInput::new(&field.draft)
+        let (submit_id, save_id, edit_id) = (p.id.clone(), p.id.clone(), p.id.clone());
+        let input = TextInput::new(draft)
             .secure()
             .placeholder("sk-…")
             .label(format!("{} API key", p.label))
             .width(Some(200.0))
             .disabled(busy)
-            .on_edit(|s: &mut KrampstaApp| &mut s.api_key.draft)
+            .on_edit(move |s: &mut KrampstaApp| s.api_key.draft_mut(&edit_id))
             .on_submit(move |s: &mut KrampstaApp, _: &mut Tx| s.save_api_key(&submit_id))
             .build(k)
             .key(keys::api_key(id));
         let save = Button::new("Save")
             .variant(ButtonVariant::Contrast)
             .control_size(ControlSize::Regular)
-            .disabled(busy || field.draft.text.trim().is_empty())
+            .disabled(busy || draft.text.trim().is_empty())
             .on_press(move |s: &mut KrampstaApp| s.save_api_key(&save_id))
             .build(k)
             .key(keys::api_key_save(id));
