@@ -55,6 +55,9 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   Se aplican los mismos permisos: la copia temporal cambia la carpeta de trabajo del comando,
   pero **no** lo aísla del sistema. Los comandos no ven las claves de los proveedores de IA del
   entorno (`OPENAI_API_KEY` y similares), porque lo que escriben llega al modelo.
+- **Plan visible**: en una tarea de varios pasos, el agente lleva un plan con `update_plan` y el
+  chat lo muestra como una lista: lo hecho, lo que está haciendo y lo que queda, actualizada en
+  cada paso. No necesita permiso ni toca archivos.
 - **Modo yolo**: el interruptor «Yolo» sobre el composer lo activa en esa sesión, que lo recuerda
   entre arranques. Mientras está activo, lo que pediría permiso (comandos, herramientas MCP, leer
   un archivo de secretos) se permite sin preguntar, y los cambios de `edit_file` se escriben al

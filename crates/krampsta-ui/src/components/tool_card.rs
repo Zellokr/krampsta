@@ -1,8 +1,9 @@
 //! A tool call in the transcript, as a card: the tool, its main argument and how it went in a
 //! header that folds the arguments and output away. A failed call keeps its error in sight.
 
+use krampsta_agent::plan::{self, Plan, StepStatus};
 use krampsta_core::{ToolCall, ToolResult};
-use rune::{El, col, icon, row, text};
+use rune::{El, col, el, icon, row, text};
 use rune_kit::diff::FileDiff;
 use rune_kit::{Kit, Spinner};
 
@@ -54,6 +55,13 @@ pub fn view(
     k: &Kit,
 ) -> El {
     let outcome = Outcome::of(result);
+    // A plan shows as its checklist, drawn from the call (bounded: `plan::MAX_ARGUMENTS`).
+    if call.name == plan::TOOL
+        && outcome != Outcome::Failed
+        && let Ok(plan) = Plan::parse(&call.arguments)
+    {
+        return plan_card(call, &plan, outcome, k);
+    }
     let border = if outcome == Outcome::Failed { k.c.danger.icon } else { k.c.border_weak };
     let mut card =
         col().w_full().radius(k.radius.md).fill(k.c.layer_01).border(1.0, border).child(header(call, outcome, open, k));
@@ -86,6 +94,44 @@ pub fn view(
         card = card.child(body(call, result, k));
     }
     card
+}
+
+/// The agent's plan: how far along it is, then each step with where it stands.
+fn plan_card(call: &ToolCall, plan: &Plan, outcome: Outcome, k: &Kit) -> El {
+    let (done, total) = (plan.completed(), plan.steps.len());
+    let status = match outcome {
+        Outcome::Running => Spinner::new().size(12.0).color(theme::accent(k.dark)).build(k),
+        Outcome::Done | Outcome::Failed => icon(&icons::CHECK, 14.0).color(k.c.icon_muted),
+    };
+    let header = row()
+        .key(keys::tool(&call.id))
+        .role("group")
+        .label(format!("Plan, {done} of {total} steps done"))
+        .w_full()
+        .h(40.0)
+        .px(12.0)
+        .gap(8.0)
+        .items_center()
+        .child(icon(&icons::CHECKLIST, 14.0).color(k.c.icon_muted))
+        .child(text("Plan").font(k.ty.ui_medium).color(k.c.text_base))
+        .child(text(format!("{done}/{total}")).font(k.ty.small).color(k.c.text_muted))
+        .child(el().grow(1.0))
+        .child(status);
+    let steps = plan.steps.iter().map(|step| {
+        let (mark, ink, font) = match step.status {
+            StepStatus::Completed => (icon(&icons::CIRCLE_CHECK, 14.0).color(k.c.icon_muted), k.c.text_faint, k.ty.ui),
+            StepStatus::InProgress => {
+                (icon(&icons::CHEVRON_RIGHT, 14.0).color(theme::accent(k.dark)), k.c.text_base, k.ty.ui_medium)
+            }
+            StepStatus::Pending => (icon(&icons::DASH, 14.0).color(k.c.icon_weaker), k.c.text_muted, k.ty.ui),
+        };
+        row().w_full().gap(8.0).items_center().child(mark).child(text(step.text.clone()).font(font).color(ink).wrap())
+    });
+    let mut list = col().key(keys::plan(&call.id)).w_full().gap(6.0).px(12.0).pb(12.0).children(steps);
+    if let Some(note) = &plan.note {
+        list = list.child(text(note.clone()).font(k.ty.small).color(k.c.text_faint).wrap().mt(2.0));
+    }
+    col().w_full().radius(k.radius.md).fill(k.c.layer_01).border(1.0, k.c.border_weak).child(header).child(list)
 }
 
 /// Lines of live output a running call shows.

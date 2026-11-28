@@ -18,6 +18,7 @@ pub mod compact;
 mod engine;
 mod host;
 mod mock;
+pub mod plan;
 mod projects;
 pub mod replay;
 mod servers;

@@ -147,6 +147,11 @@ pub fn reasoning(id: krampsta_core::MessageId) -> String {
     format!("krampsta-reasoning-{id}")
 }
 
+/// The steps of a plan the agent keeps (`update_plan`), in its call's card.
+pub fn plan(call: &krampsta_core::ToolCallId) -> String {
+    format!("krampsta-plan-{call}")
+}
+
 /// The header of a summary of earlier messages, which opens it.
 pub fn summary(id: krampsta_core::MessageId) -> String {
     format!("krampsta-summary-{id}")

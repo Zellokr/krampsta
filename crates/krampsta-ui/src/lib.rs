@@ -31,6 +31,7 @@ pub mod prefs;
 pub mod projects;
 pub mod rename;
 pub mod sample;
+mod scenes;
 pub mod search;
 pub mod servers;
 pub mod session_view;

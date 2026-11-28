@@ -15,7 +15,9 @@ lee aquí la sección de lo que vayas a tocar.
   `files`, `repo_diff`…), `ToolServers` (cómo ve la UI los servidores MCP: estado por servidor y
   versión; `FixedServers` para escenas y tests), `replay` (qué vuelve al modelo de los turnos
   anteriores: sus herramientas recortadas por antigüedad, y el resumen en lugar de lo que cubre;
-  `HISTORY_BUDGET`) y `compact` (resumir la conversación antes de una ejecución). No depende de Rune.
+  `HISTORY_BUDGET`), `compact` (resumir la conversación antes de una ejecución) y `plan`
+  (`update_plan`: el plan del modelo para una tarea de varios pasos; no guarda nada, cada llamada
+  lleva el plan entero y la tarjeta lo dibuja desde sus argumentos con `Plan::parse`). No depende de Rune.
 - `crates/krampsta-providers` — motores reales: `sse` (parser), `http` (cliente `reqwest`, petición
   SSE cancelable, `HttpError`), `access` (URL + cabeceras por petición: clave fija o token de
   cuenta), `OpenAiEngine`, `responses` (motor de la API Responses), `anthropic` (`AnthropicEngine`, la API
@@ -27,7 +29,7 @@ lee aquí la sección de lo que vayas a tocar.
   (iniciar/cerrar sesión), `secrets` (llavero del sistema) y `Catalog`. No depende de Rune.
 - `crates/krampsta-tools` — las herramientas del agente sobre la carpeta del proyecto
   (`Workspace`, un `Toolbox`): `project` (ninguna ruta sale de la carpeta), `read_file`,
-  `list_files`, `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
+  `list_files`, `update_plan` (de `krampsta_agent::plan`, sin permiso), `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
   propone, y la escritura al aceptar), `command` (`run_command`), `policy` y `permissions` (reglas
   de permisos: comandos y herramientas), `secrets` (qué archivos guardan secretos, por su nombre),
   `snapshot` (copia desechable con las ediciones pendientes para `run_command` con `pending: true`;
@@ -99,6 +101,9 @@ lee aquí la sección de lo que vayas a tocar.
     parpadear el botón de la barra de tareas y lo cuenta, por `WindowAttention`; `main.rs` le da
     la ventana real con `App::on_window`; el foco llega por `on_window_focus` en la raíz de
     `rune_kit::root`, no en un hijo).
+  - `components/tool_card.rs` dibuja una llamada a `update_plan` como su lista de pasos (hecho,
+    en curso, pendiente), siempre visible; `scenes.rs` guarda las escenas nuevas (`summary`,
+    `plan`) para que `app.rs` no pase de ~800 líneas.
   - `components/inline_diff.rs` (el cambio de un `edit_file` dentro de su tarjeta: diff compacto
     de sólo lectura; `ChangeProposed` lleva el `call` y `pump` guarda su `FileDiff` en
     `card_diffs`), `components/code_copy.rs` (el botón Copy de cada bloque de código, por

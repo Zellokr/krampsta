@@ -212,6 +212,7 @@ impl Toolbox for Workspace {
             "search" => search::run(project, pending, parse(arguments)?, cancel).map(ToolOutput::from),
             "edit_file" => edit::run(project, pending, parse(arguments)?),
             "run_command" => self.run_command(&parse(arguments)?, call),
+            krampsta_agent::plan::TOOL => krampsta_agent::plan::run(arguments).map(ToolOutput::from),
             other => Err(format!("there is no tool named `{other}`")),
         }
     }
@@ -385,6 +386,7 @@ fn specs() -> Arc<[ToolSpec]> {
             }),
         ),
         run_command,
+        krampsta_agent::plan::spec(),
     ])
 }
 
@@ -452,12 +454,18 @@ mod tests {
         let cancel = CancellationToken::new();
         let specs = tools.specs();
         let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(names, ["list_files", "read_file", "edit_file", "search", "run_command"]);
+        assert_eq!(names, ["list_files", "read_file", "edit_file", "search", "run_command", "update_plan"]);
         // Changes go through edit_file, which the user reviews, never through a command.
         let run_command = &specs[4].description;
         assert!(run_command.contains("never change files with a command") && run_command.contains("use edit_file"));
         assert!(!run_command.contains('\n'), "one paragraph, no stray line breaks");
         assert_eq!(run(&tools, "list_files", "", &cancel).unwrap().text, "hello.txt\n");
+        let plan = r#"{"steps": [{"step": "Read it", "status": "in_progress"}]}"#;
+        assert_eq!(
+            run(&tools, "update_plan", plan, &cancel).unwrap().text,
+            "Plan updated: 0 of 1 steps done; now: Read it."
+        );
+        assert_eq!(tools.check("update_plan", plan), Access::Allow(Approval::NotNeeded), "a plan needs no permission");
         assert_eq!(run(&tools, "read_file", r#"{"path":"hello.txt"}"#, &cancel).unwrap().text, "     1\thi\n");
         assert!(run(&tools, "read_file", "{}", &cancel).unwrap_err().contains("missing field `path`"));
         assert!(run(&tools, "delete_everything", "{}", &cancel).unwrap_err().contains("no tool named"));
