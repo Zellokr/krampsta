@@ -19,6 +19,9 @@ grep-matcher = "0.1"
 # Commands run as a process tree that can be killed whole: a job object on Windows, a process
 # group on Unix.
 process-wrap = { version = "10", default-features = false, features = ["std", "job-object", "creation-flags", "process-group", "kill-on-drop"] }
+# fetch_url: pages are fetched on the tool's blocking thread, and HTML read as text.
+reqwest = { workspace = true, features = ["blocking"] }
+html2text = "0.17"
 # Where the permission rules and the command log live (the user's config folder).
 dirs = "7"
 

@@ -55,6 +55,11 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   Se aplican los mismos permisos: la copia temporal cambia la carpeta de trabajo del comando,
   pero **no** lo aísla del sistema. Los comandos no ven las claves de los proveedores de IA del
   entorno (`OPENAI_API_KEY` y similares), porque lo que escriben llega al modelo.
+- **Páginas web**: con `fetch_url` el agente lee una página (`http`/`https`): documentación, una
+  issue, una referencia de API. El HTML llega como texto (sin scripts), hasta 32 KB. Cada sitio
+  pide permiso; «Always allow» guarda la regla `fetch_url:<sitio>` en `permissions.json`, sólo para
+  ese sitio, y una regla `deny` lo prohíbe. Una redirección a otro sitio se para ahí, así que ese
+  sitio también pregunta.
 - **Plan visible**: en una tarea de varios pasos, el agente lleva un plan con `update_plan` y el
   chat lo muestra como una lista: lo hecho, lo que está haciendo y lo que queda, actualizada en
   cada paso. No necesita permiso ni toca archivos.

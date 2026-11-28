@@ -29,7 +29,9 @@ lee aquí la sección de lo que vayas a tocar.
   (iniciar/cerrar sesión), `secrets` (llavero del sistema) y `Catalog`. No depende de Rune.
 - `crates/krampsta-tools` — las herramientas del agente sobre la carpeta del proyecto
   (`Workspace`, un `Toolbox`): `project` (ninguna ruta sale de la carpeta), `read_file`,
-  `list_files`, `update_plan` (de `krampsta_agent::plan`, sin permiso), `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
+  `list_files`, `update_plan` (de `krampsta_agent::plan`, sin permiso), `fetch` (`fetch_url`: una
+  página http/https con el cliente bloqueante de `reqwest`, HTML a texto con `html2text`, topes de
+  descarga y de salida, redirecciones sólo dentro del mismo sitio), `search` (crates de ripgrep: `ignore`, `grep-searcher`), `edit` (`edit_file`, que
   propone, y la escritura al aceptar), `command` (`run_command`), `policy` y `permissions` (reglas
   de permisos: comandos y herramientas), `secrets` (qué archivos guardan secretos, por su nombre),
   `snapshot` (copia desechable con las ediciones pendientes para `run_command` con `pending: true`;
@@ -166,6 +168,9 @@ configuración del usuario):
   (`allow`/`deny` por nombre o prefijo `*`); las aplica el `Workspace` o, sin carpeta,
   `Permissions` (un `Toolbox` sin herramientas). Para un nombre `mcp__…`, la `ToolSet` toma un
   `NotNeeded` como `Ask`: un toolbox que no conoce la herramienta nunca la deja pasar sin preguntar.
+- Páginas web: `fetch_url` pregunta por sitio; «siempre» guarda `fetch_url:<host>` (sólo ese
+  sitio) y `deny` gana. Una redirección a otro sitio se para y el modelo tiene que pedir esa URL,
+  que pregunta por su cuenta.
 - Secretos: `read_file` de un archivo de secretos (`secrets.rs`, por su nombre) pregunta;
   «siempre» guarda la regla `read_file:<ruta>`, sólo para ese archivo; `search` se los salta.
   `.gitignore` oculta un archivo en listados, no de una lectura.
