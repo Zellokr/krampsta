@@ -10,7 +10,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use krampsta_agent::Written;
-use krampsta_core::{FileChange, splice_lines};
+use krampsta_core::{FileChange, SessionId, splice_lines};
 use rune_kit::diff::{Annotation, FileDiff, Hunk, LineKind, LineRef, Side};
 
 use crate::state::KrampstaApp;
@@ -25,6 +25,8 @@ pub struct Changes {
     /// Why the last write failed, until the next one.
     pub error: Option<String>,
     validate_after_writes: Option<crate::approvals::Asking>,
+    /// Paths a session in yolo mode proposed: written as soon as no write is in flight.
+    auto: HashSet<String>,
 }
 
 impl Changes {
@@ -69,6 +71,32 @@ impl KrampstaApp {
         if self.stage_proposal(change) {
             self.refresh_diff();
         }
+    }
+
+    /// [`stage_proposal`](Self::stage_proposal) for a change `session` proposed: in yolo mode
+    /// it is written without review ([`write_auto`](Self::write_auto)); otherwise it waits.
+    pub(crate) fn stage_proposal_from(&mut self, session: SessionId, change: FileChange) -> bool {
+        if self.session(session).is_some_and(|s| s.yolo) {
+            self.review.auto.insert(change.path.clone());
+        } else {
+            self.review.auto.remove(&change.path);
+        }
+        self.stage_proposal(change)
+    }
+
+    /// Writes what yolo sessions proposed and isn't being written. True when a write started.
+    pub(crate) fn write_auto(&mut self) -> bool {
+        if self.review.auto.is_empty() || self.validating_changes() {
+            return false;
+        }
+        let Changes { proposals, auto, writing, .. } = &mut self.review;
+        auto.retain(|path| proposals.iter().any(|c| c.path == *path));
+        let due: Vec<FileChange> =
+            proposals.iter().filter(|c| auto.contains(&c.path) && !writing.contains(&c.path)).cloned().collect();
+        for change in &due {
+            self.write(&change.path, change.before.clone(), change.after.clone());
+        }
+        !due.is_empty()
     }
 
     /// Update the review immediately; the caller refreshes the panel after the batch.
@@ -195,7 +223,11 @@ impl KrampstaApp {
         for Written { path, content, result } in writes {
             self.review.writing.remove(&path);
             match result {
-                Err(e) => self.review.error = Some(e),
+                Err(e) => {
+                    // Shown, and left for the user: retrying alone would fail the same way.
+                    self.review.auto.remove(&path);
+                    self.review.error = Some(e);
+                }
                 Ok(()) => {
                     // A new file may have been written: the file tree lists it.
                     self.disk_changed();
@@ -338,6 +370,33 @@ mod tests {
         assert_eq!(disk.files.lock().unwrap()["a.txt"], two_blocks());
         assert!(app.review.proposals().is_empty(), "nothing left to accept");
         assert!(!disk.pending.lock().unwrap().contains_key("a.txt"), "the agent reads the disk again");
+    }
+
+    #[test]
+    fn a_yolo_sessions_changes_are_written_at_once_and_others_wait() {
+        let disk = Arc::new(Disk::default());
+        let mut app = app(&disk, &[("a.txt", BEFORE), ("b.txt", BEFORE)]);
+        app.new_session();
+        let yolo = app.sessions[0].id;
+        app.sessions[0].yolo = true;
+        app.new_session();
+        let careful = app.sessions[0].id;
+
+        app.stage_proposal_from(yolo, change("a.txt", Some(BEFORE), &two_blocks()));
+        app.stage_proposal_from(careful, change("b.txt", Some(BEFORE), &two_blocks()));
+        assert!(app.write_auto(), "the yolo session's change starts writing");
+        pump_until_written(&mut app);
+        assert_eq!(disk.files.lock().unwrap()["a.txt"], two_blocks());
+        assert_eq!(disk.files.lock().unwrap()["b.txt"], BEFORE, "the other session's waits for review");
+        assert_eq!(app.review.proposals().len(), 1);
+        assert!(!app.write_auto(), "nothing else to write");
+
+        // A write that fails is shown and left for the user, not retried every frame.
+        app.stage_proposal_from(yolo, change("locked", None, "x\n"));
+        app.write_auto();
+        pump_until_written(&mut app);
+        assert_eq!(app.review.error.as_deref(), Some("permission denied"));
+        assert!(!app.write_auto());
     }
 
     #[test]

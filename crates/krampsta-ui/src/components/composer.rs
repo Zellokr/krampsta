@@ -4,7 +4,7 @@
 use krampsta_agent::MOCK_PROVIDER;
 use krampsta_core::SessionId;
 use rune::{El, TextStyle, Tx, col, el, row, text};
-use rune_kit::{IconButton, IconButtonVariant, Kit};
+use rune_kit::{IconButton, IconButtonVariant, Kit, Switch};
 
 use crate::components::engine_picker::{self, Place};
 use crate::components::{icons, status};
@@ -97,8 +97,10 @@ pub fn view(s: &KrampstaApp, session: SessionId, running: bool, k: &Kit, layer: 
     // Why a send failed, else why the selection can't run, else how to use the composer.
     // The notice is about the active session: only its pane shows it.
     let notice = s.notice.as_ref().filter(|_| session == s.selected);
+    let yolo = s.is_yolo(session);
     let hint = match (notice, &s.engine.warning()) {
         (Some(n), _) => text(n.clone()).font(k.ty.small).color(k.c.danger.icon),
+        (None, _) if yolo => text(YOLO_HINT).font(k.ty.small).color(k.c.warning.icon),
         (None, Some(p)) => text(p.clone()).font(k.ty.small).color(k.c.warning.icon),
         (None, None) if s.engine.selection.provider == MOCK_PROVIDER => {
             text("Enter to send · Shift+Enter for a new line · /fail simulates an error")
@@ -121,7 +123,7 @@ pub fn view(s: &KrampstaApp, session: SessionId, running: bool, k: &Kit, layer: 
         .w_full()
         .max_w(820.0)
         .gap(8.0)
-        .child(row().w_full().items_center().justify_end().child(pickers))
+        .child(row().w_full().items_center().child(yolo_switch(session, yolo, k)).child(el().grow(1.0)).child(pickers))
         .child(row().w_full().gap(8.0).items_end().child(col().grow(1.0).min_w(0.0).child(field)).child(action))
         .child(
             row()
@@ -133,6 +135,18 @@ pub fn view(s: &KrampstaApp, session: SessionId, running: bool, k: &Kit, layer: 
                 // What the session has used (and cost), out of the toolbar the tabs need.
                 .children(s.session(session).and_then(|x| status::usage(x.usage, s.cost(x), k))),
         )
+}
+
+/// Under the field while the session is in yolo mode.
+pub const YOLO_HINT: &str = "Yolo mode: tools run and edits are written without asking";
+
+/// Yolo mode for this session (`yolo.rs`), left of the pickers.
+fn yolo_switch(session: SessionId, on: bool, k: &Kit) -> El {
+    Switch::new(on)
+        .label("Yolo")
+        .on_toggle(move |s: &mut KrampstaApp| s.toggle_yolo(session))
+        .build(k)
+        .key(keys::COMPOSER_YOLO)
 }
 
 /// The attached image's preview, with a button that removes it.

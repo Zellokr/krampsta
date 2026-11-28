@@ -88,6 +88,8 @@ lee aquí la sección de lo que vayas a tocar.
   - `servers.rs` (los servidores MCP en Ajustes, desde `ToolServers`: la lista se copia en `pump`
     sólo cuando cambia su versión; un servidor que falla lo avisa en el composer; el formulario
     para añadir y la confirmación de quitar; la vista en `views/mcp.rs`).
+  - `yolo.rs` (el modo yolo de una sesión: contesta solo los permisos; el interruptor y el aviso
+    están en `components/composer.rs`; ver «Permisos, en detalle»).
   - `costs.rs` (coste por sesión: tokens por modelo, `Session::by_model`, por los precios por
     millón que pone el usuario; sólo proveedores `Cloud`, sin precios de serie).
   - `attention.rs` (con la ventana detrás, una ejecución que acaba o un permiso pedido hace
@@ -160,6 +162,13 @@ configuración del usuario):
   «siempre» guarda la regla `read_file:<ruta>`, sólo para ese archivo; `search` se los salta.
   `.gitignore` oculta un archivo en listados, no de una lectura.
 - Si `permissions.json` no se puede leer, todo pregunta y nada se guarda encima.
+- Modo yolo (`Session::yolo`, guardado con la sesión; `yolo.rs` en la UI): la UI contesta sola,
+  con `Decision::Yolo` (→ `Approval::Yolo`, «yolo mode» en `commands.log`), cada
+  `ApprovalRequested` de una sesión en yolo, y al activarlo contesta lo que su ejecución ya
+  esperaba. El agente no sabe nada del modo: un `Deny` nunca pregunta, así que sigue ganando. Los
+  cambios que propone una sesión en yolo se escriben solos (`changes.rs`: `stage_proposal_from`
+  marca la ruta, `write_auto` la escribe desde `pump` cuando no hay otra escritura en marcha, por
+  el mismo `Toolbox::write` que «Accept»); si la escritura falla, se muestra y no se reintenta.
 
 ## Motores y proveedores, en detalle
 

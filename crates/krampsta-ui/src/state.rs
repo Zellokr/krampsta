@@ -463,12 +463,11 @@ impl KrampstaApp {
                 AgentEvent::ChangeProposed { call, change, .. } => {
                     // Its card shows it (worked out once, here, never in the view).
                     self.card_diffs.insert(call, crate::changes::diff_of(&change));
-                    panel_dirty |= self.stage_proposal(change);
+                    panel_dirty |= self.stage_proposal_from(e.session, change);
                     changed = true;
                 }
                 AgentEvent::ApprovalRequested { run, call, tool, what } => {
-                    self.ask(Asking { run, call, tool, what });
-                    self.needs_attention(e.session);
+                    self.ask_from(e.session, Asking { run, call, tool, what });
                     changed = true;
                 }
                 event => {
@@ -501,6 +500,7 @@ impl KrampstaApp {
                 }
             }
         }
+        changed |= self.write_auto();
         changed |= self.finish_apply_and_validate();
         if let Some(history) = self.store.as_ref().and_then(|s| s.take_history()) {
             changed |= self.land_history(history);

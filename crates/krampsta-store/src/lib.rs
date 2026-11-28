@@ -342,10 +342,13 @@ mod tests {
     use super::*;
     use krampsta_core::{AgentEvent, AgentStatus, MessageRole, RunId, ToolCall, ToolCallId, ToolResult, Usage};
 
-    /// A session that went through a whole run with a tool call, reasoning and usage.
+    /// A session in yolo mode, with a summary, that went through a whole run with a tool call,
+    /// reasoning and usage.
     fn worked_session(id: u64) -> Session {
         let mut s = Session::new(SessionId(id));
         s.project = Some(PathBuf::from("/code/krampsta"));
+        s.yolo = true;
+        s.push_message(MessageRole::Summary, "Earlier, the user set up the project.");
         let run = RunId(3);
         s.submit("List the files", run).unwrap();
         s.bill_to("openai", "gpt-test");

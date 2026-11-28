@@ -205,6 +205,11 @@ const SCENES: &[Scene] = &[
     }),
     ("reasoning", scene_reasoning),
     ("summary", scene_summary),
+    // Yolo mode on: the switch on and the warning under the field.
+    ("yolo", |s| {
+        scene_completed(s);
+        s.sessions.iter_mut().take(1).for_each(|x| x.yolo = true);
+    }),
     ("completed", scene_completed),
     ("failed", scene_failed),
     ("cancelled", |s| {

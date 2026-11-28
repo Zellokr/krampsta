@@ -26,6 +26,9 @@ pub struct Session {
     /// The project folder it works in. None: not tied to one yet (it takes the project open
     /// when it next runs).
     pub project: Option<PathBuf>,
+    /// Yolo mode: whatever would ask the user is allowed and proposed changes are written at
+    /// once, without review (rules that deny still deny). The user turns it on per session.
+    pub yolo: bool,
     /// Tokens every run in this session has used so far, as the providers counted them.
     pub usage: Usage,
     /// The same tokens by the model that used them (what a price applies to). Runs that
@@ -61,6 +64,7 @@ impl Session {
             usage: Usage::default(),
             by_model: Vec::new(),
             project: None,
+            yolo: false,
             active_run: None,
             billed: None,
             next_message: 1,
@@ -81,6 +85,7 @@ impl Session {
             usage,
             by_model: Vec::new(),
             project: None,
+            yolo: false,
             active_run: None,
             billed: None,
             next_message,

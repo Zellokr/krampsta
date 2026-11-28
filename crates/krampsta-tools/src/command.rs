@@ -282,6 +282,7 @@ pub fn approval_text(approval: &Approval) -> String {
         Approval::Rule(rule) => format!("rule `{rule}`"),
         Approval::Once => "the user, once".into(),
         Approval::Always => "the user, always".into(),
+        Approval::Yolo => "yolo mode".into(),
     }
 }
 

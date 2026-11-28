@@ -55,6 +55,12 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   Se aplican los mismos permisos: la copia temporal cambia la carpeta de trabajo del comando,
   pero **no** lo aísla del sistema. Los comandos no ven las claves de los proveedores de IA del
   entorno (`OPENAI_API_KEY` y similares), porque lo que escriben llega al modelo.
+- **Modo yolo**: el interruptor «Yolo» sobre el composer lo activa en esa sesión, que lo recuerda
+  entre arranques. Mientras está activo, lo que pediría permiso (comandos, herramientas MCP, leer
+  un archivo de secretos) se permite sin preguntar, y los cambios de `edit_file` se escriben al
+  momento, sin revisión; siguen viéndose en el chat y en el panel de cambios, y se deshacen con
+  git. Las reglas `deny` de `permissions.json` siguen ganando, y `commands.log` apunta «yolo mode»
+  como quien lo permitió. Un aviso bajo el composer recuerda que está activo.
 - **Servidores MCP**: los de `mcp.json`, en la carpeta de configuración (`%APPDATA%\krampsta`
   en Windows), con el formato `mcpServers` de Claude Desktop, Claude Code o Cursor: un archivo
   de cualquiera de ellos sirve tal cual. Por stdio (`command`, `args`, `env`) o por HTTP

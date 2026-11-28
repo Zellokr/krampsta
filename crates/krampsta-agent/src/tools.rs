@@ -82,6 +82,8 @@ pub enum Approval {
     Once,
     /// The user allowed it from now on.
     Always,
+    /// The session runs in yolo mode, which allows whatever would ask (never what a rule denies).
+    Yolo,
 }
 
 /// The user's answer to a call that asks.
@@ -90,6 +92,8 @@ pub enum Decision {
     Deny,
     Once,
     Always,
+    /// Allowed by the session's yolo mode, not by the user looking at it.
+    Yolo,
 }
 
 /// What a running call gets besides its arguments.

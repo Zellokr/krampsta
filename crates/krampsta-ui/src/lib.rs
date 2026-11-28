@@ -38,6 +38,7 @@ pub mod state;
 pub mod tabs;
 pub mod theme;
 pub mod views;
+pub mod yolo;
 
 pub use app::chrome;
 pub use app::spec;

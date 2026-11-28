@@ -22,6 +22,9 @@ pub struct SavedSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<std::path::PathBuf>,
     pub status: SavedStatus,
+    /// Yolo mode; absent when off, and in sessions saved before it existed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub yolo: bool,
     #[serde(default)]
     pub usage: SavedUsage,
     /// The same tokens by model; absent in sessions saved before it was kept.
@@ -108,6 +111,7 @@ impl SavedSession {
             id: s.id.0,
             title: s.title.clone(),
             project: s.project.clone(),
+            yolo: s.yolo,
             status: match &s.status {
                 AgentStatus::Idle => SavedStatus::Idle,
                 AgentStatus::Running => SavedStatus::Running,
@@ -142,6 +146,7 @@ impl SavedSession {
         let messages = self.messages.into_iter().map(SavedMessage::into_message).collect();
         let mut session = Session::restore(SessionId(self.id), self.title, messages, status, usage);
         session.project = self.project;
+        session.yolo = self.yolo;
         session.by_model = self
             .by_model
             .into_iter()

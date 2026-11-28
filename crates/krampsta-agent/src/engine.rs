@@ -231,6 +231,7 @@ impl RunContext {
                 Err("The user did not allow this. Ask them how to go on, or do it another way.".into())
             }
             Some(Decision::Once) => Ok(Approval::Once),
+            Some(Decision::Yolo) => Ok(Approval::Yolo),
             Some(Decision::Always) => {
                 let (tools, name, arguments) = (tools.clone(), call.name.clone(), call.arguments.clone());
                 // Allowed either way; only the rule for next time may fail to save.

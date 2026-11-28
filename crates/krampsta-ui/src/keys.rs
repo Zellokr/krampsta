@@ -12,6 +12,8 @@ pub const TRANSCRIPT: &str = "krampsta-transcript";
 pub const TRANSCRIPT_SCROLL: &str = "krampsta-transcript-scroll";
 pub const EMPTY_STATE: &str = "krampsta-empty-state";
 pub const COMPOSER: &str = "krampsta-composer";
+/// The composer's yolo-mode switch.
+pub const COMPOSER_YOLO: &str = "krampsta-composer-yolo";
 pub const COMPOSER_HINT: &str = "krampsta-composer-hint";
 /// The image attached to the draft, and its remove button.
 pub const COMPOSER_IMAGE: &str = "krampsta-composer-image";
