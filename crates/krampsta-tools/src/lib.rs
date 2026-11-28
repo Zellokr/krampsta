@@ -285,6 +285,10 @@ impl Toolbox for Workspace {
         edit::write(&self.project, path, expected, content)
     }
 
+    fn restore(&self, path: &str, expected: &str, content: Option<&str>) -> Result<(), String> {
+        edit::restore(&self.project, path, expected, content)
+    }
+
     fn set_pending(&self, path: &str, content: Option<Arc<str>>) {
         self.pending.set(path, content);
     }

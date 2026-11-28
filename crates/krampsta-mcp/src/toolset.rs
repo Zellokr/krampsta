@@ -97,6 +97,13 @@ impl Toolbox for ToolSet {
         }
     }
 
+    fn restore(&self, path: &str, expected: &str, content: Option<&str>) -> Result<(), String> {
+        match &self.local {
+            Some(local) => local.restore(path, expected, content),
+            None => Err(format!("`{path}` can't be put back: no project folder is open")),
+        }
+    }
+
     fn set_pending(&self, path: &str, content: Option<Arc<str>>) {
         if let Some(local) = &self.local {
             local.set_pending(path, content);

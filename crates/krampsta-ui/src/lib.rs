@@ -30,6 +30,7 @@ pub mod picker;
 pub mod prefs;
 pub mod projects;
 pub mod rename;
+pub mod rewind;
 pub mod sample;
 mod scenes;
 pub mod search;

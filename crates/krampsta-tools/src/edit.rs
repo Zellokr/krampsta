@@ -193,6 +193,25 @@ pub fn write(project: &Project, path: &str, expected: Option<&str>, content: &st
     })
 }
 
+/// Puts `path` back for a rewind: `content`, or removes the file when `None`, if it still
+/// holds `expected` (what Krampsta last wrote); otherwise it was changed since and is left be.
+pub fn restore(project: &Project, path: &str, expected: &str, content: Option<&str>) -> Result<(), String> {
+    let real = project.resolve_for_write(path)?;
+    let shown = project.show(&real);
+    let disk = match fs::read(&real) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("could not read `{shown}`: {e}")),
+    };
+    if disk.as_deref() != Some(expected.as_bytes()) {
+        return Err(format!("`{shown}` changed since Krampsta wrote it, so it was left as it is"));
+    }
+    match content {
+        Some(content) => write(project, path, Some(expected), content),
+        None => fs::remove_file(&real).map_err(|e| format!("could not remove `{shown}`: {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,5 +307,23 @@ mod tests {
         std::fs::write(dir.path().join("latin1"), b"caf\xe9").unwrap();
         assert!(edit(&p, &pending, "bin", "x", "y", false).unwrap_err().contains("binary"));
         assert!(edit(&p, &pending, "latin1", "caf", "x", false).unwrap_err().contains("not UTF-8"));
+    }
+
+    #[test]
+    fn a_rewind_puts_files_back_or_removes_the_ones_it_made_unless_they_changed() {
+        let (dir, project, _) = setup();
+        std::fs::write(dir.path().join("a.rs"), "v2").unwrap();
+        restore(&project, "a.rs", "v2", Some("v1")).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("a.rs")).unwrap(), "v1");
+
+        std::fs::write(dir.path().join("new.rs"), "made").unwrap();
+        restore(&project, "new.rs", "made", None).unwrap();
+        assert!(!dir.path().join("new.rs").exists(), "a file Krampsta created goes");
+
+        std::fs::write(dir.path().join("b.rs"), "edited by hand").unwrap();
+        let error = restore(&project, "b.rs", "what Krampsta wrote", Some("old")).unwrap_err();
+        assert!(error.contains("changed since Krampsta wrote it"), "{error}");
+        assert_eq!(std::fs::read_to_string(dir.path().join("b.rs")).unwrap(), "edited by hand", "left as it is");
+        assert!(restore(&project, "gone.rs", "x", None).is_err(), "a file that is gone changed too");
     }
 }

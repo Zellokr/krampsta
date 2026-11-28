@@ -5,8 +5,8 @@
 //! running command's output) is never written.
 
 use krampsta_core::{
-    AgentStatus, Message, MessageId, MessageRole, ModelUsage, RunId, Session, SessionId, ToolCall, ToolCallId,
-    ToolResult, Usage,
+    AgentStatus, FileWrite, Message, MessageId, MessageRole, ModelUsage, RunId, Session, SessionId, ToolCall,
+    ToolCallId, ToolResult, Usage,
 };
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +31,19 @@ pub struct SavedSession {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub by_model: Vec<SavedModelUsage>,
     pub messages: Vec<SavedMessage>,
+    /// The files Krampsta wrote for the session, for a rewind; absent when none (and in
+    /// sessions saved before checkpoints).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writes: Vec<SavedWrite>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SavedWrite {
+    pub turn: u64,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    pub after: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -131,6 +144,16 @@ impl SavedSession {
                 })
                 .collect(),
             messages: s.messages.iter().map(|m| SavedMessage::from_message(s.id, m)).collect(),
+            writes: s
+                .writes()
+                .iter()
+                .map(|w| SavedWrite {
+                    turn: w.turn.0,
+                    path: w.path.clone(),
+                    before: w.before.as_deref().map(str::to_owned),
+                    after: w.after.to_string(),
+                })
+                .collect(),
         }
     }
 
@@ -147,6 +170,14 @@ impl SavedSession {
         let mut session = Session::restore(SessionId(self.id), self.title, messages, status, usage);
         session.project = self.project;
         session.yolo = self.yolo;
+        for w in self.writes {
+            session.record_write(FileWrite {
+                turn: MessageId(w.turn),
+                path: w.path,
+                before: w.before.map(Into::into),
+                after: w.after.into(),
+            });
+        }
         session.by_model = self
             .by_model
             .into_iter()

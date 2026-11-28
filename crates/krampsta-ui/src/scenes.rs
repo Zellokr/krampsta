@@ -1,9 +1,10 @@
 //! Headless scenes for the newer states (`--scene NAME`); the table and the rest are in
 //! `app.rs`. Each assigns the state it shows.
 
-use krampsta_core::{AgentEvent, MessageRole, ToolCall, ToolCallId, ToolResult};
+use krampsta_core::{AgentEvent, FileWrite, MessageRole, ToolCall, ToolCallId, ToolResult};
 
-use crate::app::{SCENE_RUN, apply, staged};
+use crate::app::{SCENE_RUN, apply, scene_completed, staged};
+use crate::menus::{Confirm, MenuTarget};
 use crate::state::KrampstaApp;
 
 /// The agent working through its plan: one step done, one under way, two to go.
@@ -60,4 +61,24 @@ pub fn summary(s: &mut KrampstaApp) {
     }
     let id = x.messages.iter().find(|m| m.role == MessageRole::Summary).map(|m| m.id);
     s.open_reasoning.extend(id);
+}
+
+/// Asking to rewind a finished turn that wrote two files.
+pub fn rewind(s: &mut KrampstaApp) {
+    scene_completed(s);
+    let Some(x) = s.sessions.first_mut() else { return };
+    let Some(turn) = x.messages.iter().find(|m| m.role == MessageRole::User).map(|m| m.id) else { return };
+    for path in ["crates/krampsta-app/src/main.rs", "crates/krampsta-app/src/config.rs"] {
+        x.record_write(FileWrite { turn, path: path.into(), before: Some("old".into()), after: "new".into() });
+    }
+    s.confirm = Some(Confirm::Rewind { session: x.id, message: turn });
+}
+
+/// The menu of the user's own message, with "Rewind to here…".
+pub fn user_message_menu(s: &mut KrampstaApp) {
+    scene_completed(s);
+    let mine = s.current().and_then(|x| x.messages.iter().find(|m| m.role == MessageRole::User)).map(|m| m.id);
+    if let Some(id) = mine {
+        s.open_menu(MenuTarget::Message(id), rune::PointerPress { x: 560.0, y: 100.0 });
+    }
 }

@@ -1,5 +1,6 @@
 //! Context menus (right-click, the Menu key or Shift+F10) on session rows and messages, and
-//! deleting a session after confirming it: the state they keep and what their items do.
+//! deleting a session after confirming it: the state they keep and what their items do. (A
+//! rewind's confirmation is the other [`Confirm`]; what it does is in `rewind.rs`.)
 
 use krampsta_core::{MessageId, SessionId};
 use rune::{PointerPress, Tx};
@@ -11,6 +12,15 @@ use crate::state::KrampstaApp;
 pub enum MenuTarget {
     Session(SessionId),
     Message(MessageId),
+}
+
+/// What a confirmation dialog asks about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Confirm {
+    /// Deleting a session.
+    Delete(SessionId),
+    /// Taking `session` back to before its message `message`.
+    Rewind { session: SessionId, message: MessageId },
 }
 
 /// An open context menu: what for, and the press it opens at.
@@ -52,17 +62,19 @@ impl KrampstaApp {
     /// Opens the confirmation for deleting `id`.
     pub fn ask_delete(&mut self, id: SessionId) {
         self.menu = None;
-        self.confirm_delete = Some(id);
+        self.confirm = Some(Confirm::Delete(id));
     }
 
-    pub fn cancel_delete(&mut self) {
-        self.confirm_delete = None;
+    /// Closes the confirmation, doing nothing.
+    pub fn cancel_confirm(&mut self) {
+        self.confirm = None;
     }
 
     /// Deletes the session waiting for confirmation. A running session stays (stop it first);
     /// deleting the selected one selects the next, and deleting the last leaves a new one.
     pub fn confirm_delete(&mut self) {
-        let Some(id) = self.confirm_delete.take() else { return };
+        let Some(Confirm::Delete(id)) = self.confirm else { return };
+        self.confirm = None;
         let Some(index) = self.sessions.iter().position(|x| x.id == id) else { return };
         if self.sessions[index].status.is_running() {
             return;
@@ -128,11 +140,11 @@ mod tests {
         let ids: Vec<SessionId> = app.sessions.iter().map(|x| x.id).collect();
         app.select(ids[0]);
         app.ask_delete(ids[0]);
-        assert_eq!(app.confirm_delete, Some(ids[0]));
+        assert_eq!(app.confirm, Some(Confirm::Delete(ids[0])));
         app.confirm_delete();
         assert!(app.session(ids[0]).is_none());
         assert_eq!(app.selected, ids[1]);
-        assert_eq!(app.confirm_delete, None);
+        assert_eq!(app.confirm, None);
     }
 
     #[test]
@@ -140,7 +152,7 @@ mod tests {
         let mut app = app();
         let id = app.sessions[0].id;
         app.ask_delete(id);
-        app.cancel_delete();
+        app.cancel_confirm();
         app.confirm_delete();
         assert!(app.session(id).is_some());
     }

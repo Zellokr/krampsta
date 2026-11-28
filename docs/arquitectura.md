@@ -7,12 +7,16 @@ lee aquí la sección de lo que vayas a tocar.
 ## Módulos por crate
 
 - `crates/krampsta-core` — dominio puro. **Nunca** depende de Rune, tokio ni proveedores.
-  `Session::apply` es la única forma de cambiar una sesión a partir de eventos.
+  `Session::apply` es la única forma de cambiar una sesión a partir de eventos. `checkpoint`
+  (`FileWrite`: lo que Krampsta escribió para una sesión, por el turno que lo propuso;
+  `Session::rewind` quita la conversación desde un mensaje del usuario y devuelve un `Restore` por
+  archivo, con lo que tenía antes de la primera escritura y lo último que se escribió).
 - `crates/krampsta-agent` — `AgentEngine` (contrato), `RunContext`, `AgentHost` (tokio, canal +
   notificador, cambio de motor, listas de modelos, archivos y diff del repo en segundo plano),
   `EngineCatalog` (qué proveedores y modelos hay, cómo construir un motor), `MockAgent`,
   `MockCatalog`, `Toolbox` (las herramientas como las ve un motor: `specs`, `check`, `run`,
-  `files`, `repo_diff`…), `ToolServers` (cómo ve la UI los servidores MCP: estado por servidor y
+  `files`, `repo_diff`, `restore`…; `AgentHost::restore_files` devuelve los archivos de un rewind
+  en orden, en un hilo bloqueante, y responde con un `Restored`), `ToolServers` (cómo ve la UI los servidores MCP: estado por servidor y
   versión; `FixedServers` para escenas y tests), `replay` (qué vuelve al modelo de los turnos
   anteriores: sus herramientas recortadas por antigüedad, y el resumen en lugar de lo que cubre;
   `HISTORY_BUDGET`), `compact` (resumir la conversación antes de una ejecución) y `plan`
@@ -59,7 +63,7 @@ lee aquí la sección de lo que vayas a tocar.
   `krampsta-agent`; un JSON por sesión, escrito por un hilo propio, de forma atómica; las imágenes
   de los mensajes, en `images/<sesión>-<mensaje>.png`, escritas una vez), `load` (lectura
   bloqueante, fuera del hilo de la UI) y `format` (la forma en disco, versionada, separada del
-  dominio; versión 2: el rol `summary`). No depende de Rune.
+  dominio; versión 2: el rol `summary`; `writes`, opcional, guarda los checkpoints). No depende de Rune.
 - `crates/krampsta-ui` — `KrampstaApp` (estado, `state.rs`), `app.rs` (spec, vista raíz, poll,
   teclas, escenas), `views/` (pantallas y paneles), `components/` (piezas) y, por capacidad:
   - `picker.rs` (selector de proveedor y modelo), `accounts.rs` (diálogo de inicio de sesión),
@@ -85,6 +89,12 @@ lee aquí la sección de lo que vayas a tocar.
     `views/inspector.rs`.
   - `components/summary.rs` (el resumen de mensajes anteriores en el chat: una línea con su
     cabecera, plegada; se abre como el razonamiento, con `open_reasoning`).
+  - `rewind.rs` (volver a antes de un mensaje del usuario: `Confirm::Rewind` en `menus.rs`, el
+    diálogo en `components/menus.rs`). `changes.rs` recuerda qué sesión y turno propuso cada ruta
+    (`origins`) y, al llegar bien una escritura, la apunta en esa sesión (`keep_checkpoint`, hasta
+    `MAX_CHECKPOINT_BYTES`); el rewind rechaza lo que esos turnos propusieron sin aceptar y pide al
+    host devolver los archivos (`Toolbox::restore`, que no toca un archivo cambiado desde entonces).
+    Los comandos no se registran: lo que cambien no se deshace.
   - `search.rs` (buscar sesiones por título y mensajes desde la sidebar; las coincidencias se
     calculan al escribir y en momentos concretos, `sessions_changed`, nunca por frame; `groups`
     las filtra), `rename.rs` (renombrar una sesión en su fila, `SidebarRow::renaming`: Enter

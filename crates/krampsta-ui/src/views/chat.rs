@@ -60,7 +60,7 @@ fn transcript(s: &KrampstaApp, session: &Session, k: &Kit, layer: &mut Vec<El>) 
         .children(session.messages.iter().map(|m| {
             let streaming = Some(m.id) == streaming_id;
             let view = message::view(s, session.id, m, streaming, k);
-            let row = menus::message(s, m, view, k, layer);
+            let row = menus::message(s, session, m, view, k, layer);
             if streaming { row.streaming(true) } else { row.arrives_whole() }
         }));
     // Running, but the assistant hasn't started its message yet: show that it's working.

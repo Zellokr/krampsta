@@ -340,7 +340,9 @@ pub fn load_settings(file: &Path) -> Result<Option<serde_json::Value>, StoreErro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use krampsta_core::{AgentEvent, AgentStatus, MessageRole, RunId, ToolCall, ToolCallId, ToolResult, Usage};
+    use krampsta_core::{
+        AgentEvent, AgentStatus, FileWrite, MessageId, MessageRole, RunId, ToolCall, ToolCallId, ToolResult, Usage,
+    };
 
     /// A session in yolo mode, with a summary, that went through a whole run with a tool call,
     /// reasoning and usage.
@@ -350,6 +352,9 @@ mod tests {
         s.yolo = true;
         s.push_message(MessageRole::Summary, "Earlier, the user set up the project.");
         let run = RunId(3);
+        let turn = MessageId(9);
+        s.record_write(FileWrite { turn, path: "src/new.rs".into(), before: None, after: "fn x() {}\n".into() });
+        s.record_write(FileWrite { turn, path: "a.rs".into(), before: Some("old".into()), after: "new".into() });
         s.submit("List the files", run).unwrap();
         s.bill_to("openai", "gpt-test");
         s.apply(&AgentEvent::Started { run });

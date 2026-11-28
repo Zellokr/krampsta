@@ -129,6 +129,7 @@ pub fn view(s: &KrampstaApp, cx: &mut Cx<KrampstaApp>) -> El {
     };
     sign_in::dialog(s, k, &mut layer);
     menus::delete_dialog(s, k, &mut layer);
+    menus::rewind_dialog(s, k, &mut layer);
     crate::approvals::dialog(s, k, &mut layer);
     crate::views::palette::dialog(s, k, &mut layer);
     // The root's rect is the window: refit the side panes whenever its width changes.
@@ -206,6 +207,7 @@ const SCENES: &[Scene] = &[
     ("reasoning", scene_reasoning),
     ("summary", crate::scenes::summary),
     ("plan", crate::scenes::plan),
+    ("rewind", crate::scenes::rewind),
     // Yolo mode on: the switch on and the warning under the field.
     ("yolo", |s| {
         scene_completed(s);
@@ -260,6 +262,7 @@ const SCENES: &[Scene] = &[
             s.open_menu(MenuTarget::Message(id), PointerPress { x: 420.0, y: 245.0 });
         }
     }),
+    ("message-menu-user", crate::scenes::user_message_menu),
     ("delete-session", |s| {
         let id = s.sessions[0].id;
         s.ask_delete(id);
@@ -552,7 +555,7 @@ fn scene_projects(s: &mut KrampstaApp) {
     s.notice = None;
 }
 
-fn scene_completed(s: &mut KrampstaApp) {
+pub(crate) fn scene_completed(s: &mut KrampstaApp) {
     let run = staged(s, "Find where the configuration is loaded");
     let (started, finished) = tool(run);
     let reply = "Configuration is loaded in `crates/krampsta-app/src/main.rs`, which builds the engine \

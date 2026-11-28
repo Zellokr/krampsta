@@ -12,6 +12,10 @@ pub const TRANSCRIPT: &str = "krampsta-transcript";
 pub const TRANSCRIPT_SCROLL: &str = "krampsta-transcript-scroll";
 pub const EMPTY_STATE: &str = "krampsta-empty-state";
 pub const COMPOSER: &str = "krampsta-composer";
+/// The rewind confirmation and its buttons.
+pub const REWIND: &str = "krampsta-rewind";
+pub const REWIND_CONFIRM: &str = "krampsta-rewind-confirm";
+pub const REWIND_CANCEL: &str = "krampsta-rewind-cancel";
 /// The composer's yolo-mode switch.
 pub const COMPOSER_YOLO: &str = "krampsta-composer-yolo";
 pub const COMPOSER_HINT: &str = "krampsta-composer-hint";

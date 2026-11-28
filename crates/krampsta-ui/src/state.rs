@@ -93,8 +93,8 @@ pub struct KrampstaApp {
     pub open_reasoning: HashSet<MessageId>,
     /// The context menu showing, if any.
     pub menu: Option<OpenMenu>,
-    /// The session the delete confirmation asks about.
-    pub confirm_delete: Option<SessionId>,
+    /// What the confirmation dialog asks about, if one shows.
+    pub confirm: Option<crate::menus::Confirm>,
     pub(crate) catalog: Arc<dyn EngineCatalog>,
     pub(crate) agent: AgentHost,
     /// Where sessions are saved. None: nothing outlives the window (tests, headless scenes).
@@ -267,7 +267,7 @@ impl KrampstaApp {
             commands_with_pending_changes: HashSet::new(),
             open_reasoning: HashSet::new(),
             menu: None,
-            confirm_delete: None,
+            confirm: None,
             catalog,
             agent,
             store: None,
@@ -500,7 +500,7 @@ impl KrampstaApp {
                 }
             }
         }
-        changed |= self.write_auto();
+        changed |= self.write_auto() | self.land_restores();
         changed |= self.finish_apply_and_validate();
         if let Some(history) = self.store.as_ref().and_then(|s| s.take_history()) {
             changed |= self.land_history(history);

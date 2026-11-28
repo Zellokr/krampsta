@@ -37,7 +37,7 @@ pub use engine::RunRequest;
 pub use engine::{Effort, EffortLevel};
 pub use host::AgentHost;
 pub use host::Notifier;
-pub use host::{AccountEvent, FileList, ModelList, RepoDiffList, Written};
+pub use host::{AccountEvent, FileList, ModelList, RepoDiffList, Restored, Written};
 pub use mock::MockAgent;
 pub use mock::MockConfig;
 pub use projects::{OpenedProject, ProjectOpened, ProjectOpener, project_name};

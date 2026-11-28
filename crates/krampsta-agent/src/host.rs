@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use krampsta_core::{AgentEvent, IdGen, RunEvent, RunId, ToolCallId};
+use krampsta_core::{AgentEvent, IdGen, Restore, RunEvent, RunId, SessionId, ToolCallId};
 use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{DeviceCode, LoginPrompt};
@@ -37,6 +37,8 @@ pub struct AgentHost {
     accounts_rx: Receiver<AccountEvent>,
     writes_tx: Sender<Written>,
     writes_rx: Receiver<Written>,
+    restores_tx: Sender<Restored>,
+    restores_rx: Receiver<Restored>,
     projects_tx: Sender<ProjectOpened>,
     projects_rx: Receiver<ProjectOpened>,
     files_tx: Sender<FileList>,
@@ -55,6 +57,15 @@ pub struct Written {
     pub path: String,
     pub content: Arc<str>,
     pub result: Result<(), String>,
+}
+
+/// The answer to [`AgentHost::restore_files`]: how many files of `session` went back, and why
+/// the others didn't.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Restored {
+    pub session: SessionId,
+    pub restored: usize,
+    pub failures: Vec<String>,
 }
 
 /// The answer to [`AgentHost::list_files`]: which request it answers, and the files.
@@ -111,12 +122,15 @@ impl AgentHost {
         let (lookups_tx, lookups_rx) = channel();
         let (accounts_tx, accounts_rx) = channel();
         let (writes_tx, writes_rx) = channel();
+        let (restores_tx, restores_rx) = channel();
         let (projects_tx, projects_rx) = channel();
         let (files_tx, files_rx) = channel();
         let (repo_tx, repo_rx) = channel();
         AgentHost {
             writes_tx,
             writes_rx,
+            restores_tx,
+            restores_rx,
             projects_tx,
             projects_rx,
             files_tx,
@@ -175,6 +189,38 @@ impl AgentHost {
             }
         });
         Ok(())
+    }
+
+    /// Puts files back for a rewind of `session`, one after another, off the UI thread; the
+    /// answer arrives through [`drain_restores`](Self::drain_restores).
+    pub fn restore_files(&mut self, session: SessionId, restores: Vec<Restore>) -> Result<(), AgentError> {
+        let tools = self.tools.clone().ok_or_else(|| AgentError::Runtime("there is no project to restore".into()))?;
+        let (tx, notify) = (self.restores_tx.clone(), self.notify.clone());
+        self.runtime()?.spawn(async move {
+            let job = tokio::task::spawn_blocking(move || {
+                let mut done = Restored { session, restored: 0, failures: Vec::new() };
+                for r in &restores {
+                    match tools.restore(&r.path, &r.expected, r.content.as_deref()) {
+                        Ok(()) => done.restored += 1,
+                        Err(why) => done.failures.push(why),
+                    }
+                }
+                done
+            });
+            let done = job.await.unwrap_or_else(|e| Restored {
+                session,
+                restored: 0,
+                failures: vec![format!("putting the files back stopped abnormally: {e}")],
+            });
+            if tx.send(done).is_ok() {
+                notify();
+            }
+        });
+        Ok(())
+    }
+
+    pub fn drain_restores(&mut self) -> Vec<Restored> {
+        self.restores_rx.try_iter().collect()
     }
 
     /// Takes every finished write, without blocking.

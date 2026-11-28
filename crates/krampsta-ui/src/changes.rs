@@ -5,12 +5,12 @@
 //! Each change keeps its diff, computed once when the change arrives or moves (Myers, in
 //! rune-kit); taking a block is a linear splice of the two texts (`splice_lines`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::Arc;
 
 use krampsta_agent::Written;
-use krampsta_core::{FileChange, SessionId, splice_lines};
+use krampsta_core::{FileChange, FileWrite, MessageId, MessageRole, SessionId, splice_lines};
 use rune_kit::diff::{Annotation, FileDiff, Hunk, LineKind, LineRef, Side};
 
 use crate::state::KrampstaApp;
@@ -27,7 +27,15 @@ pub struct Changes {
     validate_after_writes: Option<crate::approvals::Asking>,
     /// Paths a session in yolo mode proposed: written as soon as no write is in flight.
     auto: HashSet<String>,
+    /// The session and turn (its user message) that last proposed each path: a write is kept
+    /// as that session's checkpoint (`rewind.rs`).
+    origins: HashMap<String, (SessionId, MessageId)>,
+    /// What each file in flight held before its write.
+    befores: HashMap<String, Option<Arc<str>>>,
 }
+
+/// A write bigger than this (before and after together) isn't kept for a rewind.
+const MAX_CHECKPOINT_BYTES: usize = 4 * 1024 * 1024;
 
 impl Changes {
     pub fn proposals(&self) -> &[FileChange] {
@@ -76,12 +84,30 @@ impl KrampstaApp {
     /// [`stage_proposal`](Self::stage_proposal) for a change `session` proposed: in yolo mode
     /// it is written without review ([`write_auto`](Self::write_auto)); otherwise it waits.
     pub(crate) fn stage_proposal_from(&mut self, session: SessionId, change: FileChange) -> bool {
-        if self.session(session).is_some_and(|s| s.yolo) {
+        let Some(x) = self.session(session) else { return self.stage_proposal(change) };
+        let (yolo, turn) = (x.yolo, x.messages.iter().rev().find(|m| m.role == MessageRole::User).map(|m| m.id));
+        if yolo {
             self.review.auto.insert(change.path.clone());
         } else {
             self.review.auto.remove(&change.path);
         }
+        if let Some(turn) = turn {
+            self.review.origins.insert(change.path.clone(), (session, turn));
+        }
         self.stage_proposal(change)
+    }
+
+    /// Rejects what `session` proposed from its turn `turn` on and nobody accepted yet: a rewind
+    /// takes those turns back.
+    pub(crate) fn drop_proposals_since(&mut self, session: SessionId, turn: MessageId) {
+        for file in (0..self.review.proposals.len()).rev() {
+            let origin = self.review.origins.get(&self.review.proposals[file].path);
+            if origin.is_some_and(|&(s, t)| s == session && t >= turn) {
+                let path = self.review.proposals[file].path.clone();
+                self.reject_file(file);
+                self.review.origins.remove(&path);
+            }
+        }
     }
 
     /// Writes what yolo sessions proposed and isn't being written. True when a write started.
@@ -209,7 +235,9 @@ impl KrampstaApp {
             return; // One write per file at a time.
         }
         self.review.error = None;
+        self.review.befores.insert(path.to_owned(), before.clone());
         if let Err(e) = self.agent.write_file(path, before, content) {
+            self.review.befores.remove(path);
             self.review.writing.remove(path);
             self.review.error = Some(e.to_string());
         }
@@ -222,6 +250,7 @@ impl KrampstaApp {
         let mut panel_dirty = false;
         for Written { path, content, result } in writes {
             self.review.writing.remove(&path);
+            let before = self.review.befores.remove(&path);
             match result {
                 Err(e) => {
                     // Shown, and left for the user: retrying alone would fail the same way.
@@ -229,6 +258,12 @@ impl KrampstaApp {
                     self.review.error = Some(e);
                 }
                 Ok(()) => {
+                    if let (Some(before), Some(&(session, turn))) = (before, self.review.origins.get(&path)) {
+                        self.keep_checkpoint(
+                            session,
+                            FileWrite { turn, path: path.clone(), before, after: content.clone() },
+                        );
+                    }
                     // A new file may have been written: the file tree lists it.
                     self.disk_changed();
                     if let Some(i) = self.review.proposals.iter().position(|c| c.path == path) {
@@ -253,6 +288,18 @@ impl KrampstaApp {
             self.agent.set_pending(&change.path, Some(change.after.clone()));
             self.review.files[i] = diff_of(&change);
             self.review.proposals[i] = change;
+        }
+    }
+
+    /// Keeps a write as `session`'s checkpoint, unless it is too big to keep.
+    fn keep_checkpoint(&mut self, session: SessionId, write: FileWrite) {
+        let size = write.after.len() + write.before.as_deref().map_or(0, str::len);
+        if size > MAX_CHECKPOINT_BYTES {
+            return;
+        }
+        if let Some(x) = self.session_mut(session) {
+            x.record_write(write);
+            self.persist(session);
         }
     }
 
@@ -397,6 +444,26 @@ mod tests {
         pump_until_written(&mut app);
         assert_eq!(app.review.error.as_deref(), Some("permission denied"));
         assert!(!app.write_auto());
+    }
+
+    #[test]
+    fn an_accepted_change_is_kept_as_its_turns_checkpoint() {
+        let disk = Arc::new(Disk::default());
+        let mut app = app(&disk, &[("a.txt", BEFORE)]);
+        app.new_session();
+        let id = app.sessions[0].id;
+        let turn = app.sessions[0].submit("change a.txt", krampsta_core::RunId(1)).unwrap();
+        app.stage_proposal_from(id, change("a.txt", Some(BEFORE), &two_blocks()));
+        app.accept_block(0, 0);
+        pump_until_written(&mut app);
+        app.accept_file(0);
+        pump_until_written(&mut app);
+        let writes = app.sessions[0].writes();
+        assert_eq!(writes.len(), 2, "one per write");
+        assert_eq!((writes[0].turn, writes[0].before.as_deref()), (turn, Some(BEFORE)));
+        assert_eq!(&*writes[1].after, two_blocks());
+        let restores = app.sessions[0].restores_since(turn);
+        assert_eq!((restores.len(), restores[0].content.as_deref()), (1, Some(BEFORE)), "back to before the turn");
     }
 
     #[test]

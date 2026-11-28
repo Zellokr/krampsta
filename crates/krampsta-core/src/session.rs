@@ -14,6 +14,8 @@ pub enum SessionError {
     EmptyMessage,
     #[error("the agent is already running in this session")]
     AlreadyRunning,
+    #[error("that message is not one of yours in this session")]
+    NoSuchMessage,
 }
 
 /// A conversation: its messages and the status of its agent.
@@ -34,6 +36,8 @@ pub struct Session {
     /// The same tokens by the model that used them (what a price applies to). Runs that
     /// weren't billed to a model ([`Session::bill_to`]) count only in `usage`.
     pub by_model: Vec<ModelUsage>,
+    /// The files Krampsta wrote for this session, oldest first ([`crate::FileWrite`]).
+    pub(crate) writes: Vec<crate::FileWrite>,
     /// The run whose events this session accepts. Events from any other run are stale
     /// (a cancelled run that kept talking, say) and change nothing.
     active_run: Option<RunId>,
@@ -63,6 +67,7 @@ impl Session {
             status: AgentStatus::Idle,
             usage: Usage::default(),
             by_model: Vec::new(),
+            writes: Vec::new(),
             project: None,
             yolo: false,
             active_run: None,
@@ -84,6 +89,7 @@ impl Session {
             status,
             usage,
             by_model: Vec::new(),
+            writes: Vec::new(),
             project: None,
             yolo: false,
             active_run: None,

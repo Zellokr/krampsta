@@ -55,6 +55,13 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   Se aplican los mismos permisos: la copia temporal cambia la carpeta de trabajo del comando,
   pero **no** lo aísla del sistema. Los comandos no ven las claves de los proveedores de IA del
   entorno (`OPENAI_API_KEY` y similares), porque lo que escriben llega al modelo.
+- **Volver atrás (checkpoints)**: el menú contextual de un mensaje tuyo tiene «Rewind to here…».
+  Tras confirmar, la conversación vuelve a antes de ese mensaje, su texto vuelve al composer para
+  retocarlo y reenviarlo, los cambios que esos turnos propusieron sin aceptar se rechazan y los
+  archivos que Krampsta escribió desde entonces (aceptados o en modo yolo) vuelven a como estaban;
+  los que creó, se borran. Un archivo que cambió después de que Krampsta lo escribiera se deja como
+  está, y el composer lo avisa. Lo que cambiaron los comandos no se deshace. Las escrituras se
+  guardan con la sesión, así que funciona también tras reiniciar.
 - **Páginas web**: con `fetch_url` el agente lee una página (`http`/`https`): documentación, una
   issue, una referencia de API. El HTML llega como texto (sin scripts), hasta 32 KB. Cada sitio
   pide permiso; «Always allow» guarda la regla `fetch_url:<sitio>` en `permissions.json`, sólo para

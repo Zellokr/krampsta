@@ -142,6 +142,13 @@ pub trait Toolbox: Send + Sync + 'static {
         Err(format!("`{path}` can't be written: these tools only read"))
     }
 
+    /// Puts `path` back as it was before Krampsta wrote it (a rewind): `content`, or gone when
+    /// `None` (Krampsta created it), if it still holds `expected`, what Krampsta last wrote.
+    fn restore(&self, path: &str, expected: &str, content: Option<&str>) -> Result<(), String> {
+        let _ = (expected, content);
+        Err(format!("`{path}` can't be put back: these tools only read"))
+    }
+
     /// What the agent's next edits and reads of `path` build on: the change still proposed for
     /// it, or the file on disk (`None`) once the change is accepted or rejected.
     fn set_pending(&self, path: &str, content: Option<Arc<str>>) {
