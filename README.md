@@ -282,7 +282,7 @@ en el árbol JSON.
 ## Actualizar Rune de forma segura
 
 Rune es pre-release: se fija **un único commit** de la rama `dev` (que nunca se reescribe).
-Commit actual: **`66006728af7cd3dc54a6bb31ca7690242fb8d6aa`**.
+Commit actual: **`c8424ac797a2a7097a3530607c9ecadef37deec6`**.
 
 1. `git ls-remote https://github.com/anomalyco/rune refs/heads/dev` → nuevo SHA.
 2. Lee el `Cargo.toml` raíz de Rune **en ese SHA**: la tabla `[patch.crates-io]` (hoy `winit`,

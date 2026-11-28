@@ -34,7 +34,7 @@ bash scripts/snapshots.sh   # y mira las PNG: compilar no prueba que la UI esté
 ## Rune y la UI
 
 - La API de Rune evoluciona: **no inventes métodos**. Consulta el código en el commit fijado
-  (`~/.cargo/git/checkouts/rune-*/6600672/`): `crates/rune/README.md`, `crates/rune-kit/README.md`
+  (`~/.cargo/git/checkouts/rune-*/c8424ac/`): `crates/rune/README.md`, `crates/rune-kit/README.md`
   y los ejemplos. Antes de hacer un componente propio, busca uno en `rune-kit`.
 - Las vistas son funciones puras de `KrampstaApp`: nada de I/O, bloqueos ni trabajo costoso en
   `view`. El trabajo lento va al `AgentHost` (o a un worker) y vuelve por `poll`, que devuelve
