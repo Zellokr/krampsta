@@ -53,7 +53,14 @@ la renderiza Rune en la GPU (wgpu) en macOS, Windows y Linux.
   al acabar, pero Cargo compila en una carpeta propia de la caché del usuario
   (`krampsta/check-target`), así que la siguiente comprobación no recompila las dependencias.
   Se aplican los mismos permisos: la copia temporal cambia la carpeta de trabajo del comando,
-  pero **no** lo aísla del sistema. Los comandos no ven las claves de los proveedores de IA del
+  pero no lo aísla del sistema: eso lo hace el sandbox. **En Linux, los comandos corren en un
+  sandbox** (Landlock, kernel 5.13 o posterior): leen y ejecutan lo que quieran, pero sólo
+  escriben en el proyecto, su carpeta de compilación, los temporales, `/dev` y las cachés de las
+  herramientas (`~/.cargo`, `~/.rustup`, `~/.cache`, `~/.npm`); escribir en otro sitio da
+  «Permission denied» y `sudo` no funciona. Se añaden carpetas o se apaga en `permissions.json`:
+  `"sandbox": {"writable": ["~/.gradle"]}` o `"sandbox": {"enabled": false}`. Con un kernel sin
+  Landlock el comando corre sin sandbox, y `commands.log` lo apunta (`"sandbox"`). En Windows y
+  macOS aún no hay sandbox. Los comandos no ven las claves de los proveedores de IA del
   entorno (`OPENAI_API_KEY` y similares), porque lo que escriben llega al modelo.
 - **Volver atrás (checkpoints)**: el menú contextual de un mensaje tuyo tiene «Rewind to here…».
   Tras confirmar, la conversación vuelve a antes de ese mensaje, su texto vuelve al composer para

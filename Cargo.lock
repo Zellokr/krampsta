@@ -2251,6 +2251,7 @@ dependencies = [
  "ignore",
  "krampsta-agent",
  "krampsta-core",
+ "landlock",
  "process-wrap",
  "reqwest",
  "serde",
@@ -2285,6 +2286,17 @@ dependencies = [
  "arrayvec",
  "euclid",
  "smallvec",
+]
+
+[[package]]
+name = "landlock"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03795bb5dba9d001e861618f7301289e3ad0bb146d0a8192ff5fd8b06d069087"
+dependencies = [
+ "enumflags2",
+ "libc",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

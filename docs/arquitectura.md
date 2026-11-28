@@ -39,7 +39,10 @@ lee aquí la sección de lo que vayas a tocar.
   propone, y la escritura al aceptar), `command` (`run_command`), `policy` y `permissions` (reglas
   de permisos: comandos y herramientas), `secrets` (qué archivos guardan secretos, por su nombre),
   `snapshot` (copia desechable con las ediciones pendientes para `run_command` con `pending: true`;
-  Cargo compila en la caché del usuario, `check-target`; no es un sandbox), `git` (el diff frente a
+  Cargo compila en la caché del usuario, `check-target`; no es un sandbox), `sandbox` (en Linux,
+  Landlock: el shell se lanza desde un hilo restringido para eso, sin `pre_exec` ni `unsafe`, y lo
+  heredan él y sus hijos; escribe sólo en el proyecto, `CARGO_TARGET_DIR`, temporales, `/dev` y
+  cachés de herramientas, más `sandbox.writable` de `permissions.json`; `no_new_privs`), `git` (el diff frente a
   `HEAD` para la vista «Git»: ejecuta `git`, sin consola, con topes), `guidance` (al abrir el
   proyecto lee su `AGENTS.md` de la raíz, con tope `MAX_RULES`, y lista las skills de
   `.agents/skills/*/SKILL.md` y `.claude/skills/` sólo por nombre, descripción y ruta; el modelo
@@ -170,6 +173,10 @@ Antes de ejecutar, `Toolbox::check` dice `Allow`, `Ask` o `Deny`. Con `Ask`, el 
 guarda la regla con `Toolbox::remember`. Las reglas viven en `permissions.json` (carpeta de
 configuración del usuario):
 
+- Sandbox (Linux): cada comando corre bajo Landlock salvo `"sandbox": {"enabled": false}`;
+  `commands.log` apunta cómo quedó (`on`, `partial`, `unavailable on this kernel`, `off`). El
+  sandbox no sustituye a los permisos: un comando sigue preguntando, y el modo yolo sólo deja de
+  preguntar.
 - Comandos: `deny` gana y mira cada parte de un comando encadenado; una regla `*` de `allow` sólo
   cubre comandos simples. Cada comando deja una línea en `commands.log` (qué, dónde, quién lo
   permitió, cómo acabó). Los comandos no heredan las claves de los proveedores de IA

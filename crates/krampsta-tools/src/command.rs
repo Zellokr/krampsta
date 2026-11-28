@@ -20,6 +20,7 @@ use process_wrap::std::{ChildWrapper, CommandWrap};
 use serde::Deserialize;
 
 use crate::project::Project;
+use crate::sandbox::{Confinement, Sandbox};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(600);
@@ -61,22 +62,28 @@ impl Outcome {
 /// The shell commands run in, as the tool's description tells the model.
 pub const SHELL: &str = if cfg!(windows) { "PowerShell" } else { "sh" };
 
-/// Runs `args.command` to its end; returns the output for the model and how it ended. With
-/// `cargo_target`, Cargo builds there (checks of pending edits, run in a copy of the project).
+/// Runs `args.command` to its end, inside `sandbox` if any; returns the output for the model,
+/// how it ended and how confined it was. With `cargo_target`, Cargo builds there (checks of
+/// pending edits, run in a copy of the project).
 pub fn run(
     project: &Project,
     args: &Args,
     cargo_target: Option<&Path>,
+    sandbox: Option<&Sandbox>,
     call: &Call<'_>,
-) -> Result<(String, Outcome), String> {
+) -> Result<(String, Outcome, Confinement), String> {
     let timeout = args
         .timeout_ms
         .map_or(DEFAULT_TIMEOUT, |ms| Duration::from_millis(ms).clamp(Duration::from_secs(1), MAX_TIMEOUT));
     if call.cancel.is_cancelled() {
-        return Ok((String::new(), Outcome::Stopped));
+        return Ok((String::new(), Outcome::Stopped, Confinement::Off));
     }
-    let mut child =
-        spawn(project, &args.command, cargo_target).map_err(|e| format!("the command could not start: {e}"))?;
+    let start = || spawn(project, &args.command, cargo_target);
+    let (started, confinement) = match sandbox {
+        Some(sandbox) => sandbox.spawn(start)?,
+        None => (start(), Confinement::Off),
+    };
+    let mut child = started.map_err(|e| format!("the command could not start: {e}"))?;
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(64);
     let readers = [child.stdout().take().map(|p| reader(p, tx.clone())), child.stderr().take().map(|p| reader(p, tx))];
 
@@ -124,7 +131,7 @@ pub fn run(
         Some(outcome) => outcome,
         None => Outcome::Exited(child.wait().map_err(|e| format!("could not wait for the command: {e}"))?.code()),
     };
-    Ok((capture.into_text(), outcome))
+    Ok((capture.into_text(), outcome, confinement))
 }
 
 /// The AI providers' API keys, as Krampsta (and the user's other tools) read them from the
@@ -301,8 +308,8 @@ mod tests {
         let streamed = Mutex::new(String::new());
         let output = |text: &str| streamed.lock().unwrap().push_str(text);
         let call = Call { cancel, approval: &Approval::Once, output: &output };
-        let (text, outcome) =
-            run(&project, &Args { command: command.into(), timeout_ms, pending: false }, None, &call).unwrap();
+        let (text, outcome, _) =
+            run(&project, &Args { command: command.into(), timeout_ms, pending: false }, None, None, &call).unwrap();
         let streamed = streamed.into_inner().unwrap();
         (text, outcome, streamed)
     }
@@ -322,6 +329,29 @@ mod tests {
         assert_eq!(said.trim(), "[][][kept]", "the keys are gone, the rest of the environment stays");
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_sandboxed_command_writes_in_the_project_and_nowhere_else() {
+        let (dir, outside) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let project = Project::open(dir.path()).unwrap();
+        let sandbox = Sandbox::writing_in(vec![dir.path().to_owned()]);
+        let cancel = CancellationToken::new();
+        let call = Call { cancel: &cancel, approval: &Approval::Once, output: &|_| {} };
+        let target = outside.path().join("escaped.txt");
+        let command = format!("echo in > inside.txt && cat inside.txt && echo out > '{}'", target.display());
+        let args = Args { command, timeout_ms: None, pending: false };
+        let (text, outcome, confinement) = run(&project, &args, None, Some(&sandbox), &call).unwrap();
+        if confinement == Confinement::Unavailable {
+            eprintln!("Landlock is not available here; skipping");
+            return;
+        }
+        assert_eq!(confinement, Confinement::Full);
+        assert!(text.contains("in"), "{text}");
+        assert!(text.to_ascii_lowercase().contains("permission denied"), "{text}");
+        assert_ne!(outcome, Outcome::Exited(Some(0)));
+        assert!(dir.path().join("inside.txt").exists() && !target.exists());
+    }
+
     #[test]
     fn a_utf8_file_read_by_a_command_keeps_its_accents() {
         let dir = tempfile::tempdir().unwrap();
@@ -331,8 +361,8 @@ mod tests {
         let cancel = CancellationToken::new();
         let call = Call { cancel: &cancel, approval: &Approval::Once, output: &|_| {} };
         let read = if cfg!(windows) { "Get-Content guía.md" } else { "cat guía.md" };
-        let (text, outcome) =
-            run(&project, &Args { command: read.into(), timeout_ms: None, pending: false }, None, &call).unwrap();
+        let (text, outcome, _) =
+            run(&project, &Args { command: read.into(), timeout_ms: None, pending: false }, None, None, &call).unwrap();
         assert_eq!(outcome, Outcome::Exited(Some(0)));
         assert!(text.contains("# Krampsta — guía, ñandú"), "{text}");
     }

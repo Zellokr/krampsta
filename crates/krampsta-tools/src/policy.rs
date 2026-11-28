@@ -17,11 +17,15 @@
 //! ```json
 //! { "tools": { "allow": ["mcp__github__get_*"], "deny": ["mcp__github__delete_repo"] } }
 //! ```
+//!
+//! `sandbox` sets where commands may write on Linux (see `sandbox.rs`).
 
 use std::path::{Path, PathBuf};
 
 use krampsta_agent::{Access, Approval};
 use serde::{Deserialize, Serialize};
+
+use crate::sandbox::SandboxRules;
 
 /// What makes a command more than one plain command.
 const SHELL_SYNTAX: [char; 9] = [';', '&', '|', '<', '>', '`', '$', '\n', '\r'];
@@ -35,6 +39,9 @@ pub struct Policy {
     /// The rules for tools that aren't commands.
     #[serde(default, skip_serializing_if = "ToolRules::is_empty")]
     pub tools: ToolRules,
+    /// Commands' sandbox: on unless turned off, and the extra folders they may write in.
+    #[serde(default, skip_serializing_if = "SandboxRules::is_default")]
+    pub sandbox: SandboxRules,
 }
 
 /// Which tools (by name) run without asking, and which never run.
@@ -158,6 +165,7 @@ mod tests {
                 allow: vec!["mcp__github__get_*".into(), "mcp__docs__search".into()],
                 deny: vec!["mcp__github__get_secret".into()],
             },
+            sandbox: SandboxRules::default(),
         }
     }
 

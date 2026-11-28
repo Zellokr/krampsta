@@ -30,6 +30,10 @@ tempfile = "3"
 [lints]
 workspace = true
 
+# Commands' sandbox on Linux: Landlock, applied to the thread that starts them (no `pre_exec`).
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+
 # To build process-wrap's `CreationFlags` (CREATE_NO_WINDOW: no console flashes up behind the
 # app); the same version process-wrap uses.
 [target.'cfg(windows)'.dependencies]

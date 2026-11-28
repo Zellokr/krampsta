@@ -16,6 +16,7 @@ mod permissions;
 mod policy;
 mod project;
 mod read;
+mod sandbox;
 mod search;
 mod secrets;
 mod snapshot;
@@ -132,8 +133,9 @@ impl Workspace {
         if !context.is_empty() {
             (call.output)(&context);
         }
-        let (output, outcome) = command::run(project, args, target.as_deref(), call)?;
-        self.log(&args.command, args.pending, call.approval, &outcome);
+        let sandbox = sandbox::Sandbox::for_command(project.root(), target.as_deref(), &self.rules.sandbox());
+        let (output, outcome, confinement) = command::run(project, args, target.as_deref(), sandbox.as_ref(), call)?;
+        self.log(&args.command, args.pending, call.approval, &outcome, &confinement);
         let text = format!("{context}{output}\n\n(Command {}.)", outcome.describe());
         match outcome {
             command::Outcome::Exited(Some(0)) => Ok(text.into()),
@@ -187,7 +189,14 @@ impl Workspace {
     }
 
     /// Appends one line to `commands.log`: when, where, what ran, who allowed it, how it ended.
-    fn log(&self, command: &str, pending: bool, approval: &Approval, outcome: &command::Outcome) {
+    fn log(
+        &self,
+        command: &str,
+        pending: bool,
+        approval: &Approval,
+        outcome: &command::Outcome,
+        confinement: &sandbox::Confinement,
+    ) {
         let Some(config) = self.rules.config() else { return };
         let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let entry = json!({
@@ -197,6 +206,7 @@ impl Workspace {
             "pending": pending,
             "allowed_by": command::approval_text(approval),
             "outcome": outcome.describe(),
+            "sandbox": confinement.describe(),
         });
         let written = std::fs::create_dir_all(config).and_then(|()| {
             let mut log = std::fs::OpenOptions::new().create(true).append(true).open(config.join("commands.log"))?;
@@ -324,8 +334,16 @@ fn specs() -> Arc<[ToolSpec]> {
              watchers that don't exit. Prefer read_file, list_files and search for looking at files, \
              and never change files with a command (scripts, sed, Set-Content, `>`): use edit_file, \
              which shows the user each change to review. Set pending to true to check proposed \
-             edits in a disposable copy instead of running against the project on disk.",
-            shell = command::SHELL
+             edits in a disposable copy instead of running against the project on disk.{sandbox}",
+            shell = command::SHELL,
+            sandbox = if cfg!(target_os = "linux") {
+                " Unless the user turned it off, it runs in a sandbox: it writes only in the project, \
+                 temporary folders and tool caches (~/.cargo, ~/.cache, ~/.npm); writing anywhere else \
+                 fails with \"Permission denied\", and sudo doesn't work. Say so instead of working \
+                 around it."
+            } else {
+                ""
+            }
         ),
         json!({
             "type": "object",

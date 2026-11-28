@@ -52,6 +52,10 @@ impl Permissions {
         self.policy.read().unwrap_or_else(PoisonError::into_inner).check_tool(name)
     }
 
+    pub(crate) fn sandbox(&self) -> crate::sandbox::SandboxRules {
+        self.policy.read().unwrap_or_else(PoisonError::into_inner).sandbox.clone()
+    }
+
     pub(crate) fn allow_command(&self, command: &str) -> Result<(), String> {
         self.change(|policy| policy.allow(command))
     }
